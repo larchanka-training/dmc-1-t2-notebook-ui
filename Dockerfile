@@ -2,30 +2,32 @@ FROM node:20-alpine AS base
 
 WORKDIR /home/app
 
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
+
+RUN npm install -g pnpm@9.15.9
 
 FROM base AS development
 
 ENV NODE_ENV=development
 
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 
 EXPOSE 5173
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+CMD ["pnpm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 FROM base AS build
 
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:1.27-alpine AS production
 
