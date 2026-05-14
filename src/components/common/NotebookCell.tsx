@@ -52,35 +52,39 @@ export function NotebookCell({
       status === 'error' && 'border-destructive',
     )}>
       {/* header */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-muted/40 border-b">
-        <span className="text-xs text-muted-foreground w-6 text-center font-mono">[{index}]</span>
-        <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 border-b">
+        {/* run button — left, prominent */}
+        {onRun && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 text-green-500 hover:bg-green-500/10"
+            disabled={status === 'running'}
+            onClick={onRun}
+          >
+            {status === 'running'
+              ? <Loader2 className="size-4 animate-spin" />
+              : <Play className="size-4" />}
+          </Button>
+        )}
+
+        <span className="text-xs text-muted-foreground font-mono">[{index}]</span>
+
+        {/* secondary actions — always visible, right side */}
+        <div className="flex items-center gap-1 ml-auto">
           {onMoveUp && (
-            <Button size="icon" variant="ghost" className="size-6" onClick={onMoveUp} disabled={isFirst}>
-              <ChevronUp className="size-3" />
+            <Button size="icon" variant="ghost" className="size-8" onClick={onMoveUp} disabled={isFirst}>
+              <ChevronUp className="size-4" />
             </Button>
           )}
           {onMoveDown && (
-            <Button size="icon" variant="ghost" className="size-6" onClick={onMoveDown} disabled={isLast}>
-              <ChevronDown className="size-3" />
+            <Button size="icon" variant="ghost" className="size-8" onClick={onMoveDown} disabled={isLast}>
+              <ChevronDown className="size-4" />
             </Button>
           )}
           {onDelete && (
-            <Button size="icon" variant="ghost" className="size-6 text-destructive" onClick={onDelete}>
-              <Trash2 className="size-3" />
-            </Button>
-          )}
-          {onRun && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6 text-green-500"
-              disabled={status === 'running'}
-              onClick={onRun}
-            >
-              {status === 'running'
-                ? <Loader2 className="size-3 animate-spin" />
-                : <Play className="size-3" />}
+            <Button size="icon" variant="ghost" className="size-8 text-destructive hover:bg-destructive/10" onClick={onDelete}>
+              <Trash2 className="size-4" />
             </Button>
           )}
         </div>
