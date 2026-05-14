@@ -4,14 +4,37 @@
 
 ## Стек
 
-- Node.js 20
-- React 18
+### Основной стек
+
+- React
 - TypeScript
-- Vite
+- Vite 8+
+- Node.js 22 LTS
+
+### Работа с API
+
+- @hey-api/openapi-ts — генерация API-клиента и TypeScript-типов из OpenAPI/Swagger схем
+
+### UI и стили
+
+- Tailwind CSS
+- shadcn/ui — готовые UI-компоненты для ускорения разработки
+
+### Качество кода и форматирование
+
 - ESLint
-- Docker / Docker Compose
-- Nginx для production-образа
-- GitHub Actions
+- prettier
+- @stylistic/eslint-plugin — единый стиль оформления кода
+- eslint-plugin-perfectionist — сортировка imports/types/interfaces
+
+### Git hooks и автоматизация
+
+- simple-git-hooks
+- lint-staged
+- pre-commit hooks:
+  - lint
+  - typecheck
+  - format/check
 
 ## Переменные окружения
 
