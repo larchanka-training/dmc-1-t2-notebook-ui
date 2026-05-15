@@ -47,9 +47,17 @@ src/
 │   └── styles/
 │       └── index.css                 # Global styles + Tailwind v4 import
 │
+├── entities/                     # Domain entities — state + persistence, no API orchestration
+│   └── session/
+│       ├── index.ts
+│       └── model/session.ts           # tokenAtom, userAtom + setSession/clearSession
+│
 ├── features/                     # Reusable business slices
 │   ├── auth/
 │   │   ├── index.ts
+│   │   ├── model/
+│   │   │   ├── auth.ts                # loginAction, logoutAction, loadCurrentUserAction
+│   │   │   └── auth.test.ts
 │   │   └── ui/LoginForm.tsx
 │   └── notebook/
 │       ├── index.ts                  # Public API of the slice
@@ -75,6 +83,13 @@ src/
 │   └── custom-components/
 │
 ├── shared/                       # Framework-agnostic, no business logic
+│   ├── api/                          # HTTP facade — see api-layer.md
+│   │   ├── generated/openapi-ts/     # auto-generated types from openapi/*.yaml — do not edit
+│   │   ├── client.ts                 # openapi-fetch clients + auth-token middleware
+│   │   ├── errors.ts                 # ApiError + 400/401/404 subclasses
+│   │   ├── auth.ts                   # login / logout / getMe
+│   │   ├── notebook.ts               # list / create / runCell
+│   │   └── index.ts                  # public namespace exports (auth, notebook, errors)
 │   ├── lib/
 │   │   ├── cn.ts                     # cn() — merges Tailwind classes
 │   │   └── use-mobile.ts             # Mobile viewport hook (from shadcn)
@@ -92,6 +107,12 @@ src/
 ### `app/` — composition only
 
 Wires the application together: render root, layouts, providers, root route. No business logic. Page route modules are imported here purely so their `rootRoute.reatomRoute(...)` calls register the route tree as a side effect.
+
+### `entities/<name>/` — domain state, no orchestration
+
+Reusable domain models with their own state and persistence. An entity owns atoms and the rules for mutating them (e.g. localStorage sync), but does **not** call APIs or orchestrate flows — that's the job of `features/`. Features can import from entities; entities only depend on `shared/`.
+
+Example: `entities/session/` owns `tokenAtom`, `userAtom`, `setSession`, `clearSession`. `features/auth/` calls `shared/api`'s `auth.login()` and then dispatches `setSession({ token, user })`.
 
 ### `pages/<name>/` — one route, three files
 
@@ -117,6 +138,7 @@ External consumers import only from `@/features/<name>` (the public API in `inde
 
 - `shared/ui/` — shadcn/ui design-system components. Treat as a dependency: don't edit, wrap when needed.
 - `shared/lib/` — pure helpers (`cn`, hooks). No business knowledge.
+- `shared/api/` — HTTP facade over a generated OpenAPI client. Thin domain functions (`auth.login`, `notebook.list`). Framework-agnostic — no Reatom, no React. See [api-layer.md](./api-layer.md). The `generated/` subfolder is auto-generated from `openapi/*.openapi.yaml` and must not be imported from outside `shared/api/` (ESLint enforces it).
 
 No business logic anywhere under `shared/`.
 

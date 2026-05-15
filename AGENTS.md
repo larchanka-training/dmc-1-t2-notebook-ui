@@ -24,8 +24,15 @@ Folder layout, routing, and path aliases are documented in `docs/architecture/`.
 - [docs/architecture/routing.md](./docs/architecture/routing.md)
 - [docs/architecture/path-aliases.md](./docs/architecture/path-aliases.md)
 - [docs/architecture/reatom.md](./docs/architecture/reatom.md)
+- [docs/architecture/api-layer.md](./docs/architecture/api-layer.md)
 
 The fractal frontend skill (`.claude/skills/fractal-frontend/`) governs layer placement and cross-feature boundaries — load it when deciding where new code should live.
+
+---
+
+## HTTP API
+
+All HTTP traffic goes through the facade at `@/shared/api`. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, or `app/` — ESLint (`no-restricted-imports`) will fail. Adding a new endpoint: update `openapi/<domain>.openapi.yaml`, run `pnpm api:generate`, then add a thin function to `src/shared/api/<domain>.ts`. See [docs/architecture/api-layer.md](./docs/architecture/api-layer.md) and the [`.agents/add-endpoint.md`](./.agents/add-endpoint.md) skill.
 
 ---
 
