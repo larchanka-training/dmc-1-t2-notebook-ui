@@ -4,9 +4,11 @@
 
 | Tool | Minimum version | Check |
 |---|---|---|
-| Node.js | 18+ | `node -v` |
-| pnpm | 8+ | `pnpm -v` |
+| Node.js | 20+ (LTS) | `node -v` |
+| pnpm | 9.15.9 | `pnpm -v` |
 | Git | any | `git --version` |
+
+The CI pipeline and Docker images both use Node 20, and `package.json` pins pnpm to `9.15.9` via `packageManager`. Corepack (`corepack enable`) is the easiest way to match the pinned version automatically.
 
 > **Why pnpm?** The project uses `pnpm-lock.yaml`. Using `npm install` will generate a conflicting `package-lock.json`. Always use `pnpm` in this repo.
 
@@ -20,16 +22,21 @@ npm install -g pnpm
 
 ## Clone the repository
 
+The UI is a standalone repository that is also vendored as a git submodule inside the monorepo `dmc-1-t2-notebook-mono`. Either clone is fine for local UI development:
+
 ```bash
+# Standalone — UI only
 git clone https://github.com/larchanka-training/dmc-1-t2-notebook-ui.git
 cd dmc-1-t2-notebook-ui
 ```
 
-Then switch to the working branch:
-
 ```bash
-git checkout feature/init-ui-components
+# Monorepo — UI + API + infra. Use --recurse-submodules to pull the UI in.
+git clone --recurse-submodules https://github.com/larchanka-training/dmc-1-t2-notebook-mono.git
+cd dmc-1-t2-notebook-mono/ui
 ```
+
+Work happens on feature branches off `main` — see [contributing.md](../contributing.md).
 
 ---
 

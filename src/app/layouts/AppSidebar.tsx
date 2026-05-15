@@ -1,5 +1,6 @@
 import { BookText, LogIn, LayoutGrid, Puzzle, Info } from 'lucide-react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { urlAtom } from '@reatom/core'
+import { reatomComponent } from '@reatom/react'
 import {
   Sidebar,
   SidebarContent,
@@ -12,27 +13,27 @@ import {
   SidebarMenuItem,
 } from '@/shared/ui/sidebar'
 
-const navMain = [
+type NavItem = { title: string; icon: typeof BookText; url: string }
+
+const navMain: NavItem[] = [
   { title: 'Notebook', icon: BookText, url: '/' },
 ]
 
-const navComponents = [
+const navComponents: NavItem[] = [
   { title: 'Shadcn UI', icon: LayoutGrid, url: '/components/shadcn' },
   { title: 'Custom', icon: Puzzle, url: '/components/custom' },
 ]
 
-const navAuth = [
+const navAuth: NavItem[] = [
   { title: 'Login', icon: LogIn, url: '/login' },
 ]
 
-const navInfo = [
+const navInfo: NavItem[] = [
   { title: 'About', icon: Info, url: '/about' },
 ]
 
-function NavGroup({ label, items }: { label: string; items: typeof navMain }) {
-  const location = useLocation()
-  const navigate = useNavigate()
-
+const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavItem[] }) => {
+  const { pathname } = urlAtom()
   return (
     <SidebarGroup>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
@@ -41,8 +42,8 @@ function NavGroup({ label, items }: { label: string; items: typeof navMain }) {
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
-                isActive={location.pathname === item.url}
-                render={<a href={item.url} onClick={(e) => { e.preventDefault(); navigate(item.url) }} />}
+                isActive={pathname === item.url}
+                render={<a href={item.url} />}
               >
                 <item.icon />
                 <span>{item.title}</span>
@@ -53,7 +54,7 @@ function NavGroup({ label, items }: { label: string; items: typeof navMain }) {
       </SidebarGroupContent>
     </SidebarGroup>
   )
-}
+}, 'NavGroup')
 
 export function AppSidebar() {
   return (

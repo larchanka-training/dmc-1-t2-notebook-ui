@@ -1,0 +1,10 @@
+import { clearStack, context } from "@reatom/core";
+
+// Don't dare to remove this line!
+clearStack();
+
+export const rootFrame = context.start();
+
+if (import.meta.env["VITE_CONNECT_LOGGER"] === "true") {
+  // rootFrame.run(connectLogger)
+}

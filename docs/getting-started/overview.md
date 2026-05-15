@@ -27,7 +27,7 @@ Jupyter Notebook made interactive Python computing accessible to everyone. The s
 | **Project** | JS Notebook |
 | **Type** | Training course project |
 | **Year** | 2026 |
-| **Stack** | React 19, TypeScript, Vite 8, Tailwind CSS v4, shadcn/ui |
+| **Stack** | React 19, TypeScript, Vite 8, Tailwind CSS v4, shadcn/ui, Reatom |
 
 ---
 
@@ -51,8 +51,9 @@ Jupyter Notebook made interactive Python computing accessible to everyone. The s
 | Language | TypeScript | Type safety across the whole project |
 | Build tool | Vite 8 | Instant HMR, fast cold starts |
 | Styling | Tailwind CSS v4 | Utility-first, zero config with Vite plugin |
-| Components | shadcn/ui | Copy-owned components, base-ui primitives |
-| Routing | React Router v7 | Simple, declarative route config |
+| Components | shadcn/ui (base-ui renderer) | Copy-owned primitives |
+| State & routing | Reatom (`@reatom/core` + `@reatom/react`) | One model for atoms, async data, routing, forms |
+| Testing | Vitest + Testing Library | Fast, ESM-native, jsdom-based |
 | Package manager | pnpm | Faster installs, disk-efficient |
 
 ---

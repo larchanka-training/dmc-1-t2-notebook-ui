@@ -1,6 +1,6 @@
 # Shadcn/UI Components
 
-This project uses **shadcn/ui** with the **base-ui** renderer (not Radix UI). Components are copied into `src/components/ui/` and owned by the project — they are not imported from a package.
+This project uses **shadcn/ui** with the **base-ui** renderer (not Radix UI). Components are copied into `src/shared/ui/` and owned by the project — they are not imported from a package.
 
 ---
 
@@ -39,10 +39,10 @@ Example:
 pnpm dlx shadcn@latest add dialog
 ```
 
-Then move the files (see the [alias quirk](../architecture/path-aliases.md#the-shadcn-alias-conflict)):
+If a literal `@/` folder appears at the project root after the command, move the files in (see the [alias quirk](../architecture/path-aliases.md#the-shadcn-alias-and-the--folder-quirk)):
 
 ```bash
-cp @/components/ui/*.tsx src/components/ui/
+mv @/shared/ui/*.tsx src/shared/ui/
 rm -rf "@/"
 ```
 
@@ -53,7 +53,7 @@ rm -rf "@/"
 ### Button
 
 ```tsx
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/button'
 
 <Button variant="default">Click me</Button>
 ```
@@ -69,7 +69,7 @@ import { Button } from '@/components/ui/button'
 ### Badge
 
 ```tsx
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@/shared/ui/badge'
 
 <Badge variant="secondary">New</Badge>
 ```
@@ -83,7 +83,7 @@ import { Badge } from '@/components/ui/badge'
 ### Input
 
 ```tsx
-import { Input } from '@/components/ui/input'
+import { Input } from '@/shared/ui/input'
 
 <Input type="email" placeholder="you@example.com" />
 ```
@@ -95,7 +95,7 @@ Accepts all standard `<input>` HTML attributes.
 ### Textarea
 
 ```tsx
-import { Textarea } from '@/components/ui/textarea'
+import { Textarea } from '@/shared/ui/textarea'
 
 <Textarea placeholder="Write something…" rows={4} />
 ```
@@ -107,7 +107,7 @@ Accepts all standard `<textarea>` HTML attributes.
 ### Card
 
 ```tsx
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/shared/ui/card'
 
 <Card>
   <CardHeader>
@@ -126,7 +126,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 ### Table
 
 ```tsx
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/shared/ui/table'
 
 <Table>
   <TableHeader>
@@ -149,7 +149,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 ### Tabs
 
 ```tsx
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/shared/ui/tabs'
 
 <Tabs defaultValue="one">
   <TabsList>
@@ -166,7 +166,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 ### Alert
 
 ```tsx
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertTitle, AlertDescription } from '@/shared/ui/alert'
 import { AlertCircle } from 'lucide-react'
 
 <Alert variant="destructive">
@@ -185,7 +185,7 @@ import { AlertCircle } from 'lucide-react'
 ### Select
 
 ```tsx
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/shared/ui/select'
 
 <Select onValueChange={(val) => console.log(val)}>
   <SelectTrigger className="w-48">
@@ -203,7 +203,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 ### Switch
 
 ```tsx
-import { Switch } from '@/components/ui/switch'
+import { Switch } from '@/shared/ui/switch'
 
 <Switch checked={isOn} onCheckedChange={setIsOn} />
 ```
@@ -213,7 +213,7 @@ import { Switch } from '@/components/ui/switch'
 ### Checkbox
 
 ```tsx
-import { Checkbox } from '@/components/ui/checkbox'
+import { Checkbox } from '@/shared/ui/checkbox'
 
 <Checkbox checked={checked} onCheckedChange={(v) => setChecked(Boolean(v))} />
 ```
@@ -223,7 +223,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 ### Separator
 
 ```tsx
-import { Separator } from '@/components/ui/separator'
+import { Separator } from '@/shared/ui/separator'
 
 <Separator />                          // horizontal (default)
 <Separator orientation="vertical" />   // vertical
@@ -234,7 +234,7 @@ import { Separator } from '@/components/ui/separator'
 ### Skeleton
 
 ```tsx
-import { Skeleton } from '@/components/ui/skeleton'
+import { Skeleton } from '@/shared/ui/skeleton'
 
 <Skeleton className="h-4 w-48" />          // text line placeholder
 <Skeleton className="size-10 rounded-full" />  // avatar placeholder
@@ -244,7 +244,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 ## Design tokens
 
-shadcn/ui uses CSS variables for theming. The variables are injected into `src/index.css` during `shadcn init`. Dark mode is supported automatically via `@media (prefers-color-scheme: dark)`.
+shadcn/ui uses CSS variables for theming. The variables are injected into `src/app/styles/index.css` during `shadcn init`. Dark mode is supported automatically via `@media (prefers-color-scheme: dark)`.
 
 Key tokens:
 

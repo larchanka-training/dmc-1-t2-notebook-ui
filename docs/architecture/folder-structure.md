@@ -1,21 +1,30 @@
 # Folder Structure
 
+This project follows a **fractal / Feature-Sliced** architecture: code is sliced into layers (`app`, `pages`, `features`, `shared`) rather than grouped by file type. See [`.claude/skills/fractal-frontend/SKILL.md`](../../.claude/skills/fractal-frontend/SKILL.md) for the underlying rules.
+
+---
+
 ## Top-level layout
 
 ```
 ui/
-├── docs/                  # Project documentation (you are here)
-├── public/                # Static assets served as-is (favicon, icons)
-├── src/                   # All application source code
-├── index.html             # Vite entry HTML — mounts <div id="root">
-├── vite.config.ts         # Vite config: plugins, path aliases
-├── tsconfig.app.json      # TypeScript config for src/ (strict mode)
-├── tsconfig.json          # Root TS config — references tsconfig.app.json
-├── tsconfig.node.json     # TypeScript config for Vite config file itself
-├── eslint.config.js       # ESLint flat config
-├── components.json        # shadcn/ui config (style, aliases, icon library)
-├── package.json           # Dependencies and scripts
-└── pnpm-lock.yaml         # Locked dependency tree — never edit manually
+├── AGENTS.md             # Agent-facing pointers (read first if you're an AI)
+├── CLAUDE.md             # Points at AGENTS.md
+├── docs/                 # Project documentation (you are here)
+├── public/               # Static assets served as-is
+├── src/                  # Application source code
+├── index.html            # Vite entry HTML — mounts <div id="root">
+├── vite.config.ts        # Vite config (paths via resolve.tsconfigPaths)
+├── vitest.config.ts      # Vitest config
+├── tsconfig.app.json     # TS config for src/ (paths live here)
+├── tsconfig.node.json    # TS config for the Vite config itself
+├── tsconfig.json         # Root TS config — references the two above
+├── eslint.config.js      # ESLint flat config
+├── components.json       # shadcn/ui config — aliases point at @/shared/*
+├── Dockerfile            # dev / build / production targets
+├── nginx.conf            # nginx config used by the production image
+├── package.json
+└── pnpm-lock.yaml
 ```
 
 ---
@@ -24,68 +33,108 @@ ui/
 
 ```
 src/
-├── assets/                # Images, SVGs, fonts imported into components
-├── components/
-│   ├── common/            # Your own reusable components
-│   │   ├── AppSidebar.tsx     # Sidebar layout with nav groups
-│   │   └── NotebookCell.tsx   # The notebook cell component
-│   └── ui/                # shadcn/ui generated components — do not edit
-│       ├── button.tsx
-│       ├── card.tsx
-│       ├── input.tsx
-│       └── ... (17 components total)
-├── hooks/                 # Custom React hooks
-│   └── use-mobile.ts          # Detects mobile viewport (from shadcn)
-├── lib/                   # Utilities and pure functions
-│   ├── utils.ts               # cn() helper — merges Tailwind classes
-│   └── executeJS.ts           # Runs JS code, captures console output
-├── pages/                 # One file per route
-│   ├── NotebookPage.tsx       # / — main notebook interface
-│   ├── LoginPage.tsx          # /login
-│   ├── ShadcnComponentsPage.tsx  # /components/shadcn
-│   ├── CustomComponentsPage.tsx  # /components/custom
-│   └── AboutPage.tsx          # /about
-├── services/              # External API calls (empty, reserved)
-├── store/                 # Global state (empty, reserved)
-├── types/                 # Shared TypeScript types (empty, reserved)
-├── App.tsx                # Router setup + shared Layout component
-├── main.tsx               # React root mount + TooltipProvider wrapper
-└── index.css              # Global styles + Tailwind v4 import
+├── app/                          # Composition root and global setup
+│   ├── App.tsx                       # Renders rootRoute, imports page modules to register routes
+│   ├── index.tsx                     # createRoot + reatomContext.Provider mount
+│   ├── layouts/
+│   │   ├── AppLayout.tsx             # Top-level shell (sidebar + content)
+│   │   └── AppSidebar.tsx            # Sidebar nav, reads urlAtom for active state
+│   ├── model/
+│   │   ├── routes.tsx                # rootRoute (layout route hosting outlet)
+│   │   └── setup.ts                  # connectLogger() in dev
+│   ├── providers/
+│   │   └── AppProviders.tsx          # Cross-cutting providers
+│   └── styles/
+│       └── index.css                 # Global styles + Tailwind v4 import
+│
+├── features/                     # Reusable business slices
+│   ├── auth/
+│   │   ├── index.ts
+│   │   └── ui/LoginForm.tsx
+│   └── notebook/
+│       ├── index.ts                  # Public API of the slice
+│       ├── domain/cell.ts            # Cell factory and types (atomized fields)
+│       ├── model/
+│       │   ├── notebook.ts           # cellsAtom + addCell/runCell/... actions
+│       │   ├── executeJS.ts          # Sandboxed JS runner
+│       │   ├── notebook.test.ts
+│       │   └── executeJS.test.ts
+│       └── ui/
+│           ├── NotebookView.tsx      # List view (reads cellsAtom)
+│           ├── NotebookCell.tsx      # Presentational single-cell component
+│           └── NotebookView.test.tsx
+│
+├── pages/                        # One folder per route
+│   ├── notebook/
+│   │   ├── index.ts
+│   │   ├── model/route.tsx           # rootRoute.reatomRoute({ path: '', render })
+│   │   └── ui/NotebookPage.tsx
+│   ├── login/                        # same shape: model/route.tsx + ui/LoginPage.tsx
+│   ├── about/
+│   ├── shadcn-components/
+│   └── custom-components/
+│
+├── shared/                       # Framework-agnostic, no business logic
+│   ├── lib/
+│   │   ├── cn.ts                     # cn() — merges Tailwind classes
+│   │   └── use-mobile.ts             # Mobile viewport hook (from shadcn)
+│   └── ui/                           # shadcn primitives (button, card, sidebar, …)
+│
+├── test/
+│   └── setup.ts                      # Vitest + Testing Library setup
+└── setup.ts                          # clearStack() + context.start() — loads first
 ```
 
 ---
 
-## Key conventions
+## Layer rules
 
-### `components/ui/` is read-only
-shadcn/ui generates component files into this folder. Treat them as a dependency — never edit them directly. If you need to change behaviour, wrap the component in `components/common/` instead.
+### `app/` — composition only
+Wires the application together: render root, layouts, providers, root route. No business logic. Page route modules are imported here purely so their `rootRoute.reatomRoute(...)` calls register the route tree as a side effect.
 
-### `components/common/` is yours
-All custom-built components live here. Each file exports one primary component. If a component grows large, split it into a subfolder:
-```
-components/common/NotebookCell/
-├── NotebookCell.tsx
-├── CellHeader.tsx
-└── CellOutput.tsx
-```
+### `pages/<name>/` — one route, three files
+Each page is a folder with:
+- `model/route.tsx` — `rootRoute.reatomRoute({ path, render })`
+- `ui/<Name>Page.tsx` — the page component (default export)
+- `index.ts` — re-exports the route and the page
 
-### `pages/` = one file per route
-Each file in `pages/` corresponds to exactly one URL. Pages orchestrate components but contain no reusable logic — extract that to `hooks/` or `lib/`.
+Pages compose features and shared UI. They do not host reusable logic — that lives in `features/` or `shared/`.
 
-### `lib/` = pure functions only
-No React imports in `lib/`. Functions in `lib/` take plain arguments and return plain values. This makes them easy to test in isolation.
+### `features/<name>/` — domain + model + ui
+A self-contained business slice:
+- `domain/` — pure types, factories, no React (e.g. `reatomCell`)
+- `model/` — atoms, actions, side effects (Reatom)
+- `ui/` — components that bind the model to React via `reatomComponent`
+
+External consumers import only from `@/features/<name>` (the public API in `index.ts`), never reach into internals.
+
+### `shared/` — generic primitives
+- `shared/ui/` — shadcn/ui design-system components. Treat as a dependency: don't edit, wrap when needed.
+- `shared/lib/` — pure helpers (`cn`, hooks). No business knowledge.
+
+No business logic anywhere under `shared/`.
 
 ---
 
-## shadcn/ui file placement issue
+## shadcn/ui placement
 
-When running `pnpm dlx shadcn@latest add <component>`, shadcn resolves the `@/` alias literally and writes files to a physical `@/` folder in the project root instead of `src/`.
+`components.json` writes shadcn files into `@/shared/*`:
 
-**Fix — always run after adding a shadcn component:**
+```json
+{
+  "aliases": {
+    "components": "@/shared",
+    "ui": "@/shared/ui",
+    "lib": "@/shared/lib",
+    "hooks": "@/shared/lib",
+    "utils": "@/shared/lib/cn"
+  }
+}
+```
+
+If `pnpm dlx shadcn@latest add <c>` still writes to a literal `@/` folder at the project root (a Vite alias resolution quirk), move the files into `src/shared/ui/`:
+
 ```bash
-cp @/components/ui/*.tsx src/components/ui/
-cp @/hooks/*.ts src/hooks/          # if hooks were added
+mv @/shared/ui/*.tsx src/shared/ui/
 rm -rf "@/"
 ```
-
-This is a known quirk of using shadcn with Vite + a custom alias that isn't configured in `jsconfig.json`.

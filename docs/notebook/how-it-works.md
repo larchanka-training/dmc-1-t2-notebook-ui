@@ -14,7 +14,7 @@ When you press **Run** (or `Cmd+Enter`), this sequence happens:
 user code (string)
     │
     ▼
-executeJS(code)                        ← src/lib/executeJS.ts
+executeJS(code)                        ← src/features/notebook/model/executeJS.ts
     │
     ├─ 1. Capture console output
     │       Override console.log / warn / error with collectors
@@ -40,7 +40,7 @@ Output string displayed below the editor
 ## executeJS — the core function
 
 ```ts
-// src/lib/executeJS.ts
+// src/features/notebook/model/executeJS.ts
 
 export async function executeJS(code: string): Promise<{ output: string; error: boolean }> {
   const lines: string[] = []
@@ -155,6 +155,9 @@ idle  ──(run)──▶  running  ──(success)──▶  done
 
 ## Related files
 
-- `src/lib/executeJS.ts` — execution logic
-- `src/components/common/NotebookCell.tsx` — cell UI component
-- `src/pages/NotebookPage.tsx` — page that manages the list of cells
+- `src/features/notebook/model/executeJS.ts` — execution logic
+- `src/features/notebook/model/notebook.ts` — `cellsAtom` + Reatom actions (`addCell`, `runCell`, `deleteCell`, `moveCell`, `updateCellCode`)
+- `src/features/notebook/domain/cell.ts` — `reatomCell()` factory; each cell's `code` / `output` / `status` are atoms
+- `src/features/notebook/ui/NotebookView.tsx` — list view that reads `cellsAtom` and dispatches actions (wrapped via `wrap`)
+- `src/features/notebook/ui/NotebookCell.tsx` — presentational cell UI
+- `src/pages/notebook/ui/NotebookPage.tsx` — the page that mounts `<NotebookView />`

@@ -25,6 +25,8 @@ The dev server has **Hot Module Replacement (HMR)** — editing any `.tsx` or `.
 | `pnpm build` | Type-check + production build into `dist/` |
 | `pnpm preview` | Serve the `dist/` build locally to test production output |
 | `pnpm lint` | Run ESLint across all source files |
+| `pnpm test` | Run the Vitest suite once (jsdom) |
+| `pnpm test:watch` | Run Vitest in watch mode |
 
 ---
 
@@ -46,7 +48,13 @@ pnpm preview
 
 ## Environment
 
-No `.env` file is required. The app has no backend and no API keys. Everything runs in the browser.
+The app currently has no required runtime backend, but a `.env.example` file lists Vite-exposed variables (`VITE_API_BASE_URL`, `VITE_APP_ENV`, `VITE_APP_NAME`). Copy it if you want to override defaults:
+
+```bash
+cp .env.example .env
+```
+
+Only variables prefixed `VITE_` are exposed to the browser bundle — don't put secrets there. See [CI/CD](../ci-cd.md) for the full list.
 
 ---
 
