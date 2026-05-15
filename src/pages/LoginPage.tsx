@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { BookText } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/shared/ui/button'
+import { Input } from '@/shared/ui/input'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')

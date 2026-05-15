@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Separator } from '@/components/ui/separator'
+import { Separator } from '@/shared/ui/separator'
 import { NotebookCell } from '@/components/common/NotebookCell'
 import { executeJS } from '@/lib/executeJS'
 

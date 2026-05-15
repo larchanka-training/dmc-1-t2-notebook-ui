@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/shared/ui/sidebar'
 import { AppSidebar } from '@/components/common/AppSidebar'
 import NotebookPage from '@/pages/NotebookPage'
 import LoginPage from '@/pages/LoginPage'

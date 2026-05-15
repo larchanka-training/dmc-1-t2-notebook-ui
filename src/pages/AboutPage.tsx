@@ -1,5 +1,5 @@
 import { BookText, Code2, Layers, Rocket, Users } from 'lucide-react'
-import { Separator } from '@/components/ui/separator'
+import { Separator } from '@/shared/ui/separator'
 
 function FeatureCard({ icon: Icon, title, description }: { icon: React.ElementType; title: string; description: string }) {
   return (

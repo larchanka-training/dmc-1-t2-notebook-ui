@@ -10,7 +10,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@/components/ui/sidebar'
+} from '@/shared/ui/sidebar'
 
 const navMain = [
   { title: 'Notebook', icon: BookText, url: '/' },
