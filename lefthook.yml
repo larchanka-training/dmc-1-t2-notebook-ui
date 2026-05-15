@@ -16,6 +16,11 @@ pre-commit:
       stage_fixed: true
 
 pre-push:
+  parallel: true
   jobs:
     - name: typecheck
       run: pnpm typecheck
+
+    - name: api-check
+      glob: '{openapi/**,src/shared/api/generated/**}'
+      run: pnpm api:check

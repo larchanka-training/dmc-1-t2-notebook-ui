@@ -14,6 +14,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "api:generate": "node scripts/api-gen.mjs",
+    "api:check": "node scripts/api-gen.mjs --check",
     "prepare": "lefthook install"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
+    "openapi-fetch": "^0.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "shadcn": "^4.7.0",
@@ -47,11 +50,18 @@
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
     "lefthook": "^2.1.6",
+    "msw": "^2.14.6",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.3",
     "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
     "vitest": "^4.1.6"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

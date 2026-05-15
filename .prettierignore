@@ -1,6 +1,35 @@
+# Build output
 dist
-node_modules
-pnpm-lock.yaml
+dist-ssr
+build
 coverage
 .vite
+.playwright-mcp
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Lock files
+*.lock
+*-lock.json
+*-lock.yaml
+
+# Static assets (don't touch SVG/icons)
 public
+
+# Generated code (OpenAPI client, etc.)
+src/**/generated
+src/**/__generated__
+openapi.json
+openapi.yaml
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example

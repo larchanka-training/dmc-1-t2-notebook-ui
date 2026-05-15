@@ -25,3 +25,6 @@ dist-ssr
 *.sw?
 *.tsbuildinfo
 .env
+
+# Playwright MCP session artifacts
+.playwright-mcp
