@@ -10,7 +10,6 @@ export async function executeJS(code: string): Promise<{ output: string; error: 
   console.error = (...args: unknown[]) => lines.push('[error] ' + args.map(String).join(' '))
 
   try {
-    // eslint-disable-next-line no-new-func
     const fn = new Function(`return (async () => { ${code} })()`)
     const result = await fn()
     if (result !== undefined) lines.push(String(result))

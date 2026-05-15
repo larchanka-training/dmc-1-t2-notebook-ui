@@ -95,7 +95,7 @@ export default function ShadcnComponentsPage() {
 
       {/* Select */}
       <Section title="Select">
-        <Select value={selectVal} onValueChange={setSelectVal}>
+        <Select value={selectVal} onValueChange={v => setSelectVal(v ?? '')}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Pick a language" />
           </SelectTrigger>
