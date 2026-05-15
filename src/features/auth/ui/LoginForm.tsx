@@ -1,14 +1,36 @@
-import { useState } from 'react'
-import { BookText } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { BookText, Loader2 } from 'lucide-react'
+import { wrap } from '@reatom/core'
+import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
+import { userAtom } from '@/entities/session'
+import { loginAction } from '../model/auth'
 
-export function LoginForm() {
+export const LoginForm = reatomComponent(() => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
+  const isLoading = !loginAction.ready()
+  const error = loginAction.error()?.message ?? null
+  const user = userAtom()
+
+  const onSubmit = wrap(async (e: FormEvent) => {
+    e.preventDefault()
+    await loginAction({ email, password })
+  })
+
+  if (user) {
+    return (
+      <div className="w-full max-w-sm space-y-4 text-center">
+        <h1 className="text-2xl font-semibold">Welcome, {user.displayName ?? user.email}</h1>
+        <p className="text-sm text-muted-foreground">You are signed in as {user.email}.</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="w-full max-w-sm space-y-6">
+    <form onSubmit={onSubmit} className="w-full max-w-sm space-y-6">
       <div className="flex flex-col items-center gap-2 text-center">
         <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10">
           <BookText className="size-6 text-primary" />
@@ -26,8 +48,11 @@ export function LoginForm() {
             id="email"
             type="email"
             placeholder="you@example.com"
+            autoComplete="username"
+            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={isLoading}
           />
         </div>
         <div className="space-y-1.5">
@@ -46,12 +71,23 @@ export function LoginForm() {
             id="password"
             type="password"
             placeholder="••••••••"
+            autoComplete="current-password"
+            required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            disabled={isLoading}
           />
         </div>
-        <Button className="w-full" type="submit">
-          Sign in
+
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+
+        <Button className="w-full" type="submit" disabled={isLoading}>
+          {isLoading ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {isLoading ? 'Signing in…' : 'Sign in'}
         </Button>
       </div>
 
@@ -61,6 +97,6 @@ export function LoginForm() {
           Sign up
         </a>
       </p>
-    </div>
+    </form>
   )
-}
+}, 'LoginForm')
