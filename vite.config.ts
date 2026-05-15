@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    allowedHosts: ['notebook.com', 'api.notebook.com', 'pgadmin.notebook.com'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
