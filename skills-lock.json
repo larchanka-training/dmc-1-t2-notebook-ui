@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "fractal-frontend": {
+      "source": "aokzhl/fractal-frontend",
+      "sourceType": "github",
+      "skillPath": "skills/fractal-frontend/SKILL.md",
+      "computedHash": "a7d2ebbdd6ff0e158bd2aa627a095d18d4158714004e4708e23514da840da05b"
+    }
+  }
+}
