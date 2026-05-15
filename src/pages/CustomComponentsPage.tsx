@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Separator } from '@/shared/ui/separator'
-import { NotebookCell } from '@/components/common/NotebookCell'
-import { executeJS } from '@/lib/executeJS'
+import { NotebookCell, executeJS } from '@/features/notebook'
 
 function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (

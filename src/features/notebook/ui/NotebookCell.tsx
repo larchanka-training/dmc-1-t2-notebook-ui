@@ -2,8 +2,7 @@ import { useRef } from 'react'
 import { Play, Trash2, ChevronUp, ChevronDown, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { cn } from '@/shared/lib/cn'
-
-export type CellStatus = 'idle' | 'running' | 'done' | 'error'
+import type { CellStatus } from '../domain/cell'
 
 export interface NotebookCellProps {
   index: number
