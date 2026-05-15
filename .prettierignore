@@ -4,6 +4,7 @@ dist-ssr
 build
 coverage
 .vite
+.playwright-mcp
 
 # Dependencies
 node_modules

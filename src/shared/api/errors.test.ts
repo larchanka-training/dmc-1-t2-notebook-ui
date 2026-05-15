@@ -1,0 +1,37 @@
+import { describe, expect, test } from 'vitest'
+import { ApiError, BadRequestError, NotFoundError, UnauthorizedError, toApiError } from './errors'
+
+describe('toApiError', () => {
+  test('400 → BadRequestError', () => {
+    const err = toApiError(400, { code: 'invalid', message: 'bad body' })
+    expect(err).toBeInstanceOf(BadRequestError)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(400)
+    expect(err.code).toBe('invalid')
+    expect(err.message).toBe('bad body')
+  })
+
+  test('401 → UnauthorizedError', () => {
+    const err = toApiError(401, { code: 'unauthenticated', message: 'no token' })
+    expect(err).toBeInstanceOf(UnauthorizedError)
+    expect(err.status).toBe(401)
+  })
+
+  test('404 → NotFoundError', () => {
+    const err = toApiError(404, { code: 'not_found', message: 'gone' })
+    expect(err).toBeInstanceOf(NotFoundError)
+    expect(err.status).toBe(404)
+  })
+
+  test('5xx falls back to generic ApiError', () => {
+    const err = toApiError(503, undefined)
+    expect(err.constructor).toBe(ApiError)
+    expect(err.status).toBe(503)
+    expect(err.code).toBeUndefined()
+  })
+
+  test('missing body still produces a useful message', () => {
+    const err = toApiError(500, undefined)
+    expect(err.message).toContain('500')
+  })
+})
