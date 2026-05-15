@@ -1,10 +1,10 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
-import NotebookPage from '@/pages/NotebookPage'
-import LoginPage from '@/pages/LoginPage'
-import ShadcnComponentsPage from '@/pages/ShadcnComponentsPage'
-import CustomComponentsPage from '@/pages/CustomComponentsPage'
-import AboutPage from '@/pages/AboutPage'
+import { NotebookPage } from '@/pages/notebook'
+import { LoginPage } from '@/pages/login'
+import { ShadcnComponentsPage } from '@/pages/shadcn-components'
+import { CustomComponentsPage } from '@/pages/custom-components'
+import { AboutPage } from '@/pages/about'
 
 export default function App() {
   return (
