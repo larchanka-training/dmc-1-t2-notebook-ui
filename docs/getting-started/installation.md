@@ -39,28 +39,6 @@ git checkout feature/init-ui-components
 pnpm install
 ```
 
-### Known issue: msw build scripts
-
-On first install you may see:
-
-```
-[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: msw@2.14.6
-```
-
-This is a pnpm security feature blocking `msw` (a transitive dependency) from running install scripts. It is already handled in `package.json`:
-
-```json
-"pnpm": {
-  "onlyBuiltDependencies": ["msw"]
-}
-```
-
-If the error still appears, run:
-
-```bash
-pnpm install --ignore-scripts
-```
-
 ---
 
 ## Verify the install
