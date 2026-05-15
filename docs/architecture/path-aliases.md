@@ -28,9 +28,9 @@ The alias is declared **once**, in `tsconfig.app.json`. Vite reads it from there
 {
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
+      "@/*": ["./src/*"],
+    },
+  },
 }
 ```
 
@@ -45,7 +45,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    tsconfigPaths: true,   // Vite 8+ reads paths from tsconfig automatically
+    tsconfigPaths: true, // Vite 8+ reads paths from tsconfig automatically
   },
 })
 ```
@@ -59,14 +59,15 @@ Vite 8 supports `resolve.tsconfigPaths` natively — no `vite-tsconfig-paths` pl
 Every internal import uses `@/`:
 
 ```tsx
-import { NotebookView } from '@/features/notebook'         // feature public API
-import { NotebookCell } from '@/features/notebook'         // re-exported via index.ts
-import { Button }       from '@/shared/ui/button'          // shadcn primitive
-import { cn }           from '@/shared/lib/cn'             // class-merge helper
-import { rootRoute }    from '@/app/model/routes'          // app composition
+import { NotebookView } from '@/features/notebook' // feature public API
+import { NotebookCell } from '@/features/notebook' // re-exported via index.ts
+import { Button } from '@/shared/ui/button' // shadcn primitive
+import { cn } from '@/shared/lib/cn' // class-merge helper
+import { rootRoute } from '@/app/model/routes' // app composition
 ```
 
 Note the layer boundaries:
+
 - Pages import from `@/features/*` and `@/shared/*`
 - Features import from `@/shared/*` only
 - `shared` imports from nothing internal
@@ -81,10 +82,10 @@ Note the layer boundaries:
 {
   "aliases": {
     "components": "@/shared",
-    "ui":         "@/shared/ui",
-    "lib":        "@/shared/lib",
-    "hooks":      "@/shared/lib",
-    "utils":      "@/shared/lib/cn"
+    "ui": "@/shared/ui",
+    "lib": "@/shared/lib",
+    "hooks": "@/shared/lib",
+    "utils": "@/shared/lib/cn"
   }
 }
 ```

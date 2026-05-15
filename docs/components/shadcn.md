@@ -6,25 +6,25 @@ This project uses **shadcn/ui** with the **base-ui** renderer (not Radix UI). Co
 
 ## Installed components
 
-| Component | File | Used in |
-|---|---|---|
-| `Button` | `ui/button.tsx` | Every page, NotebookCell |
-| `Input` | `ui/input.tsx` | LoginPage, ShadcnComponentsPage |
-| `Textarea` | `ui/textarea.tsx` | ShadcnComponentsPage |
+| Component   | File               | Used in                         |
+| ----------- | ------------------ | ------------------------------- |
+| `Button`    | `ui/button.tsx`    | Every page, NotebookCell        |
+| `Input`     | `ui/input.tsx`     | LoginPage, ShadcnComponentsPage |
+| `Textarea`  | `ui/textarea.tsx`  | ShadcnComponentsPage            |
 | `Separator` | `ui/separator.tsx` | CustomComponentsPage, AboutPage |
-| `Skeleton` | `ui/skeleton.tsx` | ShadcnComponentsPage |
-| `Badge` | `ui/badge.tsx` | ShadcnComponentsPage, AboutPage |
-| `Card` | `ui/card.tsx` | ShadcnComponentsPage |
-| `Table` | `ui/table.tsx` | ShadcnComponentsPage |
-| `Tabs` | `ui/tabs.tsx` | ShadcnComponentsPage |
-| `Alert` | `ui/alert.tsx` | ShadcnComponentsPage |
-| `Avatar` | `ui/avatar.tsx` | ShadcnComponentsPage |
-| `Switch` | `ui/switch.tsx` | ShadcnComponentsPage |
-| `Checkbox` | `ui/checkbox.tsx` | ShadcnComponentsPage |
-| `Select` | `ui/select.tsx` | ShadcnComponentsPage |
-| `Tooltip` | `ui/tooltip.tsx` | Sidebar (internal) |
-| `Sheet` | `ui/sheet.tsx` | Sidebar mobile drawer |
-| `Sidebar` | `ui/sidebar.tsx` | AppSidebar layout |
+| `Skeleton`  | `ui/skeleton.tsx`  | ShadcnComponentsPage            |
+| `Badge`     | `ui/badge.tsx`     | ShadcnComponentsPage, AboutPage |
+| `Card`      | `ui/card.tsx`      | ShadcnComponentsPage            |
+| `Table`     | `ui/table.tsx`     | ShadcnComponentsPage            |
+| `Tabs`      | `ui/tabs.tsx`      | ShadcnComponentsPage            |
+| `Alert`     | `ui/alert.tsx`     | ShadcnComponentsPage            |
+| `Avatar`    | `ui/avatar.tsx`    | ShadcnComponentsPage            |
+| `Switch`    | `ui/switch.tsx`    | ShadcnComponentsPage            |
+| `Checkbox`  | `ui/checkbox.tsx`  | ShadcnComponentsPage            |
+| `Select`    | `ui/select.tsx`    | ShadcnComponentsPage            |
+| `Tooltip`   | `ui/tooltip.tsx`   | Sidebar (internal)              |
+| `Sheet`     | `ui/sheet.tsx`     | Sidebar mobile drawer           |
+| `Sidebar`   | `ui/sidebar.tsx`   | AppSidebar layout               |
 
 ---
 
@@ -35,6 +35,7 @@ pnpm dlx shadcn@latest add <component-name>
 ```
 
 Example:
+
 ```bash
 pnpm dlx shadcn@latest add dialog
 ```
@@ -54,15 +55,14 @@ rm -rf "@/"
 
 ```tsx
 import { Button } from '@/shared/ui/button'
-
-<Button variant="default">Click me</Button>
+;<Button variant="default">Click me</Button>
 ```
 
-| Prop | Values | Default |
-|---|---|---|
-| `variant` | `default` `secondary` `outline` `ghost` `destructive` `link` | `default` |
-| `size` | `default` `sm` `lg` `icon` `icon-sm` | `default` |
-| `disabled` | `boolean` | `false` |
+| Prop       | Values                                                       | Default   |
+| ---------- | ------------------------------------------------------------ | --------- |
+| `variant`  | `default` `secondary` `outline` `ghost` `destructive` `link` | `default` |
+| `size`     | `default` `sm` `lg` `icon` `icon-sm`                         | `default` |
+| `disabled` | `boolean`                                                    | `false`   |
 
 ---
 
@@ -70,12 +70,11 @@ import { Button } from '@/shared/ui/button'
 
 ```tsx
 import { Badge } from '@/shared/ui/badge'
-
-<Badge variant="secondary">New</Badge>
+;<Badge variant="secondary">New</Badge>
 ```
 
-| Prop | Values |
-|---|---|
+| Prop      | Values                                        |
+| --------- | --------------------------------------------- |
 | `variant` | `default` `secondary` `outline` `destructive` |
 
 ---
@@ -84,8 +83,7 @@ import { Badge } from '@/shared/ui/badge'
 
 ```tsx
 import { Input } from '@/shared/ui/input'
-
-<Input type="email" placeholder="you@example.com" />
+;<Input type="email" placeholder="you@example.com" />
 ```
 
 Accepts all standard `<input>` HTML attributes.
@@ -96,8 +94,7 @@ Accepts all standard `<input>` HTML attributes.
 
 ```tsx
 import { Textarea } from '@/shared/ui/textarea'
-
-<Textarea placeholder="Write something…" rows={4} />
+;<Textarea placeholder="Write something…" rows={4} />
 ```
 
 Accepts all standard `<textarea>` HTML attributes.
@@ -107,9 +104,15 @@ Accepts all standard `<textarea>` HTML attributes.
 ### Card
 
 ```tsx
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/shared/ui/card'
-
-<Card>
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from '@/shared/ui/card'
+;<Card>
   <CardHeader>
     <CardTitle>Title</CardTitle>
     <CardDescription>Subtitle</CardDescription>
@@ -127,8 +130,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 
 ```tsx
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/shared/ui/table'
-
-<Table>
+;<Table>
   <TableHeader>
     <TableRow>
       <TableHead>Name</TableHead>
@@ -150,8 +152,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 
 ```tsx
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/shared/ui/tabs'
-
-<Tabs defaultValue="one">
+;<Tabs defaultValue="one">
   <TabsList>
     <TabsTrigger value="one">Tab One</TabsTrigger>
     <TabsTrigger value="two">Tab Two</TabsTrigger>
@@ -168,16 +169,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/shared/ui/tabs'
 ```tsx
 import { Alert, AlertTitle, AlertDescription } from '@/shared/ui/alert'
 import { AlertCircle } from 'lucide-react'
-
-<Alert variant="destructive">
+;<Alert variant="destructive">
   <AlertCircle className="size-4" />
   <AlertTitle>Error</AlertTitle>
   <AlertDescription>Something went wrong.</AlertDescription>
 </Alert>
 ```
 
-| Prop | Values |
-|---|---|
+| Prop      | Values                  |
+| --------- | ----------------------- |
 | `variant` | `default` `destructive` |
 
 ---
@@ -186,8 +186,7 @@ import { AlertCircle } from 'lucide-react'
 
 ```tsx
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/shared/ui/select'
-
-<Select onValueChange={(val) => console.log(val)}>
+;<Select onValueChange={(val) => console.log(val)}>
   <SelectTrigger className="w-48">
     <SelectValue placeholder="Choose one" />
   </SelectTrigger>
@@ -204,8 +203,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 
 ```tsx
 import { Switch } from '@/shared/ui/switch'
-
-<Switch checked={isOn} onCheckedChange={setIsOn} />
+;<Switch checked={isOn} onCheckedChange={setIsOn} />
 ```
 
 ---
@@ -214,8 +212,7 @@ import { Switch } from '@/shared/ui/switch'
 
 ```tsx
 import { Checkbox } from '@/shared/ui/checkbox'
-
-<Checkbox checked={checked} onCheckedChange={(v) => setChecked(Boolean(v))} />
+;<Checkbox checked={checked} onCheckedChange={(v) => setChecked(Boolean(v))} />
 ```
 
 ---
@@ -248,11 +245,11 @@ shadcn/ui uses CSS variables for theming. The variables are injected into `src/a
 
 Key tokens:
 
-| Variable | Used for |
-|---|---|
-| `--primary` | Primary buttons, active nav items |
-| `--muted` | Subtle backgrounds, placeholder text |
-| `--destructive` | Error states, destructive buttons |
-| `--sidebar` | Sidebar background |
-| `--card` | Card and cell backgrounds |
-| `--border` | All borders |
+| Variable        | Used for                             |
+| --------------- | ------------------------------------ |
+| `--primary`     | Primary buttons, active nav items    |
+| `--muted`       | Subtle backgrounds, placeholder text |
+| `--destructive` | Error states, destructive buttons    |
+| `--sidebar`     | Sidebar background                   |
+| `--card`        | Card and cell backgrounds            |
+| `--border`      | All borders                          |

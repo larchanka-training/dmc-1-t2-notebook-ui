@@ -35,7 +35,7 @@ config, params, guards. They import and render page components.
 // routes/$workspaceSlug/projects/index.tsx
 export const Route = createFileRoute('/$ws/projects/')({
   component: ProjectListPage,
-});
+})
 ```
 
 **Layouts** live in `app/layouts/`. They define the page shell.
@@ -327,14 +327,14 @@ import { currentUser } from '@/entities/session';
 
 ### When entity, when feature
 
-| Situation | Where |
-|---|---|
-| Data used by **multiple features** | `entities/` |
-| Data used by **one feature only** | `features/<name>/model/` |
-| Data starts in one feature, another needs it → | move to `entities/` |
-| Central domain concept, deliberate isolation | `entities/` (intentional) |
-| Interactive form, dialog, action button with logic | `features/` |
-| Pure domain rendering (card, badge, avatar) | `entities/<name>/ui/` |
+| Situation                                          | Where                     |
+| -------------------------------------------------- | ------------------------- |
+| Data used by **multiple features**                 | `entities/`               |
+| Data used by **one feature only**                  | `features/<name>/model/`  |
+| Data starts in one feature, another needs it →     | move to `entities/`       |
+| Central domain concept, deliberate isolation       | `entities/` (intentional) |
+| Interactive form, dialog, action button with logic | `features/`               |
+| Pure domain rendering (card, badge, avatar)        | `entities/<name>/ui/`     |
 
 ---
 
@@ -356,11 +356,11 @@ shared/
 
 ```typescript
 // ✅ direct file imports
-import { Button } from '@/shared/ui/button';
-import { cn } from '@/shared/lib/cn';
+import { Button } from '@/shared/ui/button'
+import { cn } from '@/shared/lib/cn'
 
 // ❌ barrel
-import { Button, cn } from '@/shared';
+import { Button, cn } from '@/shared'
 ```
 
 **Belongs in shared:** UI primitives, utility functions, HTTP client,
@@ -377,11 +377,11 @@ Configure `@/` alias for clean imports:
 
 ```typescript
 // ✅
-import { Button } from '@/shared/ui/button';
-import { useUser } from '@/entities/user';
+import { Button } from '@/shared/ui/button'
+import { useUser } from '@/entities/user'
 
 // ❌ relative imports across layers
-import { Button } from '../../../shared/ui/button';
+import { Button } from '../../../shared/ui/button'
 ```
 
 Configure in both bundler config and `tsconfig.json`.

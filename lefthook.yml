@@ -1,0 +1,21 @@
+# https://lefthook.dev/configuration/
+# Run: `pnpm lefthook install` to (re)install hooks.
+# Bypass for emergencies: `LEFTHOOK=0 git commit ...` (preferred over --no-verify).
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: format
+      glob: '*.{ts,tsx,js,jsx,json,css,md,yml,yaml}'
+      run: pnpm exec prettier --write {staged_files}
+      stage_fixed: true
+
+    - name: lint
+      glob: '*.{ts,tsx,js,jsx}'
+      run: pnpm exec eslint --fix {staged_files}
+      stage_fixed: true
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: pnpm typecheck

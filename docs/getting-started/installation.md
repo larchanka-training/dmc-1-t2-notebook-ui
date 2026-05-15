@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool | Minimum version | Check |
-|---|---|---|
-| Node.js | 20+ (LTS) | `node -v` |
-| pnpm | 9.15.9 | `pnpm -v` |
-| Git | any | `git --version` |
+| Tool    | Minimum version | Check           |
+| ------- | --------------- | --------------- |
+| Node.js | 20+ (LTS)       | `node -v`       |
+| pnpm    | 9.15.9          | `pnpm -v`       |
+| Git     | any             | `git --version` |
 
 The CI pipeline and Docker images both use Node 20, and `package.json` pins pnpm to `9.15.9` via `packageManager`. Corepack (`corepack enable`) is the easiest way to match the pinned version automatically.
 

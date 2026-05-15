@@ -30,14 +30,14 @@ entities/session/
 ```typescript
 // entities/session/domain/session.types.ts
 export interface Session {
-  userId: string;
-  email: string;
-  role: 'admin' | 'member';
+  userId: string
+  email: string
+  role: 'admin' | 'member'
 }
 
 export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
+  accessToken: string
+  refreshToken: string
 }
 ```
 
@@ -94,11 +94,11 @@ entities/user/
 
 ### Summary
 
-| What | Where | Why |
-|---|---|---|
-| Tokens, refresh, session state | `entities/session/` | reusable business module |
-| Login / signup / recovery UI + flow | `features/auth/` with sub-features | one cohesive feature |
-| User profile data | `entities/user/` | domain model, reused across features |
+| What                                | Where                              | Why                                  |
+| ----------------------------------- | ---------------------------------- | ------------------------------------ |
+| Tokens, refresh, session state      | `entities/session/`                | reusable business module             |
+| Login / signup / recovery UI + flow | `features/auth/` with sub-features | one cohesive feature                 |
+| User profile data                   | `entities/user/`                   | domain model, reused across features |
 
 ---
 
@@ -124,16 +124,16 @@ entities/product/
 ```typescript
 // entities/product/domain/product.types.ts
 export interface Product {
-  id: string;
-  name: string;
-  price: number;
-  formattedPrice: string;
-  isOnSale: boolean;
+  id: string
+  name: string
+  price: number
+  formattedPrice: string
+  isOnSale: boolean
 }
 
 // entities/product/domain/product.mapper.ts
-import type { ProductDTO } from '@/shared/api/product';
-import type { Product } from './product.types';
+import type { ProductDTO } from '@/shared/api/product'
+import type { Product } from './product.types'
 
 export const toProduct = (dto: ProductDTO): Product => ({
   id: dto.id,
@@ -141,26 +141,26 @@ export const toProduct = (dto: ProductDTO): Product => ({
   price: dto.price,
   formattedPrice: `$${dto.price.toFixed(2)}`,
   isOnSale: dto.price < 10,
-});
+})
 ```
 
 ### model/ — state + API calls
 
 ```typescript
 // entities/product/model/product.store.ts
-import { httpClient } from '@/shared/api/client';
-import { toProduct } from '../domain/product.mapper';
+import { httpClient } from '@/shared/api/client'
+import { toProduct } from '../domain/product.mapper'
 
 export const productApi = {
   getById: async (id: string) => {
-    const dto = await httpClient.get(`/products/${id}`);
-    return toProduct(dto);
+    const dto = await httpClient.get(`/products/${id}`)
+    return toProduct(dto)
   },
   getAll: async () => {
-    const dtos = await httpClient.get('/products');
-    return dtos.map(toProduct);
+    const dtos = await httpClient.get('/products')
+    return dtos.map(toProduct)
   },
-};
+}
 ```
 
 ### ui/ — domain display (props-only)
@@ -190,11 +190,11 @@ export function ProductCard({ name, formattedPrice, isOnSale }: ProductCardProps
 
 ```typescript
 // entities/product/index.ts
-export type { Product } from './domain/product.types';
-export { toProduct } from './domain/product.mapper';
-export { productApi } from './model/product.store';
-export { ProductCard } from './ui/product-card';
-export { ProductBadge } from './ui/product-badge';
+export type { Product } from './domain/product.types'
+export { toProduct } from './domain/product.mapper'
+export { productApi } from './model/product.store'
+export { ProductCard } from './ui/product-card'
+export { ProductBadge } from './ui/product-badge'
 ```
 
 ---
@@ -244,17 +244,17 @@ features/issue-tracker/
 
 ```typescript
 // features/issue-tracker/model/issue-tracker.facade.ts
-import { issueListModel } from '../modules/issue-list';
-import { issueBoardModel } from '../modules/issue-board';
-import { issueFilter } from '../common/model/issue-filter';
+import { issueListModel } from '../modules/issue-list'
+import { issueBoardModel } from '../modules/issue-board'
+import { issueFilter } from '../common/model/issue-filter'
 
 export const issueTrackerFacade = {
   applyFilter(filter: IssueFilter) {
-    issueFilter.set(filter);
-    issueListModel.refresh();
-    issueBoardModel.refresh();
+    issueFilter.set(filter)
+    issueListModel.refresh()
+    issueBoardModel.refresh()
   },
-};
+}
 ```
 
 ### Composition in ui/
@@ -398,14 +398,14 @@ page's local UI.
 
 ## Type Placement Guide
 
-| Type scope | Location |
-|---|---|
-| API response/request shapes (DTOs) | `shared/api/` or contracts package |
-| Domain model for a reused entity | `entities/*/domain/` |
-| Types used only in one feature | `features/*/domain/` or `features/*/model/` |
-| Types used only in one page | `pages/*/ui/` local types |
-| Generic utility types (`Nullable<T>`) | `shared/lib/types.ts` |
-| Infrastructure types (HTTP config) | `shared/api/` |
+| Type scope                            | Location                                    |
+| ------------------------------------- | ------------------------------------------- |
+| API response/request shapes (DTOs)    | `shared/api/` or contracts package          |
+| Domain model for a reused entity      | `entities/*/domain/`                        |
+| Types used only in one feature        | `features/*/domain/` or `features/*/model/` |
+| Types used only in one page           | `pages/*/ui/` local types                   |
+| Generic utility types (`Nullable<T>`) | `shared/lib/types.ts`                       |
+| Infrastructure types (HTTP config)    | `shared/api/`                               |
 
 **Rule:** Raw API shapes (DTOs) stay close to transport. Domain models
 with business meaning go in entities or features. If you only need the
@@ -415,12 +415,12 @@ raw shape and have no business logic, a shared types file is enough.
 
 ## entities/ vs shared/ — When to Use Each
 
-| Question | Answer | Layer |
-|---|---|---|
-| Does it have **zero** logic and **zero** state? | UI primitive or utility | `shared/` |
-| Is it **infrastructure** with no business context? | HTTP client, i18n, analytics | `shared/` |
-| Is it a **reusable business module**? | Domain model, session, workspace | `entities/` |
-| Is it a **user-facing feature**? | Feature with UI + state + flow | `features/` |
+| Question                                           | Answer                           | Layer       |
+| -------------------------------------------------- | -------------------------------- | ----------- |
+| Does it have **zero** logic and **zero** state?    | UI primitive or utility          | `shared/`   |
+| Is it **infrastructure** with no business context? | HTTP client, i18n, analytics     | `shared/`   |
+| Is it a **reusable business module**?              | Domain model, session, workspace | `entities/` |
+| Is it a **user-facing feature**?                   | Feature with UI + state + flow   | `features/` |
 
 ```text
 shared/ui/button.tsx              ← zero logic, zero state

@@ -20,26 +20,23 @@ interface NotebookRowProps {
   isLast: boolean
 }
 
-const NotebookRow = reatomComponent<NotebookRowProps>(
-  ({ cell, index, isFirst, isLast }) => {
-    return (
-      <NotebookCell
-        index={index}
-        code={cell.code()}
-        output={cell.output()}
-        status={cell.status()}
-        isFirst={isFirst}
-        isLast={isLast}
-        onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
-        onRun={wrap(() => runCell(cell.id))}
-        onDelete={wrap(() => deleteCell(cell.id))}
-        onMoveUp={wrap(() => moveCell(cell.id, -1))}
-        onMoveDown={wrap(() => moveCell(cell.id, 1))}
-      />
-    )
-  },
-  'NotebookRow',
-)
+const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, index, isFirst, isLast }) => {
+  return (
+    <NotebookCell
+      index={index}
+      code={cell.code()}
+      output={cell.output()}
+      status={cell.status()}
+      isFirst={isFirst}
+      isLast={isLast}
+      onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
+      onRun={wrap(() => runCell(cell.id))}
+      onDelete={wrap(() => deleteCell(cell.id))}
+      onMoveUp={wrap(() => moveCell(cell.id, -1))}
+      onMoveDown={wrap(() => moveCell(cell.id, 1))}
+    />
+  )
+}, 'NotebookRow')
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
@@ -64,7 +61,11 @@ export const NotebookView = reatomComponent(() => {
           />
         ))}
 
-        <Button variant="ghost" className="self-start text-muted-foreground" onClick={wrap(() => addCell())}>
+        <Button
+          variant="ghost"
+          className="self-start text-muted-foreground"
+          onClick={wrap(() => addCell())}
+        >
           <Plus className="size-3.5" /> Add cell
         </Button>
       </div>

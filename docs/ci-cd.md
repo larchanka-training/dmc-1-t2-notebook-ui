@@ -47,11 +47,11 @@ cp .env.example .env
 
 Основные переменные:
 
-| Переменная | Назначение | Пример |
-| --- | --- | --- |
-| `VITE_API_BASE_URL` | Base URL backend API для browser-кода | `/api/v1` |
-| `VITE_APP_ENV` | Окружение сборки UI | `dev`, `stage`, `prod` |
-| `VITE_APP_NAME` | Публичное имя приложения | `JS Notebook` |
+| Переменная          | Назначение                            | Пример                 |
+| ------------------- | ------------------------------------- | ---------------------- |
+| `VITE_API_BASE_URL` | Base URL backend API для browser-кода | `/api/v1`              |
+| `VITE_APP_ENV`      | Окружение сборки UI                   | `dev`, `stage`, `prod` |
+| `VITE_APP_NAME`     | Публичное имя приложения              | `JS Notebook`          |
 
 Важно: Vite передает в browser только переменные с префиксом `VITE_`. Не храните secrets в `ui/.env`, потому что frontend-переменные попадают в итоговый JavaScript bundle.
 
@@ -61,10 +61,10 @@ Frontend собирается из `ui/Dockerfile`.
 
 Dockerfile содержит два основных target:
 
-| Target | Назначение |
-| --- | --- |
-| `development` | Запуск Vite dev server на порту `5173` |
-| `production` | Сборка статических файлов и запуск через Nginx на порту `80` |
+| Target        | Назначение                                                   |
+| ------------- | ------------------------------------------------------------ |
+| `development` | Запуск Vite dev server на порту `5173`                       |
+| `production`  | Сборка статических файлов и запуск через Nginx на порту `80` |
 
 Сборка development-образа:
 
@@ -111,13 +111,13 @@ docker compose up --build
 
 Сервисы:
 
-| Сервис | URL | Назначение |
-| --- | --- | --- |
-| `frontend` | `http://127.0.0.1:3000` | React/Vite UI |
-| `api` | `http://127.0.0.1:8000` | FastAPI backend |
-| `postgres` | `127.0.0.1:5432` | PostgreSQL |
-| `pgadmin` | `http://127.0.0.1:5050` | Админка БД |
-| `proxy` | `http://127.0.0.1` | Nginx reverse proxy |
+| Сервис     | URL                     | Назначение          |
+| ---------- | ----------------------- | ------------------- |
+| `frontend` | `http://127.0.0.1:3000` | React/Vite UI       |
+| `api`      | `http://127.0.0.1:8000` | FastAPI backend     |
+| `postgres` | `127.0.0.1:5432`        | PostgreSQL          |
+| `pgadmin`  | `http://127.0.0.1:5050` | Админка БД          |
+| `proxy`    | `http://127.0.0.1`      | Nginx reverse proxy |
 
 Полезные команды:
 
@@ -167,17 +167,17 @@ Pipeline запускается при:
 
 Production-секреты frontend обычно не нужны, потому что все `VITE_` переменные публичные. Для environment-specific API URL используйте GitHub Actions Variables или build args:
 
-| Variable | Назначение |
-| --- | --- |
+| Variable            | Назначение                                |
+| ------------------- | ----------------------------------------- |
 | `VITE_API_BASE_URL` | URL backend API для конкретного окружения |
-| `VITE_APP_ENV` | Имя окружения |
+| `VITE_APP_ENV`      | Имя окружения                             |
 
 Если будет добавлена публикация Docker-образа в registry, понадобятся secrets:
 
-| Secret | Назначение |
-| --- | --- |
-| `REGISTRY_USERNAME` | Логин Docker registry |
-| `REGISTRY_TOKEN` | Token/password Docker registry |
+| Secret              | Назначение                     |
+| ------------------- | ------------------------------ |
+| `REGISTRY_USERNAME` | Логин Docker registry          |
+| `REGISTRY_TOKEN`    | Token/password Docker registry |
 
 ## Deployment
 

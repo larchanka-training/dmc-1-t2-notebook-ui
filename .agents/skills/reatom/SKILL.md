@@ -55,31 +55,23 @@ const fetchList = action(async (filters: { page: number }) => {
 // note how we chain relative atoms and actions names
 
 // extend atom with actions or just methods
-const page = atom(0, 'list.page').extend(
-  (target /* <-- target is the extendable atom */) => ({
-    reset() {
-      // update atom with "set" method
-      target.set(0)
-    },
-    prev() {
-      // update atom with current state mapping with callback in "set"
-      target.set((value) => Math.max(0, value - 1))
-    },
-    next() {
-      target.set((value) => value + 1)
-    },
+const page = atom(0, 'list.page').extend((target /* <-- target is the extendable atom */) => ({
+  reset() {
+    // update atom with "set" method
+    target.set(0)
+  },
+  prev() {
+    // update atom with current state mapping with callback in "set"
+    target.set((value) => Math.max(0, value - 1))
+  },
+  next() {
+    target.set((value) => value + 1)
+  },
 
-    // assign other relative atoms if needed
-    isPrevAvailable: computed(
-      () => target() > 0,
-      `${target.name}.isPrevAvailable`,
-    ),
-    isNextAvailable: computed(
-      () => target() < list().length - 1,
-      `${target.name}.isNextAvailable`,
-    ),
-  }),
-)
+  // assign other relative atoms if needed
+  isPrevAvailable: computed(() => target() > 0, `${target.name}.isPrevAvailable`),
+  isNextAvailable: computed(() => target() < list().length - 1, `${target.name}.isNextAvailable`),
+}))
 
 // Run effect to fetch list when page changes
 effect(() => {
@@ -510,16 +502,7 @@ Use inside **computed** or **effect** to react only to actual changes or new cal
 ### Combined example
 
 ```ts
-import {
-  action,
-  atom,
-  effect,
-  getCalls,
-  ifChanged,
-  onEvent,
-  take,
-  wrap,
-} from '@reatom/core'
+import { action, atom, effect, getCalls, ifChanged, onEvent, take, wrap } from '@reatom/core'
 
 type CheckoutRequest = { orderId: string; requestedAt: number }
 
@@ -877,9 +860,7 @@ export const usersRoute = protectedRoute.reatomRoute({
     page: z.string().regex(/^\d+$/).transform(Number).default('1'),
   }),
   async loader({ q, page }) {
-    const response = await wrap(
-      fetch(`/api/users?q=${encodeURIComponent(q ?? '')}&page=${page}`),
-    )
+    const response = await wrap(fetch(`/api/users?q=${encodeURIComponent(q ?? '')}&page=${page}`))
     return await wrap(response.json())
   },
   render(self) {
@@ -956,9 +937,7 @@ const page = atom(1, 'catalog.page').extend(
 )
 const sort = atom<Sort>('popular', 'catalog.sort').extend(
   withSearchParams('sort', (value) =>
-    value === 'new' || value === 'price' || value === 'popular'
-      ? value
-      : 'popular',
+    value === 'new' || value === 'price' || value === 'popular' ? value : 'popular',
   ),
 )
 ```
@@ -996,14 +975,7 @@ Transactions support optimistic updates with rollback.
 Example
 
 ```ts
-import {
-  action,
-  atom,
-  withAsync,
-  withRollback,
-  withTransaction,
-  wrap,
-} from '@reatom/core'
+import { action, atom, withAsync, withRollback, withTransaction, wrap } from '@reatom/core'
 
 type Todo = { id: string; title: string }
 

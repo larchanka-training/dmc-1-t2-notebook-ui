@@ -33,6 +33,7 @@ rm -rf "@/"
 ```
 
 Verify the files are in the right place:
+
 ```bash
 ls src/components/ui/
 ```
@@ -42,20 +43,21 @@ ls src/components/ui/
 Open `src/pages/ShadcnComponentsPage.tsx` and:
 
 **Add the import** at the top:
+
 ```tsx
 import { ComponentName, SubComponent } from '@/components/ui/{component-name}'
 ```
 
 **Add a Section** in the JSX:
+
 ```tsx
-<Section title="{ComponentName}">
-  {/* live example here */}
-</Section>
+<Section title="{ComponentName}">{/* live example here */}</Section>
 ```
 
 ### 4. Add to docs
 
 Open `docs/components/shadcn.md` and add:
+
 - An entry in the **Installed components** table
 - A usage code block in the **Component reference** section
 

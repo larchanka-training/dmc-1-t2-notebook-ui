@@ -19,19 +19,26 @@ export function LoginForm() {
 
       <div className="border rounded-xl p-6 space-y-4 bg-card shadow-sm">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="email">Email</label>
+          <label className="text-sm font-medium" htmlFor="email">
+            Email
+          </label>
           <Input
             id="email"
             type="email"
             placeholder="you@example.com"
             value={email}
-            onChange={e => setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
           />
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium" htmlFor="password">Password</label>
-            <a href="#" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <label className="text-sm font-medium" htmlFor="password">
+              Password
+            </label>
+            <a
+              href="#"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
               Forgot password?
             </a>
           </div>
@@ -40,15 +47,19 @@ export function LoginForm() {
             type="password"
             placeholder="••••••••"
             value={password}
-            onChange={e => setPassword(e.target.value)}
+            onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        <Button className="w-full" type="submit">Sign in</Button>
+        <Button className="w-full" type="submit">
+          Sign in
+        </Button>
       </div>
 
       <p className="text-center text-sm text-muted-foreground">
         Don't have an account?{' '}
-        <a href="#" className="text-foreground font-medium hover:underline">Sign up</a>
+        <a href="#" className="text-foreground font-medium hover:underline">
+          Sign up
+        </a>
       </p>
     </div>
   )

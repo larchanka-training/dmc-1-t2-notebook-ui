@@ -56,9 +56,7 @@ import '@/pages/my-page'
 4. **Add it to the sidebar** in `src/app/layouts/AppSidebar.tsx`:
 
 ```tsx
-const navMain: NavItem[] = [
-  { title: 'My Page', icon: SomeIcon, url: '/my-page' },
-]
+const navMain: NavItem[] = [{ title: 'My Page', icon: SomeIcon, url: '/my-page' }]
 ```
 
 5. **Add it to the docs** — create `docs/<topic>/my-page.md`.
@@ -92,11 +90,11 @@ Document it in `docs/components/shadcn.md`.
 
 Where the component goes depends on its scope:
 
-| Scope | Location |
-|---|---|
-| Reused across the whole app, no business logic | `src/shared/ui/MyComponent.tsx` |
-| Belongs to a specific feature | `src/features/<feature>/ui/MyComponent.tsx` |
-| Belongs to a specific page only | `src/pages/<page>/ui/MyComponent.tsx` (or inline in the page file) |
+| Scope                                          | Location                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| Reused across the whole app, no business logic | `src/shared/ui/MyComponent.tsx`                                    |
+| Belongs to a specific feature                  | `src/features/<feature>/ui/MyComponent.tsx`                        |
+| Belongs to a specific page only                | `src/pages/<page>/ui/MyComponent.tsx` (or inline in the page file) |
 
 Use **named exports** in `shared/` and `features/`. Page-level files in `pages/<name>/ui/` use a **default export** for the page itself (referenced by `model/route.tsx`).
 
@@ -130,14 +128,14 @@ This project uses Reatom for state, async data, routing, and forms. Before reach
 
 ## Code style
 
-| Rule | Detail |
-|---|---|
-| **Default export only for pages** | Use named exports in `features/` and `shared/`. Default exports only for `pages/<name>/ui/<Name>Page.tsx`. |
-| **No comments explaining what** | Code should be self-documenting. Comment the *why* only when non-obvious. |
-| **Tailwind only** | No inline `style={{}}` except for dynamic values (e.g. computed heights). |
-| **`cn()` for conditional classes** | Use `cn()` from `@/shared/lib/cn` instead of template literals. |
-| **No `any`** | Use `unknown` and narrow types instead. |
-| **Wrap React handlers calling Reatom** | `onClick={wrap(() => action())}` — `clearStack()` is enabled, see [reatom.md](./architecture/reatom.md). |
+| Rule                                   | Detail                                                                                                     |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Default export only for pages**      | Use named exports in `features/` and `shared/`. Default exports only for `pages/<name>/ui/<Name>Page.tsx`. |
+| **No comments explaining what**        | Code should be self-documenting. Comment the _why_ only when non-obvious.                                  |
+| **Tailwind only**                      | No inline `style={{}}` except for dynamic values (e.g. computed heights).                                  |
+| **`cn()` for conditional classes**     | Use `cn()` from `@/shared/lib/cn` instead of template literals.                                            |
+| **No `any`**                           | Use `unknown` and narrow types instead.                                                                    |
+| **Wrap React handlers calling Reatom** | `onClick={wrap(() => action())}` — `clearStack()` is enabled, see [reatom.md](./architecture/reatom.md).   |
 
 ---
 
@@ -177,11 +175,11 @@ No configuration file needs updating — docs are just markdown files.
 
 ## Docs index
 
-| Topic | Files |
-|---|---|
-| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md` |
-| Architecture | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` |
-| Notebook | `docs/notebook/how-it-works.md` · `adding-cells.md` |
-| Components | `docs/components/shadcn.md` · `custom.md` |
-| Contributing | `docs/contributing.md` |
-| CI/CD | `docs/ci-cd.md` |
+| Topic           | Files                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md`                    |
+| Architecture    | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` |
+| Notebook        | `docs/notebook/how-it-works.md` · `adding-cells.md`                                      |
+| Components      | `docs/components/shadcn.md` · `custom.md`                                                |
+| Contributing    | `docs/contributing.md`                                                                   |
+| CI/CD           | `docs/ci-cd.md`                                                                          |

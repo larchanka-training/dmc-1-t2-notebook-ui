@@ -6,20 +6,21 @@ with correct formatting and cross-links to related docs.
 ## Usage
 
 Invoke this skill with:
+
 - topic area: `getting-started`, `architecture`, `notebook`, `components`, or a new folder name
 - file name (kebab-case, e.g. `markdown-cells`)
 - content to document
 
 ## Folder guide
 
-| Topic | Folder | Examples |
-|---|---|---|
-| Onboarding, setup | `docs/getting-started/` | installation, running, env vars |
-| Code structure, patterns | `docs/architecture/` | folder layout, state management, API patterns |
-| Notebook features | `docs/notebook/` | cell types, execution, persistence |
-| UI components | `docs/components/` | shadcn reference, custom component API |
-| AI agents, skills | `docs/agents/` | agent concepts, SDK usage, skill reference |
-| Everything else | new folder | create a new topic folder |
+| Topic                    | Folder                  | Examples                                      |
+| ------------------------ | ----------------------- | --------------------------------------------- |
+| Onboarding, setup        | `docs/getting-started/` | installation, running, env vars               |
+| Code structure, patterns | `docs/architecture/`    | folder layout, state management, API patterns |
+| Notebook features        | `docs/notebook/`        | cell types, execution, persistence            |
+| UI components            | `docs/components/`      | shadcn reference, custom component API        |
+| AI agents, skills        | `docs/agents/`          | agent concepts, SDK usage, skill reference    |
+| Everything else          | new folder              | create a new topic folder                     |
 
 ## Steps
 

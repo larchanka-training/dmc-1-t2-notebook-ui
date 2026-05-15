@@ -62,7 +62,6 @@ describe('NotebookView (RTL integration)', () => {
 
     await user.clear(first)
     await user.type(first, 'console.log("edited")')
-
     ;[first, second] = getCellTextareas()
     expect(first).toHaveValue('console.log("edited")')
     expect(second).toHaveValue('')

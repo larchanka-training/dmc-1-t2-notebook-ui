@@ -8,13 +8,13 @@ See the [Reatom skill](../../.claude/skills/reatom/SKILL.md) for general framewo
 
 ## Route map
 
-| Path | Page component | Source |
-|---|---|---|
-| `/` | `NotebookPage` | `src/pages/notebook/` |
-| `/login` | `LoginPage` | `src/pages/login/` |
+| Path                 | Page component         | Source                         |
+| -------------------- | ---------------------- | ------------------------------ |
+| `/`                  | `NotebookPage`         | `src/pages/notebook/`          |
+| `/login`             | `LoginPage`            | `src/pages/login/`             |
 | `/components/shadcn` | `ShadcnComponentsPage` | `src/pages/shadcn-components/` |
 | `/components/custom` | `CustomComponentsPage` | `src/pages/custom-components/` |
-| `/about` | `AboutPage` | `src/pages/about/` |
+| `/about`             | `AboutPage`            | `src/pages/about/`             |
 
 ---
 
@@ -38,7 +38,7 @@ rootRoute (layout: true)                    src/app/model/routes.tsx
 // src/app/App.tsx
 import { reatomComponent } from '@reatom/react'
 import { rootRoute } from './model/routes'
-import '@/pages/notebook'           // registers notebookRoute
+import '@/pages/notebook' // registers notebookRoute
 import '@/pages/login'
 import '@/pages/about'
 import '@/pages/shadcn-components'
@@ -100,10 +100,7 @@ const NavGroup = reatomComponent(({ items }) => {
     <SidebarMenu>
       {items.map((item) => (
         <SidebarMenuItem key={item.title}>
-          <SidebarMenuButton
-            isActive={pathname === item.url}
-            render={<a href={item.url} />}
-          >
+          <SidebarMenuButton isActive={pathname === item.url} render={<a href={item.url} />}>
             <item.icon />
             <span>{item.title}</span>
           </SidebarMenuButton>

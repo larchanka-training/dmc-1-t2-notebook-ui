@@ -77,7 +77,7 @@ components.
 
 ## 3. What Makes One Feature
 
-> **Important:** A *feature* is a cohesive product block — NOT a
+> **Important:** A _feature_ is a cohesive product block — NOT a
 > micro use-case (single user action).
 
 ### Coherence criterion (from ED)
@@ -117,11 +117,11 @@ project: 3–10 features. Use-cases (create-X, edit-X, delete-X) live
 
 **Examples of correct granularity:**
 
-| ✅ One feature (with use-cases inside) | ❌ Each use-case as a feature |
-|---|---|
-| `features/auth/` (login, signup, recovery) | `features/login/` + `features/signup/` + `features/recovery/` |
-| `features/issue-tracker/` (list, detail, board, filters, create) | `features/issue-list/` + `features/issue-create/` + … |
-| `features/comments/` (post, edit, delete, mention) | `features/post-comment/` + `features/delete-comment/` + … |
+| ✅ One feature (with use-cases inside)                           | ❌ Each use-case as a feature                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| `features/auth/` (login, signup, recovery)                       | `features/login/` + `features/signup/` + `features/recovery/` |
+| `features/issue-tracker/` (list, detail, board, filters, create) | `features/issue-list/` + `features/issue-create/` + …         |
+| `features/comments/` (post, edit, delete, mention)               | `features/post-comment/` + `features/delete-comment/` + …     |
 
 ### Modules inside a feature (fractal nesting)
 
@@ -252,20 +252,20 @@ A valid response is "not yet" — but only after you paused and asked.
 
 ## 6. Quick Placement Table
 
-| Scenario | Single use | Reused (by 2+ features) |
-|---|---|---|
-| Login/signup forms | `features/auth/` (one feature, sub-features inside) | same |
-| User profile form | `features/profile/` | `features/profile/` + `entities/user/` (data) |
-| Product card (display only) | `features/<name>/ui/ProductCard.tsx` | `entities/product/ui/ProductCard.tsx` |
-| Product data fetching, types | `entities/product/` | `entities/product/` |
-| Add-to-cart interaction | `features/cart/` | `features/cart/` |
-| Session / tokens / current user | `entities/session/` (always) | `entities/session/` |
-| HTTP client | `shared/api/` (always) | `shared/api/` |
-| Generic Card/Button/Input | `shared/ui/` | `shared/ui/` |
-| Date formatting util | `shared/lib/` | `shared/lib/` |
-| Sidebar navigation | `app/layouts/` | `widgets/sidebar/` |
-| Landing-page hero (no logic) | `pages/landing/ui/Hero.tsx` | — |
-| Page-level data orchestration across features | `pages/<slice>/model/` | — |
+| Scenario                                      | Single use                                          | Reused (by 2+ features)                       |
+| --------------------------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| Login/signup forms                            | `features/auth/` (one feature, sub-features inside) | same                                          |
+| User profile form                             | `features/profile/`                                 | `features/profile/` + `entities/user/` (data) |
+| Product card (display only)                   | `features/<name>/ui/ProductCard.tsx`                | `entities/product/ui/ProductCard.tsx`         |
+| Product data fetching, types                  | `entities/product/`                                 | `entities/product/`                           |
+| Add-to-cart interaction                       | `features/cart/`                                    | `features/cart/`                              |
+| Session / tokens / current user               | `entities/session/` (always)                        | `entities/session/`                           |
+| HTTP client                                   | `shared/api/` (always)                              | `shared/api/`                                 |
+| Generic Card/Button/Input                     | `shared/ui/`                                        | `shared/ui/`                                  |
+| Date formatting util                          | `shared/lib/`                                       | `shared/lib/`                                 |
+| Sidebar navigation                            | `app/layouts/`                                      | `widgets/sidebar/`                            |
+| Landing-page hero (no logic)                  | `pages/landing/ui/Hero.tsx`                         | —                                             |
+| Page-level data orchestration across features | `pages/<slice>/model/`                              | —                                             |
 
 ---
 
@@ -288,10 +288,10 @@ other widgets. If they need to interact, use section 4.
 
 ```typescript
 // ✅
-import { LoginForm } from "@/features/auth";
+import { LoginForm } from '@/features/auth'
 
 // ❌ bypasses public API
-import { LoginForm } from "@/features/auth/modules/login/ui/LoginForm";
+import { LoginForm } from '@/features/auth/modules/login/ui/LoginForm'
 ```
 
 **Exception:** `shared/` has no barrel — direct file imports only.
@@ -381,7 +381,7 @@ domain → model → ui
 ```
 
 | Segment   | Purpose                                     | Depends on |
-|-----------|---------------------------------------------|------------|
+| --------- | ------------------------------------------- | ---------- |
 | `domain/` | Types, mappers, pure operations             | nothing    |
 | `model/`  | State, stores, actions, computed, API calls | `domain/`  |
 | `ui/`     | Components                                  | all above  |

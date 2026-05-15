@@ -15,8 +15,8 @@ Programmatically, cells are added via the `addCell(afterId?)` Reatom action:
 ```ts
 import { addCell } from '@/features/notebook'
 
-addCell()             // adds at the end
-addCell(cell.id)      // inserts immediately after the cell with this id
+addCell() // adds at the end
+addCell(cell.id) // inserts immediately after the cell with this id
 ```
 
 Both buttons call `addCell()` wrapped in `wrap(...)` so they preserve Reatom's async context (see [reatom.md](../architecture/reatom.md)).
@@ -25,10 +25,10 @@ Both buttons call `addCell()` wrapped in `wrap(...)` so they preserve Reatom's a
 
 ## Running a cell
 
-| Method | Action |
-|---|---|
-| Keyboard | `Cmd+Enter` (Mac) or `Ctrl+Enter` (Windows/Linux) |
-| Mouse | Click the green **▶** play button in the cell header |
+| Method   | Action                                               |
+| -------- | ---------------------------------------------------- |
+| Keyboard | `Cmd+Enter` (Mac) or `Ctrl+Enter` (Windows/Linux)    |
+| Mouse    | Click the green **▶** play button in the cell header |
 
 Both call the `runCell(id)` action, which delegates to `executeJS`. See [How It Works](./how-it-works.md) for the full execution flow.
 
@@ -81,7 +81,7 @@ window.myData = [1, 2, 3, 4, 5]
 
 ```js
 // Cell 2
-console.log(window.myData.map(n => n * 2))
+console.log(window.myData.map((n) => n * 2))
 // output: 2,4,6,8,10
 ```
 
@@ -95,8 +95,7 @@ Each cell renders a `<NotebookCell />`. The component is **stateless** — the p
 import { wrap } from '@reatom/core'
 import { NotebookCell } from '@/features/notebook'
 import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebook'
-
-<NotebookCell
+;<NotebookCell
   index={idx + 1}
   code={cell.code()}
   output={cell.output()}
@@ -119,10 +118,10 @@ See [Custom Components — NotebookCell](../components/custom.md#notebookcell) f
 
 Ideas for future additions:
 
-| Feature | Approach |
-|---|---|
-| **Persist cells** | Extend `cellsAtom` with `withLocalStorage` (or serialise atomized fields manually) |
-| **Markdown cells** | Add `type: 'code' \| 'markdown'` to the `Cell` type, render with a markdown parser |
+| Feature                        | Approach                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Persist cells**              | Extend `cellsAtom` with `withLocalStorage` (or serialise atomized fields manually)       |
+| **Markdown cells**             | Add `type: 'code' \| 'markdown'` to the `Cell` type, render with a markdown parser       |
 | **Shared scope between cells** | Execute prior cells' code in sequence inside one `Function` scope before the current one |
-| **Cell output formatting** | Detect arrays/objects and pretty-print with JSON syntax highlighting |
-| **Export notebook** | Serialise `cellsAtom()` to JSON and trigger a file download |
+| **Cell output formatting**     | Detect arrays/objects and pretty-print with JSON syntax highlighting                     |
+| **Export notebook**            | Serialise `cellsAtom()` to JSON and trigger a file download                              |

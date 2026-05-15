@@ -15,22 +15,16 @@ import {
 
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
-const navMain: NavItem[] = [
-  { title: 'Notebook', icon: BookText, url: '/' },
-]
+const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '/' }]
 
 const navComponents: NavItem[] = [
   { title: 'Shadcn UI', icon: LayoutGrid, url: '/components/shadcn' },
   { title: 'Custom', icon: Puzzle, url: '/components/custom' },
 ]
 
-const navAuth: NavItem[] = [
-  { title: 'Login', icon: LogIn, url: '/login' },
-]
+const navAuth: NavItem[] = [{ title: 'Login', icon: LogIn, url: '/login' }]
 
-const navInfo: NavItem[] = [
-  { title: 'About', icon: Info, url: '/about' },
-]
+const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: '/about' }]
 
 const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavItem[] }) => {
   const { pathname } = urlAtom()
@@ -41,10 +35,7 @@ const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavI
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton
-                isActive={pathname === item.url}
-                render={<a href={item.url} />}
-              >
+              <SidebarMenuButton isActive={pathname === item.url} render={<a href={item.url} />}>
                 <item.icon />
                 <span>{item.title}</span>
               </SidebarMenuButton>

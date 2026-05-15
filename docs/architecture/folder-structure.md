@@ -90,10 +90,13 @@ src/
 ## Layer rules
 
 ### `app/` — composition only
+
 Wires the application together: render root, layouts, providers, root route. No business logic. Page route modules are imported here purely so their `rootRoute.reatomRoute(...)` calls register the route tree as a side effect.
 
 ### `pages/<name>/` — one route, three files
+
 Each page is a folder with:
+
 - `model/route.tsx` — `rootRoute.reatomRoute({ path, render })`
 - `ui/<Name>Page.tsx` — the page component (default export)
 - `index.ts` — re-exports the route and the page
@@ -101,7 +104,9 @@ Each page is a folder with:
 Pages compose features and shared UI. They do not host reusable logic — that lives in `features/` or `shared/`.
 
 ### `features/<name>/` — domain + model + ui
+
 A self-contained business slice:
+
 - `domain/` — pure types, factories, no React (e.g. `reatomCell`)
 - `model/` — atoms, actions, side effects (Reatom)
 - `ui/` — components that bind the model to React via `reatomComponent`
@@ -109,6 +114,7 @@ A self-contained business slice:
 External consumers import only from `@/features/<name>` (the public API in `index.ts`), never reach into internals.
 
 ### `shared/` — generic primitives
+
 - `shared/ui/` — shadcn/ui design-system components. Treat as a dependency: don't edit, wrap when needed.
 - `shared/lib/` — pure helpers (`cn`, hooks). No business knowledge.
 

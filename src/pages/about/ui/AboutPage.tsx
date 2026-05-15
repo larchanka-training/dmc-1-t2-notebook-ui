@@ -1,7 +1,15 @@
 import { BookText, Code2, Layers, Rocket, Users } from 'lucide-react'
 import { Separator } from '@/shared/ui/separator'
 
-function FeatureCard({ icon: Icon, title, description }: { icon: React.ElementType; title: string; description: string }) {
+function FeatureCard({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ElementType
+  title: string
+  description: string
+}) {
   return (
     <div className="flex gap-4 p-4 rounded-xl border bg-card">
       <div className="shrink-0 flex items-center justify-center size-10 rounded-lg bg-primary/10">
@@ -18,7 +26,6 @@ function FeatureCard({ icon: Icon, title, description }: { icon: React.ElementTy
 export default function AboutPage() {
   return (
     <div className="p-8 max-w-2xl space-y-10">
-
       {/* hero */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -27,14 +34,16 @@ export default function AboutPage() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">JS Notebook</h1>
-            <p className="text-sm text-muted-foreground">Interactive JavaScript environment in the browser</p>
+            <p className="text-sm text-muted-foreground">
+              Interactive JavaScript environment in the browser
+            </p>
           </div>
         </div>
         <p className="text-muted-foreground leading-relaxed">
           JS Notebook is a browser-based interactive coding environment — similar in concept to{' '}
           <span className="text-foreground font-medium">Jupyter Notebook</span>, but built for{' '}
-          <span className="text-foreground font-medium">JavaScript</span> instead of Python.
-          Write code in cells, run them instantly, and see output inline — no server, no setup.
+          <span className="text-foreground font-medium">JavaScript</span> instead of Python. Write
+          code in cells, run them instantly, and see output inline — no server, no setup.
         </p>
       </div>
 
@@ -89,7 +98,7 @@ export default function AboutPage() {
           <FeatureCard
             icon={Rocket}
             title="Modern Tooling"
-            description="Built with Vite, Tailwind CSS v4, shadcn/ui, and React Router — the same stack used in production apps today."
+            description="Built with Vite, Tailwind CSS v4, shadcn/ui, and Reatom — the same stack used in production apps today."
           />
         </div>
       </div>
@@ -120,7 +129,6 @@ export default function AboutPage() {
           ))}
         </div>
       </div>
-
     </div>
   )
 }

@@ -14,9 +14,7 @@ describe('executeJS', () => {
   })
 
   test('captures console.warn and console.error with prefixes', async () => {
-    const result = await executeJS(
-      'console.warn("w"); console.error("e"); console.log("l")',
-    )
+    const result = await executeJS('console.warn("w"); console.error("e"); console.log("l")')
     expect(result.output).toBe('[warn] w\n[error] e\nl')
   })
 
@@ -27,9 +25,7 @@ describe('executeJS', () => {
   })
 
   test('supports top-level await', async () => {
-    const result = await executeJS(
-      'const v = await Promise.resolve(42); console.log(v)',
-    )
+    const result = await executeJS('const v = await Promise.resolve(42); console.log(v)')
     expect(result.output).toBe('42')
     expect(result.error).toBe(false)
   })

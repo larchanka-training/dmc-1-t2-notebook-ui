@@ -20,33 +20,26 @@ The presentational building block of the notebook. Renders a dark code editor wi
 
 ### Props
 
-| Prop | Type | Required | Description |
-|---|---|---|---|
-| `index` | `number` | yes | Cell number shown in the `[n]` badge in the header |
-| `code` | `string` | yes | Source code displayed in the textarea |
-| `output` | `string` | no | Text output shown below the editor after running |
-| `status` | `'idle' \| 'running' \| 'done' \| 'error'` | no | Controls border colour and run button icon |
-| `isFirst` | `boolean` | no | Disables the move-up button |
-| `isLast` | `boolean` | no | Disables the move-down button |
-| `readOnly` | `boolean` | no | Prevents editing the textarea |
-| `onCodeChange` | `(code: string) => void` | no | Called on every keystroke |
-| `onRun` | `() => void` | no | Called when the play button or Cmd+Enter is pressed |
-| `onDelete` | `() => void` | no | Called when the trash icon is clicked |
-| `onMoveUp` | `() => void` | no | Called when the ↑ button is clicked |
-| `onMoveDown` | `() => void` | no | Called when the ↓ button is clicked |
+| Prop           | Type                                       | Required | Description                                         |
+| -------------- | ------------------------------------------ | -------- | --------------------------------------------------- |
+| `index`        | `number`                                   | yes      | Cell number shown in the `[n]` badge in the header  |
+| `code`         | `string`                                   | yes      | Source code displayed in the textarea               |
+| `output`       | `string`                                   | no       | Text output shown below the editor after running    |
+| `status`       | `'idle' \| 'running' \| 'done' \| 'error'` | no       | Controls border colour and run button icon          |
+| `isFirst`      | `boolean`                                  | no       | Disables the move-up button                         |
+| `isLast`       | `boolean`                                  | no       | Disables the move-down button                       |
+| `readOnly`     | `boolean`                                  | no       | Prevents editing the textarea                       |
+| `onCodeChange` | `(code: string) => void`                   | no       | Called on every keystroke                           |
+| `onRun`        | `() => void`                               | no       | Called when the play button or Cmd+Enter is pressed |
+| `onDelete`     | `() => void`                               | no       | Called when the trash icon is clicked               |
+| `onMoveUp`     | `() => void`                               | no       | Called when the ↑ button is clicked                 |
+| `onMoveDown`   | `() => void`                               | no       | Called when the ↓ button is clicked                 |
 
 ### Usage — static display (e.g. component gallery)
 
 ```tsx
 import { NotebookCell } from '@/features/notebook'
-
-<NotebookCell
-  index={1}
-  code={`console.log("hello")`}
-  output="hello"
-  status="done"
-  readOnly
-/>
+;<NotebookCell index={1} code={`console.log("hello")`} output="hello" status="done" readOnly />
 ```
 
 ### Usage — wired to Reatom state
@@ -57,8 +50,7 @@ In the live notebook, the cell's fields are **atomized** (`code`, `output`, `sta
 import { wrap } from '@reatom/core'
 import { NotebookCell } from '@/features/notebook'
 import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebook'
-
-<NotebookCell
+;<NotebookCell
   index={idx + 1}
   code={cell.code()}
   output={cell.output()}
@@ -75,14 +67,15 @@ import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebo
 
 ### Status visual reference
 
-| Status | Border | Run button | Output text colour |
-|---|---|---|---|
-| `idle` | default | ▶ green | — |
-| `running` | default | ⟳ spinner | — |
-| `done` | default | ▶ green | foreground |
-| `error` | red (`border-destructive`) | ▶ green | destructive (red) |
+| Status    | Border                     | Run button | Output text colour |
+| --------- | -------------------------- | ---------- | ------------------ |
+| `idle`    | default                    | ▶ green    | —                  |
+| `running` | default                    | ⟳ spinner  | —                  |
+| `done`    | default                    | ▶ green    | foreground         |
+| `error`   | red (`border-destructive`) | ▶ green    | destructive (red)  |
 
 ### Design notes
+
 - Editor background is `#1e1e2e` (Catppuccin Mocha dark) with `#cdd6f4` text — deliberate visual contrast from the rest of the theme.
 - The textarea auto-resizes to fit content using `scrollHeight`.
 - Action buttons are visible by default (no hover gate) in the current implementation.
@@ -109,9 +102,9 @@ The following are tiny components defined inline in `src/pages/custom-components
 
 A compact status label with semantic colour variants. Lighter than the shadcn `Badge` — no border, rounded-full shape.
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `label` | `string` | — | Text content |
+| Prop    | Type                                             | Default     | Description                |
+| ------- | ------------------------------------------------ | ----------- | -------------------------- |
+| `label` | `string`                                         | —           | Text content               |
 | `color` | `'default' \| 'success' \| 'warning' \| 'error'` | `'default'` | Background and text colour |
 
 ```tsx
@@ -121,22 +114,22 @@ A compact status label with semantic colour variants. Lighter than the shadcn `B
 <Badge label="Unknown" />
 ```
 
-| Value | Background | Text |
-|---|---|---|
-| `default` | `bg-muted` | `text-muted-foreground` |
-| `success` | `bg-green-500/15` | `text-green-600` |
-| `warning` | `bg-yellow-500/15` | `text-yellow-600` |
-| `error` | `bg-red-500/15` | `text-red-600` |
+| Value     | Background         | Text                    |
+| --------- | ------------------ | ----------------------- |
+| `default` | `bg-muted`         | `text-muted-foreground` |
+| `success` | `bg-green-500/15`  | `text-green-600`        |
+| `warning` | `bg-yellow-500/15` | `text-yellow-600`       |
+| `error`   | `bg-red-500/15`    | `text-red-600`          |
 
 ### StatCard
 
 A metric card for dashboards. Label + large value + optional delta.
 
-| Prop | Type | Required | Description |
-|---|---|---|---|
-| `label` | `string` | yes | Small descriptor above the value |
-| `value` | `string` | yes | The primary metric — displayed large |
-| `delta` | `string` | no | Trend vs previous period — rendered green |
+| Prop    | Type     | Required | Description                               |
+| ------- | -------- | -------- | ----------------------------------------- |
+| `label` | `string` | yes      | Small descriptor above the value          |
+| `value` | `string` | yes      | The primary metric — displayed large      |
+| `delta` | `string` | no       | Trend vs previous period — rendered green |
 
 ```tsx
 <StatCard label="Total Students" value="1,284" delta="+12% this week" />
@@ -169,9 +162,9 @@ const { output, error } = await executeJS(`console.log(2 + 2)`)
 // error: false
 ```
 
-| Return field | Type | Description |
-|---|---|---|
-| `output` | `string` | All captured console lines + return value, joined with `\n` |
-| `error` | `boolean` | `true` if an exception was thrown |
+| Return field | Type      | Description                                                 |
+| ------------ | --------- | ----------------------------------------------------------- |
+| `output`     | `string`  | All captured console lines + return value, joined with `\n` |
+| `error`      | `boolean` | `true` if an exception was thrown                           |
 
 See [How the Notebook Works](../notebook/how-it-works.md) for the full implementation.

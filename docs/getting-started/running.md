@@ -19,14 +19,14 @@ The dev server has **Hot Module Replacement (HMR)** — editing any `.tsx` or `.
 
 ## Available scripts
 
-| Command | What it does |
-|---|---|
-| `pnpm dev` | Start the development server with HMR |
-| `pnpm build` | Type-check + production build into `dist/` |
-| `pnpm preview` | Serve the `dist/` build locally to test production output |
-| `pnpm lint` | Run ESLint across all source files |
-| `pnpm test` | Run the Vitest suite once (jsdom) |
-| `pnpm test:watch` | Run Vitest in watch mode |
+| Command           | What it does                                              |
+| ----------------- | --------------------------------------------------------- |
+| `pnpm dev`        | Start the development server with HMR                     |
+| `pnpm build`      | Type-check + production build into `dist/`                |
+| `pnpm preview`    | Serve the `dist/` build locally to test production output |
+| `pnpm lint`       | Run ESLint across all source files                        |
+| `pnpm test`       | Run the Vitest suite once (jsdom)                         |
+| `pnpm test:watch` | Run Vitest in watch mode                                  |
 
 ---
 
@@ -62,12 +62,14 @@ Only variables prefixed `VITE_` are exposed to the browser bundle — don't put 
 
 **Port already in use**
 Vite automatically tries the next port. If you want a specific port:
+
 ```bash
 pnpm dev --port 3000
 ```
 
 **`pnpm: command not found`**
 Install pnpm first:
+
 ```bash
 npm install -g pnpm
 ```
