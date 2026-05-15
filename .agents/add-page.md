@@ -6,6 +6,7 @@ the page component, the route registration, and the sidebar nav entry.
 ## Usage
 
 Invoke this skill with:
+
 - page name (PascalCase, e.g. `SettingsPage`)
 - route path (e.g. `/settings`)
 - sidebar label (e.g. `Settings`)
@@ -32,11 +33,13 @@ export default function {PageName}() {
 ### 2. Register the route in `src/App.tsx`
 
 Add the import at the top:
+
 ```tsx
-import {PageName} from '@/pages/{PageName}'
+import { PageName } from '@/pages/{PageName}'
 ```
 
 Add the route inside `<Routes>`:
+
 ```tsx
 <Route path="{route}" element={<{PageName} />} />
 ```
@@ -44,11 +47,13 @@ Add the route inside `<Routes>`:
 ### 3. Add to sidebar in `src/components/common/AppSidebar.tsx`
 
 Add the icon import if not already present:
+
 ```tsx
 import { {Icon} } from 'lucide-react'
 ```
 
 Add the nav item to the correct group array:
+
 ```tsx
 { title: '{Label}', icon: {Icon}, url: '{route}' },
 ```

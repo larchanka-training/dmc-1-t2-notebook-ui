@@ -39,11 +39,11 @@ files or sub-features.
 
 **Examples of correct granularity:**
 
-| ✅ One feature | ❌ Use-case per feature |
-|---|---|
-| `features/auth/` | `features/login/` + `features/signup/` |
-| `features/issue-tracker/` | `features/issue-create/` + `features/issue-filter/` |
-| `features/comments/` | `features/post-comment/` + `features/delete-comment/` |
+| ✅ One feature            | ❌ Use-case per feature                               |
+| ------------------------- | ----------------------------------------------------- |
+| `features/auth/`          | `features/login/` + `features/signup/`                |
+| `features/issue-tracker/` | `features/issue-create/` + `features/issue-filter/`   |
+| `features/comments/`      | `features/post-comment/` + `features/delete-comment/` |
 
 ---
 
@@ -56,7 +56,7 @@ domain → model → ui
 ```
 
 | Segment   | Purpose                                     | Depends on |
-|-----------|---------------------------------------------|------------|
+| --------- | ------------------------------------------- | ---------- |
 | `domain/` | Types, mappers, pure operations             | nothing    |
 | `model/`  | State, stores, actions, computed, API calls | `domain/`  |
 | `ui/`     | Components                                  | all above  |
@@ -142,11 +142,13 @@ For the full pattern, import rules, and examples, see
    `entities/`. Interactive feature with its own state → `features/`.
 
 4. **Create the directory:**
+
    ```text
    src/features/<name>/
    ```
 
 5. **Start with only the segments you need.** Typically `model/` + `ui/`:
+
    ```text
    features/<name>/
      model/
@@ -157,9 +159,10 @@ For the full pattern, import rules, and examples, see
    ```
 
 6. **Create `index.ts`** re-exporting the public API:
+
    ```typescript
-   export { MyComponent } from './ui/my-component';
-   export { myModel } from './model/my-model';
+   export { MyComponent } from './ui/my-component'
+   export { myModel } from './model/my-model'
    ```
 
 7. **Verify imports.** The feature should only import from `entities/`

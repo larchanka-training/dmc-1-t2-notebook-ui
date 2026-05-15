@@ -5,13 +5,13 @@
 Without an alias, importing a component from a deeply nested file looks like:
 
 ```tsx
-import { Button } from '../../../components/ui/button'
+import { Button } from '../../../shared/ui/button'
 ```
 
 This breaks when you move files. With the `@/` alias it becomes:
 
 ```tsx
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/button'
 ```
 
 `@/` always points to `src/` regardless of where the importing file lives.
@@ -20,12 +20,24 @@ import { Button } from '@/components/ui/button'
 
 ## Where it's configured
 
-The alias must be declared in **two places** — one for Vite (runtime bundling), one for TypeScript (type checking).
+The alias is declared **once**, in `tsconfig.app.json`. Vite reads it from there at runtime; you don't need to repeat it in `vite.config.ts`.
 
-### 1. `vite.config.ts`
+### `tsconfig.app.json` — the single source of truth
+
+```jsonc
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+    },
+  },
+}
+```
+
+### `vite.config.ts` — opt into native tsconfig resolution
 
 ```ts
-import path from 'path'
+// vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -33,27 +45,12 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    tsconfigPaths: true, // Vite 8+ reads paths from tsconfig automatically
   },
 })
 ```
 
-### 2. `tsconfig.app.json`
-
-```json
-{
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
-}
-```
-
-Both must match. If you add the alias to one but not the other, either the build will fail or the editor will show false type errors.
+Vite 8 supports `resolve.tsconfigPaths` natively — no `vite-tsconfig-paths` plugin needed. The previous version of this project manually duplicated the alias as `resolve.alias`; that duplication is gone, and renaming or adding aliases now only requires editing `tsconfig.app.json`.
 
 ---
 
@@ -62,24 +59,44 @@ Both must match. If you add the alias to one but not the other, either the build
 Every internal import uses `@/`:
 
 ```tsx
-import { NotebookCell } from '@/components/common/NotebookCell'
-import { Button }        from '@/components/ui/button'
-import { cn }            from '@/lib/utils'
-import { executeJS }     from '@/lib/executeJS'
+import { NotebookView } from '@/features/notebook' // feature public API
+import { NotebookCell } from '@/features/notebook' // re-exported via index.ts
+import { Button } from '@/shared/ui/button' // shadcn primitive
+import { cn } from '@/shared/lib/cn' // class-merge helper
+import { rootRoute } from '@/app/model/routes' // app composition
 ```
+
+Note the layer boundaries:
+
+- Pages import from `@/features/*` and `@/shared/*`
+- Features import from `@/shared/*` only
+- `shared` imports from nothing internal
 
 ---
 
-## The shadcn alias conflict
+## The shadcn alias and the `@/` folder quirk
 
-shadcn/ui reads the `@/` alias from `components.json` to decide where to write generated files. Due to how it resolves paths with Vite (vs Next.js), it sometimes writes files to a literal `@/` folder in the project root instead of `src/`.
+`components.json` tells shadcn/ui where to write generated files:
 
-**Symptom:** after running `pnpm dlx shadcn@latest add <component>` you see a new `@/` folder at the root of the project.
+```json
+{
+  "aliases": {
+    "components": "@/shared",
+    "ui": "@/shared/ui",
+    "lib": "@/shared/lib",
+    "hooks": "@/shared/lib",
+    "utils": "@/shared/lib/cn"
+  }
+}
+```
+
+**Symptom:** after `pnpm dlx shadcn@latest add <c>`, a literal `@/` folder sometimes appears at the project root containing the generated files. This is a shadcn + Vite resolution quirk.
 
 **Fix:**
+
 ```bash
-cp @/components/ui/*.tsx src/components/ui/
+mv @/shared/ui/*.tsx src/shared/ui/
 rm -rf "@/"
 ```
 
-See [Folder Structure](./folder-structure.md#shadcnui-file-placement-issue) for the full explanation.
+See [Folder Structure — shadcn/ui placement](./folder-structure.md#shadcnui-placement) for the full explanation.

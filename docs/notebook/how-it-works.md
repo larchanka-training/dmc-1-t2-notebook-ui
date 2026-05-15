@@ -14,7 +14,7 @@ When you press **Run** (or `Cmd+Enter`), this sequence happens:
 user code (string)
     │
     ▼
-executeJS(code)                        ← src/lib/executeJS.ts
+executeJS(code)                        ← src/features/notebook/model/executeJS.ts
     │
     ├─ 1. Capture console output
     │       Override console.log / warn / error with collectors
@@ -40,7 +40,7 @@ Output string displayed below the editor
 ## executeJS — the core function
 
 ```ts
-// src/lib/executeJS.ts
+// src/features/notebook/model/executeJS.ts
 
 export async function executeJS(code: string): Promise<{ output: string; error: boolean }> {
   const lines: string[] = []
@@ -73,18 +73,21 @@ export async function executeJS(code: string): Promise<{ output: string; error: 
 ## What you can run
 
 ### Basic expressions
+
 ```js
 2 + 2
 // output: 4
 ```
 
 ### console.log
+
 ```js
 console.log('Hello', 'World')
 // output: Hello World
 ```
 
 ### Multiple outputs
+
 ```js
 console.log('first')
 console.log('second')
@@ -94,14 +97,16 @@ console.log('second')
 ```
 
 ### Variables and logic
+
 ```js
 const nums = [1, 2, 3, 4, 5]
-const evens = nums.filter(n => n % 2 === 0)
+const evens = nums.filter((n) => n % 2 === 0)
 console.log(evens)
 // output: 2,4
 ```
 
 ### Async / await
+
 ```js
 const res = await fetch('https://jsonplaceholder.typicode.com/todos/1')
 const data = await res.json()
@@ -109,6 +114,7 @@ console.log(data.title)
 ```
 
 ### Error handling
+
 ```js
 JSON.parse('not valid json')
 // output (in red): SyntaxError: Unexpected token 'o', "not valid" is not valid JSON
@@ -118,12 +124,12 @@ JSON.parse('not valid json')
 
 ## Limitations
 
-| Limitation | Reason |
-|---|---|
-| No `import` / `require` | Code runs inside `new Function`, not a module — no module system available |
-| No access to `src/` files | Browser sandbox — you can't read files from the project |
-| `console.warn` shown as `[warn] …` | Captured and prefixed to distinguish from `console.log` |
-| Objects logged as `[object Object]` | `String(obj)` is used — use `JSON.stringify(obj)` for full output |
+| Limitation                          | Reason                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| No `import` / `require`             | Code runs inside `new Function`, not a module — no module system available |
+| No access to `src/` files           | Browser sandbox — you can't read files from the project                    |
+| `console.warn` shown as `[warn] …`  | Captured and prefixed to distinguish from `console.log`                    |
+| Objects logged as `[object Object]` | `String(obj)` is used — use `JSON.stringify(obj)` for full output          |
 
 ### Workaround for objects
 
@@ -144,17 +150,20 @@ idle  ──(run)──▶  running  ──(success)──▶  done
                       └──(error)──▶  error
 ```
 
-| Status | Border | Run button | Output area |
-|---|---|---|---|
-| `idle` | default | green play icon | hidden |
-| `running` | default | spinning loader | hidden |
-| `done` | default | green play icon | visible, normal text |
-| `error` | red (`border-destructive`) | green play icon | visible, red text |
+| Status    | Border                     | Run button      | Output area          |
+| --------- | -------------------------- | --------------- | -------------------- |
+| `idle`    | default                    | green play icon | hidden               |
+| `running` | default                    | spinning loader | hidden               |
+| `done`    | default                    | green play icon | visible, normal text |
+| `error`   | red (`border-destructive`) | green play icon | visible, red text    |
 
 ---
 
 ## Related files
 
-- `src/lib/executeJS.ts` — execution logic
-- `src/components/common/NotebookCell.tsx` — cell UI component
-- `src/pages/NotebookPage.tsx` — page that manages the list of cells
+- `src/features/notebook/model/executeJS.ts` — execution logic
+- `src/features/notebook/model/notebook.ts` — `cellsAtom` + Reatom actions (`addCell`, `runCell`, `deleteCell`, `moveCell`, `updateCellCode`)
+- `src/features/notebook/domain/cell.ts` — `reatomCell()` factory; each cell's `code` / `output` / `status` are atoms
+- `src/features/notebook/ui/NotebookView.tsx` — list view that reads `cellsAtom` and dispatches actions (wrapped via `wrap`)
+- `src/features/notebook/ui/NotebookCell.tsx` — presentational cell UI
+- `src/pages/notebook/ui/NotebookPage.tsx` — the page that mounts `<NotebookView />`

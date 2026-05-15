@@ -107,11 +107,11 @@ entities/voucher/
 
 ## common/ vs model/
 
-| | `common/` | `model/` |
-|---|---|---|
-| **Who uses it** | `modules/`, `model/`, `ui/` | Only the parent slice itself |
-| **Direction** | Shared down to sub-features | Composes up from sub-features |
-| **Contains** | Types, stores, UI shared across sub-features | Slice-level facade, orchestration |
+|                 | `common/`                                    | `model/`                          |
+| --------------- | -------------------------------------------- | --------------------------------- |
+| **Who uses it** | `modules/`, `model/`, `ui/`                  | Only the parent slice itself      |
+| **Direction**   | Shared down to sub-features                  | Composes up from sub-features     |
+| **Contains**    | Types, stores, UI shared across sub-features | Slice-level facade, orchestration |
 
 `common/` is the shared infrastructure of the slice — a contract between
 sub-features. If something is needed by multiple `modules/*`, put it
@@ -128,14 +128,14 @@ into a unified facade:
 
 ```typescript
 // features/issue-tracker/model/issue-tracker.facade.ts
-import { issueListModel } from '../modules/issue-list';
-import { issueBoardModel } from '../modules/issue-board';
-import { issueFilter } from '../common/model/issue-filter';
+import { issueListModel } from '../modules/issue-list'
+import { issueBoardModel } from '../modules/issue-board'
+import { issueFilter } from '../common/model/issue-filter'
 
 export function applyFilterEverywhere(filter: IssueFilter) {
-  issueFilter.set(filter);
-  issueListModel.refresh();
-  issueBoardModel.refresh();
+  issueFilter.set(filter)
+  issueListModel.refresh()
+  issueBoardModel.refresh()
 }
 ```
 

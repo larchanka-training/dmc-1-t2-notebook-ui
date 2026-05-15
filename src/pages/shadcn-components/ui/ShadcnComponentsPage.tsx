@@ -5,7 +5,14 @@ import { Textarea } from '@/shared/ui/textarea'
 import { Separator } from '@/shared/ui/separator'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Badge } from '@/shared/ui/badge'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shared/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/shared/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
@@ -18,7 +25,9 @@ import { AlertCircle, Info, CheckCircle2, Terminal } from 'lucide-react'
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{title}</h2>
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+        {title}
+      </h2>
       <div className="flex flex-wrap gap-3 items-start">{children}</div>
       <Separator />
     </div>
@@ -49,7 +58,9 @@ export default function ShadcnComponentsPage() {
     <div className="p-8 max-w-4xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold">Shadcn UI Components</h1>
-        <p className="text-muted-foreground mt-1 text-sm">Installed shadcn/ui components — live examples.</p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Installed shadcn/ui components — live examples.
+        </p>
       </div>
 
       {/* Button */}
@@ -63,7 +74,9 @@ export default function ShadcnComponentsPage() {
         <Button disabled>Disabled</Button>
         <Button size="sm">Small</Button>
         <Button size="lg">Large</Button>
-        <Button size="icon" variant="outline">+</Button>
+        <Button size="icon" variant="outline">
+          +
+        </Button>
       </Section>
 
       {/* Badge */}
@@ -80,7 +93,7 @@ export default function ShadcnComponentsPage() {
           className="w-56"
           placeholder="Type something…"
           value={inputVal}
-          onChange={e => setInputVal(e.target.value)}
+          onChange={(e) => setInputVal(e.target.value)}
         />
         <Input className="w-56" placeholder="Disabled" disabled />
         <Input className="w-56" type="password" placeholder="Password" />
@@ -89,13 +102,13 @@ export default function ShadcnComponentsPage() {
           placeholder="Multiline input…"
           rows={3}
           value={textareaVal}
-          onChange={e => setTextareaVal(e.target.value)}
+          onChange={(e) => setTextareaVal(e.target.value)}
         />
       </Section>
 
       {/* Select */}
       <Section title="Select">
-        <Select value={selectVal} onValueChange={v => setSelectVal(v ?? '')}>
+        <Select value={selectVal} onValueChange={(v) => setSelectVal(v ?? '')}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Pick a language" />
           </SelectTrigger>
@@ -118,12 +131,10 @@ export default function ShadcnComponentsPage() {
           </label>
         </div>
         <div className="flex items-center gap-2">
-          <Checkbox
-            id="cb"
-            checked={checked}
-            onCheckedChange={v => setChecked(Boolean(v))}
-          />
-          <label htmlFor="cb" className="text-sm cursor-pointer">Accept terms</label>
+          <Checkbox id="cb" checked={checked} onCheckedChange={(v) => setChecked(Boolean(v))} />
+          <label htmlFor="cb" className="text-sm cursor-pointer">
+            Accept terms
+          </label>
         </div>
       </Section>
 
@@ -175,12 +186,15 @@ export default function ShadcnComponentsPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Write and run JavaScript directly in the browser. Output is captured inline below each cell.
+              Write and run JavaScript directly in the browser. Output is captured inline below each
+              cell.
             </p>
           </CardContent>
           <CardFooter className="gap-2">
             <Button size="sm">Open</Button>
-            <Button size="sm" variant="outline">Learn more</Button>
+            <Button size="sm" variant="outline">
+              Learn more
+            </Button>
           </CardFooter>
         </Card>
 
@@ -195,7 +209,9 @@ export default function ShadcnComponentsPage() {
             <Badge variant="outline">Vite</Badge>
           </CardContent>
           <CardFooter>
-            <Button size="sm" variant="ghost" className="w-full">View members</Button>
+            <Button size="sm" variant="ghost" className="w-full">
+              View members
+            </Button>
           </CardFooter>
         </Card>
       </Section>
@@ -208,13 +224,22 @@ export default function ShadcnComponentsPage() {
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="docs">Docs</TabsTrigger>
           </TabsList>
-          <TabsContent value="preview" className="rounded-md border p-4 mt-2 text-sm text-muted-foreground">
+          <TabsContent
+            value="preview"
+            className="rounded-md border p-4 mt-2 text-sm text-muted-foreground"
+          >
             This is the preview tab. Rendered output goes here.
           </TabsContent>
-          <TabsContent value="code" className="rounded-md border p-4 mt-2 font-mono text-sm bg-muted/30">
+          <TabsContent
+            value="code"
+            className="rounded-md border p-4 mt-2 font-mono text-sm bg-muted/30"
+          >
             {`<Button variant="outline">Click me</Button>`}
           </TabsContent>
-          <TabsContent value="docs" className="rounded-md border p-4 mt-2 text-sm text-muted-foreground">
+          <TabsContent
+            value="docs"
+            className="rounded-md border p-4 mt-2 text-sm text-muted-foreground"
+          >
             Full documentation and API reference goes here.
           </TabsContent>
         </Tabs>
@@ -233,7 +258,7 @@ export default function ShadcnComponentsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tableData.map(row => (
+              {tableData.map((row) => (
                 <TableRow key={row.name}>
                   <TableCell className="font-medium">{row.name}</TableCell>
                   <TableCell className="text-muted-foreground">{row.role}</TableCell>

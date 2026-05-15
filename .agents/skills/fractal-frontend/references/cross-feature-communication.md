@@ -14,7 +14,7 @@ violates the architecture:
 
 ```typescript
 // ❌ features/cart imports features/promo — forbidden
-import { applyPromoCode } from '@/features/promo';
+import { applyPromoCode } from '@/features/promo'
 ```
 
 ### Diagnostic (ED)
@@ -109,18 +109,18 @@ export function ProductCatalog() {
 ```typescript
 // features/notifications/model/notifications.ts
 interface NotificationDeps {
-  getUserName: (userId: string) => string;
+  getUserName: (userId: string) => string
 }
 
 export const createNotificationService = (deps: NotificationDeps) => ({
   format: (n) => `${deps.getUserName(n.userId)}: ${n.message}`,
-});
+})
 
 // pages/dashboard/model/setup.ts — wire dependencies
-import { createNotificationService } from '@/features/notifications';
-import { getUserName } from '@/entities/user';
+import { createNotificationService } from '@/features/notifications'
+import { getUserName } from '@/entities/user'
 
-export const notificationService = createNotificationService({ getUserName });
+export const notificationService = createNotificationService({ getUserName })
 ```
 
 **When to use:** Features are genuinely independent concepts and the
@@ -138,12 +138,14 @@ through a shared channel — an event bus or an action on an entity.
 ```typescript
 // entities/notifications/model/notifications.ts
 export const notificationsStore = {
-  push(message: string) { /* ... */ },
-};
+  push(message: string) {
+    /* ... */
+  },
+}
 
 // features/order-create/model/order.ts
-import { notificationsStore } from '@/entities/notifications';
-notificationsStore.push('Order created');
+import { notificationsStore } from '@/entities/notifications'
+notificationsStore.push('Order created')
 
 // features/notifications-panel reads from the same store
 ```
@@ -152,13 +154,13 @@ notificationsStore.push('Order created');
 
 ```typescript
 // shared/lib/event-bus.ts — pure infrastructure, no domain
-export const bus = createEventBus<AppEvents>();
+export const bus = createEventBus<AppEvents>()
 
 // features/order-create emits
-bus.emit('order:created', { id });
+bus.emit('order:created', { id })
 
 // features/analytics subscribes — no dependency between features
-bus.on('order:created', track);
+bus.on('order:created', track)
 ```
 
 **When to use:** The interaction is a contract that naturally belongs
@@ -262,13 +264,14 @@ Comment references an Issue).
 **Rules:**
 
 1. **Prefer `import type`** to minimize runtime coupling:
+
    ```typescript
    // entities/order/domain/order.types.ts
-   import type { User } from '@/entities/user';
+   import type { User } from '@/entities/user'
 
    export interface Order {
-     id: string;
-     customer: User;
+     id: string
+     customer: User
    }
    ```
 

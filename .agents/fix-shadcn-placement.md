@@ -9,6 +9,7 @@ instead of `src/` — this skill moves them to the correct location.
 Run immediately after any `pnpm dlx shadcn@latest add ...` command.
 
 Symptom — you see a new `@/` folder at the project root:
+
 ```
 ui/
 ├── @/                ← wrong, should not exist

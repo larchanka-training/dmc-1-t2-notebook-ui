@@ -2,7 +2,15 @@ import { useState } from 'react'
 import { Separator } from '@/shared/ui/separator'
 import { NotebookCell, executeJS } from '@/features/notebook'
 
-function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: React.ReactNode
+}) {
   return (
     <div className="space-y-2">
       <div>
@@ -19,7 +27,9 @@ function PropTable({ rows }: { rows: [string, string, string][] }) {
   return (
     <div className="rounded-lg border overflow-hidden text-xs">
       <div className="grid grid-cols-3 bg-muted/50 px-3 py-1.5 font-medium text-muted-foreground uppercase tracking-wider">
-        <span>Prop</span><span>Type</span><span>Description</span>
+        <span>Prop</span>
+        <span>Type</span>
+        <span>Description</span>
       </div>
       {rows.map(([prop, type, desc]) => (
         <div key={prop} className="grid grid-cols-3 px-3 py-2 border-t even:bg-muted/10">
@@ -34,7 +44,13 @@ function PropTable({ rows }: { rows: [string, string, string][] }) {
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
 
-function Badge({ label, color = 'default' }: { label: string; color?: 'default' | 'success' | 'warning' | 'error' }) {
+function Badge({
+  label,
+  color = 'default',
+}: {
+  label: string
+  color?: 'default' | 'success' | 'warning' | 'error'
+}) {
   const colors = {
     default: 'bg-muted text-muted-foreground',
     success: 'bg-green-500/15 text-green-600 dark:text-green-400',
@@ -42,7 +58,9 @@ function Badge({ label, color = 'default' }: { label: string; color?: 'default' 
     error: 'bg-red-500/15 text-red-600 dark:text-red-400',
   }
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${colors[color]}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${colors[color]}`}
+    >
       {label}
     </span>
   )
@@ -64,14 +82,18 @@ function StatCard({ label, value, delta }: { label: string; value: string; delta
 
 function CodeTag({ children }: { children: string }) {
   return (
-    <code className="rounded-md bg-muted px-2 py-1 text-xs font-mono text-foreground">{children}</code>
+    <code className="rounded-md bg-muted px-2 py-1 text-xs font-mono text-foreground">
+      {children}
+    </code>
   )
 }
 
 // ─── Live NotebookCell demo ───────────────────────────────────────────────────
 
 function LiveCellDemo() {
-  const [code, setCode] = useState('const nums = [1, 2, 3, 4, 5]\nconsole.log(nums.map(n => n * 2))')
+  const [code, setCode] = useState(
+    'const nums = [1, 2, 3, 4, 5]\nconsole.log(nums.map(n => n * 2))',
+  )
   const [output, setOutput] = useState('')
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
 
@@ -144,18 +166,24 @@ export default function CustomComponentsPage() {
         <p className="text-xs text-muted-foreground pt-2">Live — try editing and running:</p>
         <LiveCellDemo />
 
-        <PropTable rows={[
-          ['index', 'number', 'Cell number shown in the header badge'],
-          ['code', 'string', 'The source code displayed in the editor'],
-          ['output', 'string?', 'Text output shown below the editor'],
-          ['status', "'idle'|'running'|'done'|'error'", 'Controls border color and run button state'],
-          ['isFirst / isLast', 'boolean?', 'Disables the move up / move down buttons'],
-          ['readOnly', 'boolean?', 'Prevents editing the code textarea'],
-          ['onCodeChange', '(code: string) => void', 'Called on every keystroke in the editor'],
-          ['onRun', '() => void', 'Called when play button or Cmd+Enter is pressed'],
-          ['onDelete', '() => void', 'Called when the trash icon is clicked'],
-          ['onMoveUp / onMoveDown', '() => void', 'Called when the arrow buttons are clicked'],
-        ]} />
+        <PropTable
+          rows={[
+            ['index', 'number', 'Cell number shown in the header badge'],
+            ['code', 'string', 'The source code displayed in the editor'],
+            ['output', 'string?', 'Text output shown below the editor'],
+            [
+              'status',
+              "'idle'|'running'|'done'|'error'",
+              'Controls border color and run button state',
+            ],
+            ['isFirst / isLast', 'boolean?', 'Disables the move up / move down buttons'],
+            ['readOnly', 'boolean?', 'Prevents editing the code textarea'],
+            ['onCodeChange', '(code: string) => void', 'Called on every keystroke in the editor'],
+            ['onRun', '() => void', 'Called when play button or Cmd+Enter is pressed'],
+            ['onDelete', '() => void', 'Called when the trash icon is clicked'],
+            ['onMoveUp / onMoveDown', '() => void', 'Called when the arrow buttons are clicked'],
+          ]}
+        />
       </Section>
 
       {/* Badge */}
@@ -169,10 +197,16 @@ export default function CustomComponentsPage() {
           <Badge label="Warning" color="warning" />
           <Badge label="Error" color="error" />
         </div>
-        <PropTable rows={[
-          ['label', 'string', 'Text content of the badge'],
-          ['color', "'default'|'success'|'warning'|'error'", 'Controls background and text color'],
-        ]} />
+        <PropTable
+          rows={[
+            ['label', 'string', 'Text content of the badge'],
+            [
+              'color',
+              "'default'|'success'|'warning'|'error'",
+              'Controls background and text color',
+            ],
+          ]}
+        />
       </Section>
 
       {/* StatCard */}
@@ -185,11 +219,13 @@ export default function CustomComponentsPage() {
           <StatCard label="Courses" value="48" />
           <StatCard label="Completion Rate" value="73%" delta="+5% vs last month" />
         </div>
-        <PropTable rows={[
-          ['label', 'string', 'Small label shown above the value'],
-          ['value', 'string', 'Primary metric — large bold number'],
-          ['delta', 'string?', 'Optional trend line shown in green below the value'],
-        ]} />
+        <PropTable
+          rows={[
+            ['label', 'string', 'Small label shown above the value'],
+            ['value', 'string', 'Primary metric — large bold number'],
+            ['delta', 'string?', 'Optional trend line shown in green below the value'],
+          ]}
+        />
       </Section>
 
       {/* CodeTag */}
@@ -202,9 +238,7 @@ export default function CustomComponentsPage() {
           <CodeTag>pnpm dev</CodeTag>
           <CodeTag>git commit -m "feat"</CodeTag>
         </div>
-        <PropTable rows={[
-          ['children', 'string', 'The code text to display'],
-        ]} />
+        <PropTable rows={[['children', 'string', 'The code text to display']]} />
       </Section>
     </div>
   )

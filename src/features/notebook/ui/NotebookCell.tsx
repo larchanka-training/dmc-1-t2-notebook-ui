@@ -46,10 +46,12 @@ export function NotebookCell({
   }
 
   return (
-    <div className={cn(
-      'group border rounded-lg overflow-hidden bg-card',
-      status === 'error' && 'border-destructive',
-    )}>
+    <div
+      className={cn(
+        'group border rounded-lg overflow-hidden bg-card',
+        status === 'error' && 'border-destructive',
+      )}
+    >
       {/* header */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 border-b">
         {/* run button — left, prominent */}
@@ -61,9 +63,11 @@ export function NotebookCell({
             disabled={status === 'running'}
             onClick={onRun}
           >
-            {status === 'running'
-              ? <Loader2 className="size-4 animate-spin" />
-              : <Play className="size-4" />}
+            {status === 'running' ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Play className="size-4" />
+            )}
           </Button>
         )}
 
@@ -72,17 +76,34 @@ export function NotebookCell({
         {/* secondary actions — always visible, right side */}
         <div className="flex items-center gap-1 ml-auto">
           {onMoveUp && (
-            <Button size="icon" variant="ghost" className="size-8" onClick={onMoveUp} disabled={isFirst}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8"
+              onClick={onMoveUp}
+              disabled={isFirst}
+            >
               <ChevronUp className="size-4" />
             </Button>
           )}
           {onMoveDown && (
-            <Button size="icon" variant="ghost" className="size-8" onClick={onMoveDown} disabled={isLast}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8"
+              onClick={onMoveDown}
+              disabled={isLast}
+            >
               <ChevronDown className="size-4" />
             </Button>
           )}
           {onDelete && (
-            <Button size="icon" variant="ghost" className="size-8 text-destructive hover:bg-destructive/10" onClick={onDelete}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 text-destructive hover:bg-destructive/10"
+              onClick={onDelete}
+            >
               <Trash2 className="size-4" />
             </Button>
           )}
@@ -96,28 +117,30 @@ export function NotebookCell({
         readOnly={readOnly}
         spellCheck={false}
         rows={1}
-        onChange={e => {
+        onChange={(e) => {
           onCodeChange?.(e.target.value)
           autoResize(e.target)
         }}
-        onKeyDown={e => {
+        onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault()
             onRun?.()
           }
         }}
-        onInput={e => autoResize(e.currentTarget)}
+        onInput={(e) => autoResize(e.currentTarget)}
         className="w-full resize-none bg-[#1e1e2e] text-[#cdd6f4] font-mono text-sm p-4 outline-none min-h-[60px] leading-relaxed"
       />
 
       {/* output */}
       {output && (
-        <div className={cn(
-          'border-t px-4 py-3 font-mono text-sm whitespace-pre-wrap',
-          status === 'error'
-            ? 'text-destructive bg-destructive/5'
-            : 'text-foreground bg-background',
-        )}>
+        <div
+          className={cn(
+            'border-t px-4 py-3 font-mono text-sm whitespace-pre-wrap',
+            status === 'error'
+              ? 'text-destructive bg-destructive/5'
+              : 'text-foreground bg-background',
+          )}
+        >
           {output}
         </div>
       )}

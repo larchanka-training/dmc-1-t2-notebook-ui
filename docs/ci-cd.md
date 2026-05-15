@@ -6,35 +6,35 @@
 
 ### Основной стек
 
-- React
+- React 19
 - TypeScript
 - Vite 8+
-- Node.js 22 LTS
+- Node.js 20 LTS (Dockerfile использует `node:20-alpine`, CI — `node-version: "20"`)
+- pnpm 9.15.9 (pinned через `packageManager` в `package.json`)
 
-### Работа с API
+### Состояние и роутинг
 
-- @hey-api/openapi-ts — генерация API-клиента и TypeScript-типов из OpenAPI/Swagger схем
+- Reatom (`@reatom/core` + `@reatom/react`) — атомы, экшены, реактивные роуты, формы
 
 ### UI и стили
 
-- Tailwind CSS
-- shadcn/ui — готовые UI-компоненты для ускорения разработки
+- Tailwind CSS v4
+- shadcn/ui (base-ui renderer) — копируемые UI-примитивы в `src/shared/ui/`
 
-### Качество кода и форматирование
+### Тесты
 
-- ESLint
-- prettier
-- @stylistic/eslint-plugin — единый стиль оформления кода
-- eslint-plugin-perfectionist — сортировка imports/types/interfaces
+- Vitest + jsdom
+- @testing-library/react + @testing-library/jest-dom + @testing-library/user-event
+- Скрипты: `pnpm test`, `pnpm test:watch`
 
-### Git hooks и автоматизация
+### Качество кода
 
-- simple-git-hooks
-- lint-staged
-- pre-commit hooks:
-  - lint
-  - typecheck
-  - format/check
+- ESLint (flat config, `eslint.config.js`)
+- typescript-eslint
+- eslint-plugin-react-hooks
+- eslint-plugin-react-refresh
+
+Отдельные prettier / simple-git-hooks / lint-staged в проекте пока не настроены.
 
 ## Переменные окружения
 
@@ -47,11 +47,11 @@ cp .env.example .env
 
 Основные переменные:
 
-| Переменная | Назначение | Пример |
-| --- | --- | --- |
-| `VITE_API_BASE_URL` | Base URL backend API для browser-кода | `/api/v1` |
-| `VITE_APP_ENV` | Окружение сборки UI | `dev`, `stage`, `prod` |
-| `VITE_APP_NAME` | Публичное имя приложения | `JS Notebook` |
+| Переменная          | Назначение                            | Пример                 |
+| ------------------- | ------------------------------------- | ---------------------- |
+| `VITE_API_BASE_URL` | Base URL backend API для browser-кода | `/api/v1`              |
+| `VITE_APP_ENV`      | Окружение сборки UI                   | `dev`, `stage`, `prod` |
+| `VITE_APP_NAME`     | Публичное имя приложения              | `JS Notebook`          |
 
 Важно: Vite передает в browser только переменные с префиксом `VITE_`. Не храните secrets в `ui/.env`, потому что frontend-переменные попадают в итоговый JavaScript bundle.
 
@@ -61,10 +61,10 @@ Frontend собирается из `ui/Dockerfile`.
 
 Dockerfile содержит два основных target:
 
-| Target | Назначение |
-| --- | --- |
-| `development` | Запуск Vite dev server на порту `5173` |
-| `production` | Сборка статических файлов и запуск через Nginx на порту `80` |
+| Target        | Назначение                                                   |
+| ------------- | ------------------------------------------------------------ |
+| `development` | Запуск Vite dev server на порту `5173`                       |
+| `production`  | Сборка статических файлов и запуск через Nginx на порту `80` |
 
 Сборка development-образа:
 
@@ -111,13 +111,13 @@ docker compose up --build
 
 Сервисы:
 
-| Сервис | URL | Назначение |
-| --- | --- | --- |
-| `frontend` | `http://127.0.0.1:3000` | React/Vite UI |
-| `api` | `http://127.0.0.1:8000` | FastAPI backend |
-| `postgres` | `127.0.0.1:5432` | PostgreSQL |
-| `pgadmin` | `http://127.0.0.1:5050` | Админка БД |
-| `proxy` | `http://127.0.0.1` | Nginx reverse proxy |
+| Сервис     | URL                     | Назначение          |
+| ---------- | ----------------------- | ------------------- |
+| `frontend` | `http://127.0.0.1:3000` | React/Vite UI       |
+| `api`      | `http://127.0.0.1:8000` | FastAPI backend     |
+| `postgres` | `127.0.0.1:5432`        | PostgreSQL          |
+| `pgadmin`  | `http://127.0.0.1:5050` | Админка БД          |
+| `proxy`    | `http://127.0.0.1`      | Nginx reverse proxy |
 
 Полезные команды:
 
@@ -132,26 +132,20 @@ docker compose down -v
 
 ```bash
 cd ui
-npm ci
+pnpm install --frozen-lockfile
 cp .env.example .env
-npm run dev
+pnpm dev
 ```
 
-Lint:
+Lint, тесты и сборка:
 
 ```bash
-cd ui
-npm run lint
+pnpm lint
+pnpm test
+pnpm build
 ```
 
-Build:
-
-```bash
-cd ui
-npm run build
-```
-
-В текущем шаблоне отдельный test script еще не добавлен. Для полноценного test pipeline можно подключить Vitest и React Testing Library, затем добавить `npm test` в `package.json` и отдельный job в GitHub Actions.
+`pnpm-lock.yaml` — единственный lockfile в проекте. Использование `npm install` сгенерирует конфликтующий `package-lock.json` — не используйте `npm` здесь.
 
 ## GitHub Actions CI
 
@@ -165,23 +159,25 @@ Pipeline запускается при:
 
 Этапы CI:
 
-1. `lint`: установка зависимостей через `npm ci` и запуск `npm run lint`.
-2. `build`: TypeScript/Vite production build через `npm run build`.
-3. `docker-build`: сборка production Docker image из `ui/Dockerfile`.
+1. `lint`: `pnpm install --frozen-lockfile`, далее `pnpm run lint` и `pnpm run --if-present test`.
+2. `build`: `pnpm install --frozen-lockfile`, далее `pnpm run build` (`tsc -b && vite build`).
+3. `docker-build`: сборка production Docker image из `ui/Dockerfile` с тегом `js-notebook-ui:${{ github.sha }}` (зависит от `lint` и `build`).
+
+Все job-ы используют `pnpm@9.15.9` (`pnpm/action-setup@v4`) и `node-version: "20"` с pnpm-кэшем (`cache-dependency-path: ui/pnpm-lock.yaml`). Чекаут — с `submodules: recursive`.
 
 Production-секреты frontend обычно не нужны, потому что все `VITE_` переменные публичные. Для environment-specific API URL используйте GitHub Actions Variables или build args:
 
-| Variable | Назначение |
-| --- | --- |
+| Variable            | Назначение                                |
+| ------------------- | ----------------------------------------- |
 | `VITE_API_BASE_URL` | URL backend API для конкретного окружения |
-| `VITE_APP_ENV` | Имя окружения |
+| `VITE_APP_ENV`      | Имя окружения                             |
 
 Если будет добавлена публикация Docker-образа в registry, понадобятся secrets:
 
-| Secret | Назначение |
-| --- | --- |
-| `REGISTRY_USERNAME` | Логин Docker registry |
-| `REGISTRY_TOKEN` | Token/password Docker registry |
+| Secret              | Назначение                     |
+| ------------------- | ------------------------------ |
+| `REGISTRY_USERNAME` | Логин Docker registry          |
+| `REGISTRY_TOKEN`    | Token/password Docker registry |
 
 ## Deployment
 

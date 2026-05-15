@@ -6,6 +6,7 @@ Create a new custom component in `src/components/common/`, showcase it in
 ## Usage
 
 Invoke this skill with:
+
 - component name (PascalCase, e.g. `ProgressBar`)
 - brief description of what it does
 - list of props it accepts
@@ -34,6 +35,7 @@ export function {ComponentName}({ ...props }: {ComponentName}Props) {
 ```
 
 Rules:
+
 - Use a **named export**, not default export
 - Export the props interface too so consumers can type-check
 - Use `cn()` from `@/lib/utils` for conditional Tailwind classes
@@ -44,11 +46,13 @@ Rules:
 Open `src/pages/CustomComponentsPage.tsx`:
 
 **Add the import:**
+
 ```tsx
 import { {ComponentName} } from '@/components/common/{ComponentName}'
 ```
 
 **Add a Section with examples and PropTable:**
+
 ```tsx
 <Section
   title="{ComponentName}"
@@ -64,6 +68,7 @@ import { {ComponentName} } from '@/components/common/{ComponentName}'
 ```
 
 Show at least:
+
 - The default state
 - One variant or edge case
 - The prop table with all props documented
@@ -72,7 +77,7 @@ Show at least:
 
 Add a section following the existing format:
 
-```markdown
+````markdown
 ## {ComponentName}
 
 **File:** `src/components/common/{ComponentName}.tsx`
@@ -82,9 +87,9 @@ Description of the component.
 
 ### Props
 
-| Prop | Type | Required | Description |
-|---|---|---|---|
-| propName | type | yes/no | what it does |
+| Prop     | Type | Required | Description  |
+| -------- | ---- | -------- | ------------ |
+| propName | type | yes/no   | what it does |
 
 ### Usage
 
@@ -95,8 +100,9 @@ import { {ComponentName} } from '@/components/common/{ComponentName}'
 \```
 
 ### Design notes
+
 - Why certain choices were made
-```
+````
 
 ## Checklist
 
