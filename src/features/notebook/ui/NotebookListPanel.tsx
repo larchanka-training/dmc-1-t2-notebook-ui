@@ -4,7 +4,7 @@ import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { createNotebookAction, notebookListAtom } from '../model/notebookList'
+import { createNotebookAction, notebookListResource } from '../model/notebookList'
 
 interface NotebookListPanelProps {
   isLoading?: boolean
@@ -13,7 +13,7 @@ interface NotebookListPanelProps {
 
 export const NotebookListPanel = reatomComponent<NotebookListPanelProps>(
   ({ isLoading = false, loadError }) => {
-    const items = notebookListAtom()
+    const items = notebookListResource.data()
     const error = loadError ?? createNotebookAction.error()?.message
 
     const [title, setTitle] = useState('')

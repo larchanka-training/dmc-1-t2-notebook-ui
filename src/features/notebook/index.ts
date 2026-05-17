@@ -11,6 +11,6 @@ export {
   updateCellCode,
   SEED_CODE,
 } from './model/notebook'
-export { notebookListAtom, createNotebookAction } from './model/notebookList'
+export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { reatomCell } from './domain/cell'
 export type { Cell, CellStatus } from './domain/cell'

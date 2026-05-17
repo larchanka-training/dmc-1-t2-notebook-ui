@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import type { components as AuthC } from '@/shared/api/generated/openapi-ts/auth'
 import type { components as NotebookC } from '@/shared/api/generated/openapi-ts/notebook'
 
@@ -6,6 +6,11 @@ type User = AuthC['schemas']['User']
 type LoginRequest = AuthC['schemas']['LoginRequest']
 type Notebook = NotebookC['schemas']['Notebook']
 type CreateNotebookRequest = NotebookC['schemas']['CreateNotebookRequest']
+
+// Match the prefix that `shared/api/client.ts` builds from VITE_API_BASE_URL.
+// Without this, MSW would miss requests like `/api/v1/notebooks`, the SPA
+// fallback would return index.html, and the client would fail to parse it as JSON.
+const API = import.meta.env['VITE_API_BASE_URL'] ?? '/api'
 
 const state = {
   user: null as User | null,
@@ -34,7 +39,7 @@ const unauthorized = () =>
   HttpResponse.json({ code: 'unauthenticated', message: 'missing bearer token' }, { status: 401 })
 
 export const handlersArray = [
-  http.post('/api/auth/login', async ({ request }) => {
+  http.post(`${API}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as LoginRequest
     if (!body.email || !body.password) {
       return HttpResponse.json(
@@ -57,14 +62,14 @@ export const handlersArray = [
     return HttpResponse.json({ token: state.token, user: state.user })
   }),
 
-  http.post('/api/auth/logout', ({ request }) => {
+  http.post(`${API}/auth/logout`, ({ request }) => {
     if (!hasBearer(request)) return unauthorized()
     state.user = null
     state.token = null
     return new HttpResponse(null, { status: 204 })
   }),
 
-  http.get('/api/auth/me', ({ request }) => {
+  http.get(`${API}/auth/me`, ({ request }) => {
     if (!hasBearer(request)) return unauthorized()
     // MSW state is in-memory and resets on full page reload. The token, however,
     // persists in localStorage via `withLocalStorage`. To keep the mocked
@@ -75,18 +80,27 @@ export const handlersArray = [
     return HttpResponse.json(state.user)
   }),
 
-  http.get('/api/notebooks', ({ request }) => {
+  http.get(`${API}/notebooks`, async ({ request }) => {
     if (!hasBearer(request)) return unauthorized()
+    await delay(600)
     return HttpResponse.json(state.notebooks)
   }),
 
-  http.post('/api/notebooks', async ({ request }) => {
+  http.post(`${API}/notebooks`, async ({ request }) => {
     if (!hasBearer(request)) return unauthorized()
     const body = (await request.json()) as CreateNotebookRequest
     if (!body.title) {
       return HttpResponse.json(
         { code: 'invalid_request', message: 'title is required' },
         { status: 400 },
+      )
+    }
+    await delay(800)
+    // Title-triggered failures so the optimistic rollback flow is testable in the browser.
+    if (/\bfail\b/i.test(body.title)) {
+      return HttpResponse.json(
+        { code: 'mock_failure', message: 'mock: title contains "fail"' },
+        { status: 500 },
       )
     }
     const nb: Notebook = {
@@ -99,7 +113,7 @@ export const handlersArray = [
     return HttpResponse.json(nb, { status: 201 })
   }),
 
-  http.post('/api/notebooks/:notebookId/cells/:cellId/run', ({ request, params }) => {
+  http.post(`${API}/notebooks/:notebookId/cells/:cellId/run`, ({ request, params }) => {
     if (!hasBearer(request)) return unauthorized()
     const nb = state.notebooks.find((n) => n.id === params.notebookId)
     if (!nb) {

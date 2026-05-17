@@ -1,10 +1,9 @@
 import { reatomComponent } from '@reatom/react'
-import { NotebookListPanel, NotebookView } from '@/features/notebook'
-import { notebookRoute } from '../model/route'
+import { NotebookListPanel, NotebookView, notebookListResource } from '@/features/notebook'
 
 const NotebookPage = reatomComponent(() => {
-  const isListLoading = !notebookRoute.loader.ready()
-  const loadError = notebookRoute.loader.error()?.message
+  const isListLoading = !notebookListResource.ready()
+  const loadError = notebookListResource.error()?.message
   return (
     <div className="flex flex-col h-full">
       <NotebookListPanel isLoading={isListLoading} loadError={loadError} />
