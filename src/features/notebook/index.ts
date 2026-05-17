@@ -1,6 +1,5 @@
 export { NotebookView } from './ui/NotebookView'
 export { NotebookCell } from './ui/NotebookCell'
-export { NotebookListPanel } from './ui/NotebookListPanel'
 export { executeJS } from './model/executeJS'
 export {
   cellsAtom,
@@ -13,4 +12,4 @@ export {
 } from './model/notebook'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { reatomCell } from './domain/cell'
-export type { Cell, CellStatus } from './domain/cell'
+export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'

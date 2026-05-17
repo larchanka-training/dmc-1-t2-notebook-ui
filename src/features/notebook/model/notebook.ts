@@ -1,13 +1,13 @@
 import { action, atom, wrap } from '@reatom/core'
-import { reatomCell, type Cell } from '../domain/cell'
+import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { executeJS } from './executeJS'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
 export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
 
-export const addCell = action((afterId?: string) => {
-  const cell = reatomCell()
+export const addCell = action((afterId?: string, kind: CellKind = 'code') => {
+  const cell = reatomCell('', kind)
   cellsAtom.set((cells) => {
     if (!afterId) return [...cells, cell]
     const idx = cells.findIndex((c) => c.id === afterId)
