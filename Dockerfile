@@ -4,13 +4,15 @@ WORKDIR /home/app
 
 COPY package.json pnpm-lock.yaml ./
 
+RUN apk add --no-cache git
+
 RUN npm install -g pnpm@9.15.9
 
 FROM base AS development
 
 ENV NODE_ENV=development
 
-RUN pnpm install --frozen-lockfile
+RUN git init -q && pnpm install --frozen-lockfile && rm -rf .git lefthook.yml
 
 COPY . .
 
@@ -20,7 +22,7 @@ CMD ["pnpm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 FROM base AS build
 
-RUN pnpm install --frozen-lockfile
+RUN git init -q && pnpm install --frozen-lockfile && rm -rf .git lefthook.yml
 
 COPY . .
 
