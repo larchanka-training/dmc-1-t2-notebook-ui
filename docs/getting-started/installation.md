@@ -46,6 +46,18 @@ Work happens on feature branches off `main` — see [contributing.md](../contrib
 pnpm install
 ```
 
+## Install Git hooks
+
+Git hooks are optional local checks for developers. They are not installed automatically during `pnpm install`, so Docker builds and CI dependency installation do not depend on local Git metadata.
+
+To enable local hooks:
+
+```bash
+pnpm run hooks:install
+```
+
+The hooks run formatting/linting before commit and heavier checks before push. GitHub Actions remain the required quality gate for pull requests.
+
 ---
 
 ## Verify the install

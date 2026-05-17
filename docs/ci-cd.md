@@ -133,9 +133,12 @@ docker compose down -v
 ```bash
 cd ui
 pnpm install --frozen-lockfile
+pnpm run hooks:install # optional local Git hooks
 cp .env.example .env
 pnpm dev
 ```
+
+`pnpm install` does not install Git hooks automatically. Use `pnpm run hooks:install` only in a local Git checkout when you want Lefthook pre-commit/pre-push checks. Docker builds and CI should not depend on Git hooks.
 
 Lint, тесты и сборка:
 
