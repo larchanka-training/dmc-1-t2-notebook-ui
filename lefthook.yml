@@ -1,5 +1,5 @@
 # https://lefthook.dev/configuration/
-# Run: `pnpm lefthook install` to (re)install hooks.
+# Run: `pnpm run hooks:install` to (re)install hooks.
 # Bypass for emergencies: `LEFTHOOK=0 git commit ...` (preferred over --no-verify).
 
 pre-commit:
