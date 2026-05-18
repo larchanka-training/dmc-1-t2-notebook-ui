@@ -1,9 +1,16 @@
-import { Plus } from 'lucide-react'
+import { Code2, Plus, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/shared/ui/dropdown-menu'
 import { NotebookCell } from './NotebookCell'
-import type { Cell } from '../domain/cell'
+import { NotebookOutline } from './NotebookOutline'
+import type { Cell, CellViewMode } from '../domain/cell'
 import {
   addCell,
   cellsAtom,
@@ -22,53 +29,123 @@ interface NotebookRowProps {
 
 const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, index, isFirst, isLast }) => {
   return (
-    <NotebookCell
-      index={index}
-      code={cell.code()}
-      output={cell.output()}
-      status={cell.status()}
-      isFirst={isFirst}
-      isLast={isLast}
-      onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
-      onRun={wrap(() => runCell(cell.id))}
-      onDelete={wrap(() => deleteCell(cell.id))}
-      onMoveUp={wrap(() => moveCell(cell.id, -1))}
-      onMoveDown={wrap(() => moveCell(cell.id, 1))}
-    />
+    <div data-cell-id={cell.id}>
+      <NotebookCell
+        index={index}
+        kind={cell.kind}
+        code={cell.code()}
+        output={cell.output()}
+        status={cell.status()}
+        viewMode={cell.viewMode()}
+        isFirst={isFirst}
+        isLast={isLast}
+        onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
+        onViewModeChange={wrap((mode: CellViewMode) => cell.viewMode.set(mode))}
+        onRun={wrap(() => runCell(cell.id))}
+        onDelete={wrap(() => deleteCell(cell.id))}
+        onMoveUp={wrap(() => moveCell(cell.id, -1))}
+        onMoveDown={wrap(() => moveCell(cell.id, 1))}
+      />
+    </div>
   )
 }, 'NotebookRow')
+
+interface CellInserterProps {
+  afterId?: string
+  variant?: 'between' | 'end'
+}
+
+const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'between' }) => {
+  const onAddCode = wrap(() => {
+    addCell(afterId, 'code')
+  })
+  const onAddText = wrap(() => {
+    addCell(afterId, 'markdown')
+  })
+
+  if (variant === 'end') {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="outline" size="sm" className="self-center text-muted-foreground">
+              <Plus className="size-3.5" /> Add cell
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="center">
+          <DropdownMenuItem onClick={onAddCode}>
+            <Code2 className="size-4" /> Code
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onAddText}>
+            <Type className="size-4" /> Text
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+  return (
+    <div className="group/inserter relative h-2 -my-3 flex items-center justify-center">
+      <div className="absolute inset-x-0 h-px bg-transparent group-hover/inserter:bg-border transition-colors" />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="relative z-10 h-6 px-2 text-xs opacity-0 group-hover/inserter:opacity-100 transition-opacity"
+            >
+              <Plus className="size-3" /> Add cell
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="center">
+          <DropdownMenuItem onClick={onAddCode}>
+            <Code2 className="size-4" /> Code
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onAddText}>
+            <Type className="size-4" /> Text
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}, 'CellInserter')
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-sidebar">
-        <span className="text-sm font-medium text-muted-foreground mr-2">JS Notebook</span>
-        <Button size="sm" variant="outline" onClick={wrap(() => addCell())}>
-          <Plus className="size-3.5" /> Add Cell
-        </Button>
-      </div>
+    <div className="flex flex-1 min-h-0">
+      <main className="flex-1 overflow-auto">
+        <div className="mx-auto w-full max-w-3xl px-6 py-8">
+          <header className="mb-8">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Local scratchpad · autosaved</p>
+          </header>
 
-      <div className="flex flex-col gap-4 p-4 overflow-auto flex-1">
-        {cells.map((cell, idx) => (
-          <NotebookRow
-            key={cell.id}
-            cell={cell}
-            index={idx + 1}
-            isFirst={idx === 0}
-            isLast={idx === cells.length - 1}
-          />
-        ))}
+          <div className="flex flex-col gap-6">
+            {cells.map((cell, idx) => (
+              <div key={cell.id} className="flex flex-col gap-6">
+                <NotebookRow
+                  cell={cell}
+                  index={idx + 1}
+                  isFirst={idx === 0}
+                  isLast={idx === cells.length - 1}
+                />
+                {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+              </div>
+            ))}
 
-        <Button
-          variant="ghost"
-          className="self-start text-muted-foreground"
-          onClick={wrap(() => addCell())}
-        >
-          <Plus className="size-3.5" /> Add cell
-        </Button>
-      </div>
+            <CellInserter
+              afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
+              variant="end"
+            />
+          </div>
+        </div>
+      </main>
+
+      <NotebookOutline />
     </div>
   )
 }, 'NotebookView')

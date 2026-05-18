@@ -2,6 +2,7 @@ import { connectLogger, log } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter } from '@/shared/api'
 import { tokenAtom } from '@/entities/session'
+import { themeAtom } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 
 if (import.meta.env.MODE === 'development') {
@@ -22,3 +23,9 @@ setAuthTokenGetter(() => tokenAtom())
 // `clearStack()` requires every action to run inside an active Reatom stack,
 // so dispatch through rootFrame at module init.
 rootFrame.run(() => loadCurrentUserAction())
+
+// Apply persisted theme to <html> on first paint — withChangeHook only fires on changes,
+// so the initial value coming from localStorage must be applied imperatively here.
+rootFrame.run(() => {
+  document.documentElement.classList.toggle('dark', themeAtom() === 'dark')
+})

@@ -1,50 +1,55 @@
+import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { createNotebookAction, notebookListAtom } from './notebookList'
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
-let fetchMock: ReturnType<typeof vi.fn>
+import { notebook as notebookApi } from '@/shared/api'
+import { ApiError } from '@/shared/api/errors'
+import { createNotebookAction, notebookListResource } from './notebookList'
 
 beforeEach(() => {
-  fetchMock = vi.fn()
-  vi.stubGlobal('fetch', fetchMock)
-  notebookListAtom.set([])
+  vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+  notebookListResource.reset()
   createNotebookAction.error.set(undefined)
 })
 
 afterEach(() => {
-  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('createNotebookAction', () => {
-  test('appends to the list and returns the new notebook', async () => {
+  test('creates the notebook and invalidates the resource', async () => {
     const existing = { id: 'nb1', title: 'old', createdAt: '2026-05-01T00:00:00Z', cells: [] }
-    notebookListAtom.set([existing])
+    notebookListResource.data.set([existing])
 
     const created = { id: 'nb2', title: 'new', createdAt: '2026-05-15T00:00:00Z', cells: [] }
-    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+    const createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([existing, created])
 
     const result = await createNotebookAction('new')
 
     expect(result).toEqual(created)
-    expect(notebookListAtom()).toEqual([existing, created])
+    expect(createSpy).toHaveBeenCalledWith({ title: 'new' })
+    expect(peek(notebookListResource.data)).toEqual([existing, created])
   })
 
   test('refuses empty titles without calling the API', async () => {
+    const createSpy = vi.spyOn(notebookApi, 'create')
     const result = await createNotebookAction('   ')
     expect(result).toBeNull()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
   })
 
   test('surfaces error via createNotebookAction.error() on 401', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(401, { code: 'unauthenticated', message: 'nope' }))
+    vi.spyOn(notebookApi, 'create').mockRejectedValue(new ApiError(401, 'unauthenticated', 'nope'))
 
     await expect(createNotebookAction('new')).rejects.toThrow()
     expect(createNotebookAction.error()).toBeDefined()
+  })
+
+  test('rolls back the optimistic update when the API rejects', async () => {
+    const existing = { id: 'nb1', title: 'old', createdAt: '2026-05-01T00:00:00Z', cells: [] }
+    notebookListResource.data.set([existing])
+    vi.spyOn(notebookApi, 'create').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
+
+    await expect(createNotebookAction('new')).rejects.toThrow()
+    expect(peek(notebookListResource.data)).toEqual([existing])
   })
 })
