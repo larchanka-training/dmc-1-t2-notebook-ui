@@ -143,6 +143,7 @@ export function NotebookCell({
                   <Button
                     size="icon"
                     variant="ghost"
+                    aria-label="Run cell"
                     className="size-7 text-success hover:bg-success/10"
                     disabled={isRunning}
                     onClick={onRun}
@@ -176,6 +177,7 @@ export function NotebookCell({
                     <Button
                       size="icon"
                       variant="ghost"
+                      aria-label={showPreview ? 'Edit cell' : 'Preview cell'}
                       className="size-7"
                       onClick={() => onViewModeChange(showPreview ? 'edit' : 'preview')}
                     >
@@ -192,7 +194,12 @@ export function NotebookCell({
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <Button size="icon" variant="ghost" className="size-7">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Cell options"
+                        className="size-7"
+                      >
                         <MoreHorizontal className="size-4" />
                       </Button>
                     }

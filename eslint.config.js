@@ -7,7 +7,7 @@ import eslintConfigPrettier from 'eslint-config-prettier'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'public', 'src/**/generated/**']),
+  globalIgnores(['dist', 'public', 'coverage', 'src/**/generated/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -31,15 +31,12 @@ export default defineConfig([
   {
     // Generated API client is an implementation detail of @/shared/api.
     // Consumers must import from the facade, not reach into generated/.
-    // Mocks under `src/app/mocks/**` are an explicit exception — they implement
-    // the same OpenAPI contract on the server side and need the raw types.
     files: [
       'src/features/**/*.{ts,tsx}',
       'src/pages/**/*.{ts,tsx}',
       'src/app/**/*.{ts,tsx}',
       'src/entities/**/*.{ts,tsx}',
     ],
-    ignores: ['src/app/mocks/**'],
     rules: {
       'no-restricted-imports': [
         'error',
