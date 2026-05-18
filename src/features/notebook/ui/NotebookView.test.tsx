@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
 import { SEED_CODE } from '../model/notebook'
@@ -17,6 +17,14 @@ function getCellTextareas() {
   return screen.getAllByRole('textbox') as HTMLTextAreaElement[]
 }
 
+async function addCodeCell(user: UserEvent) {
+  // The "Add cell" trigger at the end of the list opens a menu; pick "Code".
+  const triggers = screen.getAllByRole('button', { name: /add cell/i })
+  await user.click(triggers[triggers.length - 1])
+  const codeItem = await screen.findByRole('menuitem', { name: /code/i })
+  await user.click(codeItem)
+}
+
 describe('NotebookView (RTL integration)', () => {
   test('renders a single seed cell on mount', () => {
     renderView()
@@ -29,7 +37,7 @@ describe('NotebookView (RTL integration)', () => {
     const user = userEvent.setup()
     renderView()
     expect(getCellTextareas()).toHaveLength(1)
-    await user.click(screen.getAllByRole('button', { name: /add cell/i })[0])
+    await addCodeCell(user)
     expect(getCellTextareas()).toHaveLength(2)
   })
 
@@ -37,21 +45,16 @@ describe('NotebookView (RTL integration)', () => {
     const user = userEvent.setup()
     renderView()
     const [textarea] = getCellTextareas()
-    // replace seed code with a deterministic snippet
     await user.clear(textarea)
     await user.type(textarea, 'console.log(1+1)')
-    // each cell has a single play button — the first non-toggle button in the cell
-    const runButton = screen.getAllByRole('button')[1]
-    await act(async () => {
-      runButton.click()
-    })
+    await user.click(screen.getByRole('button', { name: /run cell/i }))
     expect(await screen.findByText('2')).toBeInTheDocument()
   })
 
   test('editing one cell leaves other cells untouched (atomization)', async () => {
     const user = userEvent.setup()
     renderView()
-    await user.click(screen.getAllByRole('button', { name: /add cell/i })[0])
+    await addCodeCell(user)
     let [first, second] = getCellTextareas()
     expect(first).toHaveValue(SEED_CODE)
     expect(second).toHaveValue('')

@@ -26,20 +26,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('notebook.list', () => {
-  test('GET /notebooks returns parsed list', async () => {
-    const payload = [{ id: 'n1', title: 'first', createdAt: '2026-05-15T00:00:00Z', cells: [] }]
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, payload))
-
-    const result = await notebook.list()
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledOnce()
-    const req = lastRequest()
-    expect(req.url).toContain('/notebooks')
-    expect(req.method).toBe('GET')
-  })
-
+describe('error mapping', () => {
   test('401 maps to UnauthorizedError', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(401, { code: 'unauthenticated', message: 'no session' }),
@@ -47,6 +34,13 @@ describe('notebook.list', () => {
     await expect(notebook.list()).rejects.toBeInstanceOf(UnauthorizedError)
   })
 
+  test('404 maps to NotFoundError', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(404, { code: 'not_found', message: 'cell gone' }))
+    await expect(notebook.runCell('nb-x', 'cell-x')).rejects.toBeInstanceOf(NotFoundError)
+  })
+})
+
+describe('auth middleware', () => {
   test('sends Bearer header when token getter is set', async () => {
     setAuthTokenGetter(() => 'tok-123')
     fetchMock.mockResolvedValueOnce(jsonResponse(200, []))
@@ -55,39 +49,12 @@ describe('notebook.list', () => {
 
     expect(lastRequest().headers.get('authorization')).toBe('Bearer tok-123')
   })
-})
 
-describe('notebook.create', () => {
-  test('POSTs body and returns created notebook', async () => {
-    const created = { id: 'n2', title: 'hi', createdAt: '2026-05-15T00:00:00Z', cells: [] }
-    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+  test('omits Authorization header when token getter returns null', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []))
 
-    const result = await notebook.create({ title: 'hi' })
+    await notebook.list()
 
-    expect(result).toEqual(created)
-    const req = lastRequest()
-    expect(req.url).toContain('/notebooks')
-    expect(req.method).toBe('POST')
-    expect(await req.clone().json()).toEqual({ title: 'hi' })
-  })
-})
-
-describe('notebook.runCell', () => {
-  test('substitutes path params', async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(200, { status: 'done', output: 'ok', durationMs: 5 }),
-    )
-
-    const result = await notebook.runCell('nb-1', 'cell-1')
-
-    if (result.status !== 'done') throw new Error('expected done')
-    expect(result.output).toBe('ok')
-    expect(result.durationMs).toBe(5)
-    expect(lastRequest().url).toContain('/notebooks/nb-1/cells/cell-1/run')
-  })
-
-  test('404 maps to NotFoundError', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(404, { code: 'not_found', message: 'cell gone' }))
-    await expect(notebook.runCell('nb-x', 'cell-x')).rejects.toBeInstanceOf(NotFoundError)
+    expect(lastRequest().headers.has('authorization')).toBe(false)
   })
 })

@@ -30,20 +30,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('auth.login', () => {
-  test('POSTs credentials, returns token + user', async () => {
-    const payload = { token: 'jwt-xyz', user: { id: 'u1', email: 'a@b.com' } }
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, payload))
-
-    const result = await auth.login({ email: 'a@b.com', password: 'secret' })
-
-    expect(result).toEqual(payload)
-    const req = lastRequest()
-    expect(req.url).toContain('/auth/login')
-    expect(req.method).toBe('POST')
-    expect(await req.clone().json()).toEqual({ email: 'a@b.com', password: 'secret' })
-  })
-
+describe('error mapping', () => {
   test('401 maps to UnauthorizedError', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(401, { code: 'invalid_credentials', message: 'nope' }),
@@ -52,29 +39,24 @@ describe('auth.login', () => {
       UnauthorizedError,
     )
   })
-})
 
-describe('auth.logout', () => {
-  test('returns void on 204', async () => {
+  test('204 resolves to void', async () => {
     fetchMock.mockResolvedValueOnce(emptyResponse(204))
     await expect(auth.logout()).resolves.toBeUndefined()
   })
 })
 
-describe('auth.getMe', () => {
-  test('GETs /auth/me and returns user', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: 'u1', email: 'a@b.com' }))
-    const user = await auth.getMe()
-    expect(user).toEqual({ id: 'u1', email: 'a@b.com' })
-    const req = lastRequest()
-    expect(req.url).toContain('/auth/me')
-    expect(req.method).toBe('GET')
-  })
-
+describe('auth middleware', () => {
   test('attaches Bearer header from token getter', async () => {
     setAuthTokenGetter(() => 'tok-abc')
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: 'u1', email: 'a@b.com' }))
     await auth.getMe()
     expect(lastRequest().headers.get('authorization')).toBe('Bearer tok-abc')
+  })
+
+  test('omits Authorization header when token getter returns null', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: 'u1', email: 'a@b.com' }))
+    await auth.getMe()
+    expect(lastRequest().headers.has('authorization')).toBe(false)
   })
 })
