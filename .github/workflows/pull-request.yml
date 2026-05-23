@@ -27,11 +27,17 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          persist-credentials: false
+          ref: ${{ github.head_ref }}
       - uses: ./.github/actions/setup-pnpm
+      - run: pnpm run format
+      - uses: stefanzweifel/git-auto-commit-action@8621497c8c39c72f3e2a999a26b4ca1b5058a842 # v5.0.1
+        with:
+          commit_message: "style: auto-format code"
       - run: pnpm run format:check
       - run: pnpm run lint
 
