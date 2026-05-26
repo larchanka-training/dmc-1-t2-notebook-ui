@@ -149,22 +149,27 @@ Renders as `<code>` with `bg-muted`, small padding, `font-mono`. For longer code
 
 ---
 
-## executeJS (utility, not a component)
+## runInWorker (utility, not a component)
 
-**File:** `src/features/notebook/model/executeJS.ts`
-**Import:** `import { executeJS } from '@/features/notebook'`
+**File:** `src/features/notebook/runtime/workerHost.ts`
+**Import:** `import { runInWorker } from '@/features/notebook'`
 
-Pure async function that runs a JavaScript string and returns its output. Not a React component.
+Pure async function that runs a JavaScript string inside the sandboxed
+Web Worker + QuickJS kernel and returns structured output. Not a React
+component.
 
 ```ts
-const { output, error } = await executeJS(`console.log(2 + 2)`)
-// output: "4"
-// error: false
+const result = await runInWorker(`console.log(2 + 2)`)
+// result.status: 'done'
+// result.items: [{ type: 'stdout', text: '4' }]
 ```
 
-| Return field | Type      | Description                                                 |
-| ------------ | --------- | ----------------------------------------------------------- |
-| `output`     | `string`  | All captured console lines + return value, joined with `\n` |
-| `error`      | `boolean` | `true` if an exception was thrown                           |
+| Return field | Type            | Description                                                                    |
+| ------------ | --------------- | ------------------------------------------------------------------------------ |
+| `status`     | `RuntimeStatus` | `'done' \| 'error' \| 'timeout' \| 'interrupted'`                              |
+| `items`      | `OutputItem[]`  | Structured output: `stdout` / `stderr` / `result` / `error` / `html` / `image` |
 
-See [How the Notebook Works](../notebook/how-it-works.md) for the full implementation.
+Shared scope (variables, functions, classes) lives inside the persistent
+worker VM and carries across runs automatically; nothing is passed in or
+out per call. See [How the Notebook Works](../notebook/how-it-works.md)
+for the full execution flow.

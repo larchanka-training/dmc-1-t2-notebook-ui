@@ -62,14 +62,23 @@ src/
 │   └── notebook/
 │       ├── index.ts                  # Public API of the slice
 │       ├── domain/cell.ts            # Cell factory and types (atomized fields)
+│       ├── runtime/                  # Sandboxed execution runtime
+│       │   ├── quickjs.ts            # Persistent QuickJS kernel
+│       │   ├── worker.ts             # Web Worker entrypoint
+│       │   ├── workerHost.ts         # Host facade (runInWorker, Stop, timeout)
+│       │   ├── transform.ts          # acorn AST rewrite for shared scope
+│       │   ├── interrupt.ts          # SharedArrayBuffer interrupt flag
+│       │   ├── serialize.ts          # Safe value serialization
+│       │   └── types.ts              # Protocol + OutputItem types
 │       ├── model/
-│       │   ├── notebook.ts           # cellsAtom + addCell/runCell/... actions
-│       │   ├── executeJS.ts          # Sandboxed JS runner
-│       │   ├── notebook.test.ts
-│       │   └── executeJS.test.ts
+│       │   ├── notebook.ts           # cellsAtom + addCell/... CRUD actions
+│       │   ├── runtime.ts            # Kernel model: runCell/runAll/stop/restart
+│       │   └── notebook.test.ts
 │       └── ui/
 │           ├── NotebookView.tsx      # List view (reads cellsAtom)
 │           ├── NotebookCell.tsx      # Presentational single-cell component
+│           ├── OutputView.tsx        # Renders OutputItem[]
+│           ├── OutputFrame.tsx       # Sandboxed iframe for HTML output
 │           └── NotebookView.test.tsx
 │
 ├── pages/                        # One folder per route

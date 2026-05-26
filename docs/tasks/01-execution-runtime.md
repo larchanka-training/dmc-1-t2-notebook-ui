@@ -25,46 +25,51 @@
 
 ### Sandbox
 
-- [ ] Код выполняется в **Web Worker**, не в основном потоке.
-- [ ] Worker создан из бандла Vite (а не из строки) — корректно типизирован и проходит CSP.
-- [ ] Из Worker недоступны `document`, `window`, `localStorage`, основной `fetch` к origin (тестируется юнит-тестом).
-- [ ] DOM-вывод (Canvas/SVG/HTML) рендерится в отдельный `<iframe sandbox="allow-scripts">` под ячейкой, общение через `postMessage`.
+- [x] Код выполняется в **Web Worker**, не в основном потоке.
+- [x] Worker создан из бандла Vite (а не из строки) — корректно типизирован и проходит CSP.
+- [x] Из Worker недоступны `document`, `window`, `localStorage`, основной `fetch` к origin (тестируется юнит-тестом).
+- [x] DOM-вывод (Canvas/SVG/HTML) рендерится в отдельный `<iframe sandbox="allow-scripts">` под ячейкой, общение через `postMessage`.
 
 ### Shared scope
 
-- [ ] Переменные, объявленные через `var`, `let`, `const`, `function` в ячейке N, доступны в ячейке N+1.
-- [ ] `Restart kernel` сбрасывает scope, статус всех ячеек и executionCount.
-- [ ] Удаление ячейки **не** удаляет её переменные из scope — Jupyter-семантика, чтобы избежать сюрпризов.
+- [x] Переменные, объявленные через `var`, `let`, `const`, `function` в ячейке N, доступны в ячейке N+1.
+- [x] `Restart kernel` сбрасывает scope, статус всех ячеек и executionCount.
+- [x] Удаление ячейки **не** удаляет её переменные из scope — Jupyter-семантика, чтобы избежать сюрпризов.
 
 ### Stop / Interrupt
 
-- [ ] Кнопка `Stop` в running-ячейке завершает выполнение в течение ≤ 500 мс.
-- [ ] После Stop статус ячейки = `interrupted`, output содержит явное «Execution interrupted by user».
-- [ ] `Stop All` в тулбаре ноутбука останавливает все выполняющиеся ячейки и очередь.
+- [x] Кнопка `Stop` в running-ячейке завершает выполнение в течение ≤ 500 мс.
+- [x] После Stop статус ячейки = `interrupted`, output содержит явное «Execution interrupted by user».
+- [x] `Stop All` в тулбаре ноутбука останавливает все выполняющиеся ячейки и очередь.
 
 ### Очередь
 
-- [ ] `Run All` ставит ячейки в очередь и выполняет последовательно, executionCount возрастает.
-- [ ] Если ячейка падает, очередь останавливается, остальные помечены как `skipped` с возможностью продолжить.
+- [x] `Run All` ставит ячейки в очередь и выполняет последовательно, executionCount возрастает.
+- [x] Если ячейка падает, очередь останавливается, остальные помечены как `skipped` с возможностью продолжить.
 
 ### Structured output
 
-- [ ] Output ячейки — массив, не строка. См. модель в Tech notes.
-- [ ] `console.log/warn/error/info` маршрутизируются в разные item-ы (`stdout` / `stderr`).
-- [ ] Последнее **expression statement** (как в REPL) попадает в `result` item.
-- [ ] Объекты сериализуются через структурированный клон-сейф формат (числа, строки, массивы, объекты до глубины 5 — далее `[Object]`), без `String(value)`.
+- [x] Output ячейки — массив, не строка. См. модель в Tech notes.
+- [x] `console.log/warn/error/info` маршрутизируются в разные item-ы (`stdout` / `stderr`).
+- [x] Последнее **expression statement** (как в REPL) попадает в `result` item.
+- [x] Объекты сериализуются через структурированный клон-сейф формат (числа, строки, массивы, объекты до глубины 5 — далее `[Object]`), без `String(value)`.
 
 ### ExecutionCount
 
-- [ ] У каждой ячейки есть `executionCount: number | null` (null = не запускалась).
-- [ ] Бейдж `[3]` слева от ячейки.
-- [ ] Изменение содержимого ячейки **не сбрасывает** executionCount — обнуляет только Restart.
+- [x] У каждой ячейки есть `executionCount: number | null` (null = не запускалась).
+- [x] Бейдж `[3]` слева от ячейки.
+- [x] Изменение содержимого ячейки **не сбрасывает** executionCount — обнуляет только Restart.
 
 ### Limits
 
-- [ ] Таймаут выполнения по умолчанию — 30 с, конфигурируется в `notebookSettings`.
-- [ ] По таймауту — статус `timeout`, output с явной отметкой.
-- [ ] Лимит размера output — 5 МБ, далее truncated с предупреждением.
+- [x] Таймаут выполнения по умолчанию — 30 с, конфигурируется в `notebookSettings`.
+- [x] По таймауту — статус `timeout`, output с явной отметкой.
+- [x] Лимит размера output — 5 МБ, далее truncated с предупреждением.
+
+> Все AC реализованы в рамках TARDIS-70 (Web Worker + persistent QuickJS
+> kernel). Shared scope несёт функции/классы/замыкания через персистентный
+> VM; Stop использует `SharedArrayBuffer`-interrupt (с fallback на terminate
+> вне cross-origin isolation).
 
 ## Tech notes
 

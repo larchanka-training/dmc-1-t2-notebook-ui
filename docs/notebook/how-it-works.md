@@ -56,40 +56,37 @@ model/runtime.ts: runCell(id)
     │  cell.output = []
     │
     ▼
-runtime/workerHost.ts: runInWorker(code, scope, { timeoutMs })
+runtime/workerHost.ts: runInWorker(code, { timeoutMs })
     │  serialise after any pending run
     │  worker = ensureWorker()
     │
     ▼
-postMessage({ kind: 'run', runId, code, scope, timeoutMs })
+postMessage({ kind: 'run', runId, code, timeoutMs })
     │
-    ▼ (inside Worker)
+    ▼ (inside Worker, one persistent kernel for its whole lifetime)
 runtime/worker.ts: self.onmessage
     │
     ▼
-runtime/transform.ts: rewrite top-level declarations to write through
-                       globalThis.__ctx; trailing ExpressionStatement
-                       becomes `return <expr>`
+runtime/transform.ts: publish top-level declarations to globalThis;
+                       trailing ExpressionStatement becomes `return <expr>`
     │
     ▼
-runtime/quickjs.ts: runInQuickJS(transformedCode, scope, { timeoutMs })
-    │  inject console.log / info / warn / error
-    │  setInterruptHandler(deadline)
-    │  install scope on globalThis.__ctx
-    │  evalCode(`(async () => { ... })()`)
+runtime/quickjs.ts: kernel.run(transformedCode, { timeoutMs })
+    │  console + display already installed on the persistent VM
+    │  setInterruptHandler(deadline OR SharedArrayBuffer stop flag)
+    │  evalCode(`(async () => { ... })()`)  — scope lives in the VM
     │  await vm.resolvePromise
-    │  collect OutputItem[] · extract updated scope
+    │  collect OutputItem[]
     │
     ▼
 postMessage({ kind: 'output', item }) × N
-postMessage({ kind: 'done', status, scope })
+postMessage({ kind: 'done', status })
     │
     ▼ (back on main thread)
-workerHost resolves with { status, items, scope }
+workerHost resolves with { status, items }
     │
     ▼
 runtime.ts: cell.output = items
-           sharedScopeAtom = scope
            cell.status = mapStatus(...)
            runtimeStatusAtom = 'idle'
 ```
@@ -136,45 +133,61 @@ when the user explicitly calls `display()`.
 
 ## Shared scope (Jupyter-style)
 
-Top-level `var` / `let` / `const` / `function` declarations from cell N
-are visible in cell N+1. Mechanism:
+The worker holds **one persistent QuickJS VM** for its whole lifetime, so
+shared scope is just that VM's own global state. Top-level
+`var` / `let` / `const` / `function` / `class` declarations — including
+closures and live class instances — from cell N are visible in cell N+1.
+Mechanism:
 
 1. `runtime/transform.ts` walks the cell's AST.
-2. Every top-level declaration emits a follow-up
-   `globalThis.__ctx.<name> = <name>`, so QuickJS holds the value in a
-   single shared object.
-3. Every subsequent run starts with a `prelude` that binds incoming keys
-   back as locals: `const x = globalThis.__ctx.x`.
-4. `sharedScopeAtom` carries the structured-clone-safe slice of `__ctx`
-   between cells (functions are dropped at the worker boundary — they
-   only live for a single run).
+2. Each cell runs inside a fresh async IIFE (so top-level `await` works).
+   Because IIFE-local declarations would not escape, every top-level
+   declaration emits a follow-up `globalThis.<name> = <name>` (covering
+   plain ids, multi-declarators, and destructuring patterns).
+3. A later cell reads a bare identifier (`x`), which the VM resolves to
+   `globalThis.x`. There is no prelude and no `__ctx` snapshot — the
+   value lives in the VM, never crossing the postMessage boundary.
+4. Re-running a cell with `const x = 1` is therefore safe: each run is a
+   fresh IIFE with a single `const x`, no redeclaration clash.
 
-**Restart Kernel** clears `sharedScopeAtom`, `execCounterAtom`,
-`queueAtom`, and every cell's `executionCount` / `status` / `output`.
+Because scope is real interpreter state (not a serialized copy), functions,
+closures and class instances survive across cells — unlike a data-only
+snapshot, which could only carry plain values.
+
+**Restart Kernel** terminates the worker (dropping the VM), and resets
+`execCounterAtom`, `queueAtom`, and every cell's `executionCount` /
+`status` / `output`. The next run spins up a fresh kernel with empty scope.
 
 **Deleting a cell does NOT remove its variables.** Jupyter semantics:
 once a binding made it into the kernel, it stays until Restart.
+
+`import` / `export` are rejected with a clear error — the kernel has no
+ESM module loader.
 
 ---
 
 ## Stop and timeout
 
-Two independent mechanisms cooperate:
+The kernel's `setInterruptHandler` runs synchronously between bytecode ops
+and can abort the current evaluation **without destroying the VM**, so the
+shared scope survives. It fires on either of two causes, and records which:
 
-1. **In-VM interrupt.** `setInterruptHandler` polls a deadline and
-   aborts the QuickJS bytecode loop. This catches `while(true){}` even
-   though the VM has no `await` point.
-2. **Host-side terminate.** The host runs a `setTimeout(timeoutMs + 100)`
-   and a `worker.terminate()` callback. This is the last resort —
-   relevant if the VM ever blocks on a native call.
+1. **Timeout.** A per-run deadline (`timeoutMs`). Aborts `while(true){}`
+   even though the VM has no `await` point → status `'timeout'`.
+2. **User stop.** `stopCell` / `stopAll` flip a `SharedArrayBuffer` flag
+   that the handler reads. Because the buffer is shared, the host can set
+   it even while the worker thread is blocked in a tight loop → status
+   `'interrupted'`, scope preserved.
 
-`stopCell` and `stopAll` short-circuit both: they call `restartWorker()`,
-which terminates the current worker and unsticks the in-flight run via
-`inFlightResolver`. A fresh worker is spun up on the next call.
+The SAB path requires a cross-origin isolated context (COOP/COEP headers,
+see `auth.md` § Cross-origin isolation). **Without isolation** the runtime
+falls back to `worker.terminate()` + respawn: the run is still stopped
+`'interrupted'`, but the VM (and shared scope) is lost. A host-side
+`setTimeout(timeoutMs + 100)` terminate remains as a last-resort safety net.
 
-The user-visible cell status of an interrupted cell is `'interrupted'`,
-with an explicit stderr item in the output. Host-side timeouts surface
-as `'timeout'`.
+`stopCell` only interrupts when its cell is the one actually running; a
+merely-queued cell is just dropped from the queue. The interrupted/timeout
+cell gets an explicit stderr marker in its output.
 
 ---
 
@@ -182,13 +195,13 @@ as `'timeout'`.
 
 | Limit          | Default                 | Configurable via                             |
 | -------------- | ----------------------- | -------------------------------------------- |
-| Execution time | 30 s                    | `runInWorker(code, scope, { timeoutMs })`    |
+| Execution time | 30 s                    | `runInWorker(code, { timeoutMs })`           |
 | Output size    | 5 MB cumulative per run | `runtime/workerHost.ts: OUTPUT_BUDGET_BYTES` |
 
-When the output budget is exceeded, the host appends `{ type: 'stderr',
-text: 'Output truncated at <N> bytes' }`, terminates the worker, and
-resolves the run as `error`. Further output messages from the worker
-are discarded.
+The budget is checked **before** each item is accepted, so a single huge
+item cannot blow past the limit. When exceeded, the host appends
+`{ type: 'stderr', text: 'Output truncated at <N> bytes' }`, terminates the
+worker, and resolves the run as `error`. Further output is discarded.
 
 ---
 
@@ -198,7 +211,7 @@ are discarded.
 idle ──(runCell)──▶ running ──(success)─▶ done
                       │
                       ├──(error)────────▶ error
-                      ├──(timeout)──────▶ error      // worker hit host budget
+                      ├──(deadline)─────▶ timeout
                       └──(stopCell)─────▶ interrupted
 ```
 
@@ -211,8 +224,9 @@ short-circuits the rest as `skipped`.
 | `running`     | primary lead-bar           | red stop   | partial     |
 | `done`        | default                    | green play | visible     |
 | `error`       | red (`border-destructive`) | green play | red         |
-| `interrupted` | default                    | green play | stderr note |
-| `skipped`     | default                    | green play | empty       |
+| `timeout`     | amber                      | green play | stderr note |
+| `interrupted` | amber                      | green play | stderr note |
+| `skipped`     | dashed muted               | green play | empty       |
 
 ---
 
@@ -227,19 +241,20 @@ Only Restart Kernel resets the counter. A cell that never ran shows
 
 ## Related files
 
-| File                                              | Layer                                                                      |
-| ------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/features/notebook/runtime/types.ts`          | Worker protocol + OutputItem + SerializedValue                             |
-| `src/features/notebook/runtime/serialize.ts`      | Safe walk to depth 5, cycle-safe                                           |
-| `src/features/notebook/runtime/transform.ts`      | acorn AST: prelude + lift + trailing return                                |
-| `src/features/notebook/runtime/quickjs.ts`        | QuickJS VM, console, interrupt, async IIFE                                 |
-| `src/features/notebook/runtime/worker.ts`         | Worker entrypoint                                                          |
-| `src/features/notebook/runtime/workerHost.ts`     | Main-thread facade, timeout, output budget, `setWorkerFactory` for tests   |
-| `src/features/notebook/model/notebook.ts`         | `cellsAtom`, CRUD, `sharedScopeAtom`                                       |
-| `src/features/notebook/model/notebookSettings.ts` | `timeoutMsAtom` and default / max limits                                   |
-| `src/features/notebook/model/runtime.ts`          | `runCell`, `runAll`, `resumeQueue`, `stopCell`, `stopAll`, `restartKernel` |
-| `src/features/notebook/domain/cell.ts`            | `reatomCell()` factory, atomized fields                                    |
-| `src/features/notebook/ui/OutputView.tsx`         | Renders `OutputItem[]`                                                     |
-| `src/features/notebook/ui/OutputFrame.tsx`        | Sandboxed iframe for `html` items                                          |
-| `src/features/notebook/ui/NotebookToolbar.tsx`    | Run All / Continue / Stop All / Restart                                    |
-| `src/features/notebook/ui/NotebookCell.tsx`       | Per-cell UI with Stop button                                               |
+| File                                              | Layer                                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/features/notebook/runtime/types.ts`          | Worker protocol + OutputItem + SerializedValue                                |
+| `src/features/notebook/runtime/serialize.ts`      | Safe walk to depth 5, cycle-safe                                              |
+| `src/features/notebook/runtime/transform.ts`      | acorn AST: publish declarations to globalThis + trailing return               |
+| `src/features/notebook/runtime/quickjs.ts`        | Persistent QuickJS kernel: console, interrupt (deadline + SAB), async IIFE    |
+| `src/features/notebook/runtime/interrupt.ts`      | Worker-side `SharedArrayBuffer` interrupt flag                                |
+| `src/features/notebook/runtime/worker.ts`         | Worker entrypoint, owns the persistent kernel                                 |
+| `src/features/notebook/runtime/workerHost.ts`     | Main-thread facade, timeout, output budget, SAB interrupt, `setWorkerFactory` |
+| `src/features/notebook/model/notebook.ts`         | `cellsAtom`, CRUD                                                             |
+| `src/features/notebook/model/notebookSettings.ts` | `timeoutMsAtom` and default / max limits                                      |
+| `src/features/notebook/model/runtime.ts`          | `runCell`, `runAll`, `resumeQueue`, `stopCell`, `stopAll`, `restartKernel`    |
+| `src/features/notebook/domain/cell.ts`            | `reatomCell()` factory, atomized fields                                       |
+| `src/features/notebook/ui/OutputView.tsx`         | Renders `OutputItem[]`                                                        |
+| `src/features/notebook/ui/OutputFrame.tsx`        | Sandboxed iframe for `html` items                                             |
+| `src/features/notebook/ui/NotebookToolbar.tsx`    | Run All / Continue / Stop All / Restart                                       |
+| `src/features/notebook/ui/NotebookCell.tsx`       | Per-cell UI with Stop button                                                  |

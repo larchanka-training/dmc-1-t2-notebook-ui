@@ -30,7 +30,7 @@ Both buttons call `addCell()` wrapped in `wrap(...)` so they preserve Reatom's a
 | Keyboard | `Cmd+Enter` (Mac) or `Ctrl+Enter` (Windows/Linux)    |
 | Mouse    | Click the green **▶** play button in the cell header |
 
-Both call the `runCell(id)` action, which delegates to `executeJS`. See [How It Works](./how-it-works.md) for the full execution flow.
+Both call the `runCell(id)` action, which runs the code in the sandboxed Web Worker + QuickJS kernel via `runInWorker`. See [How It Works](./how-it-works.md) for the full execution flow.
 
 ---
 

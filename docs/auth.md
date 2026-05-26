@@ -123,7 +123,7 @@ export const userAtom = atom<User | null>(null, 'session.user').extend(
 
 ### 4.1. Слой 1 — изоляция пользовательского JS
 
-Code-cells выполняются **только в sandboxed iframe / Web Worker** (`ui/src/features/notebook/model/executeJS.ts`). Никогда — в основном потоке UI. Это уже архитектурное требование проекта (см. `docs/project.md` § Выполнение кода). Любая регрессия этого слоя — critical bug.
+Code-cells выполняются **только в Web Worker + QuickJS sandbox** (`ui/src/features/notebook/runtime/`, фасад `runtime/workerHost.ts`). Никогда — в основном потоке UI. Это уже архитектурное требование проекта (см. `docs/project.md` § Выполнение кода). Любая регрессия этого слоя — critical bug.
 
 ### 4.2. Слой 2 — санитизация Markdown
 
@@ -150,7 +150,7 @@ report-to csp-endpoint;
 Пояснения к директивам:
 
 - `frame-src 'self' blob:` — `blob:` нужен для sandboxed iframe, в которых выполняется пользовательский JS (собираем HTML бандл как Blob и подключаем через `URL.createObjectURL`).
-- `worker-src 'self' blob:` — альтернативная реализация executeJS через Web Worker требует `blob:`. Без этой директивы переход с iframe на Worker сломается молча.
+- `worker-src 'self' blob:` — sandbox исполняется в Web Worker (`runtime/worker.ts`), загружаемом Vite-бандлом; `blob:` нужен для worker-чанка. Без этой директивы runtime сломается молча.
 - `style-src 'self' 'unsafe-inline'` — `'unsafe-inline'` вынужденный из-за Tailwind 4 и shadcn (inline style-атрибуты в runtime). При возможности заменить на nonce-подход.
 - `img-src 'self' data:` — без `https:`. Широкое `https:` разрешает любые сторонние картинки (tracking-pixels, exfiltration). Если в проде появится легитимный источник (CDN аватаров, превью и т. п.) — добавляем конкретный host, не весь `https:`.
 - `font-src 'self' data:` — shadcn и любые иконочные шрифты через data-URI не упадут. CDN-шрифтов не используем.
@@ -161,6 +161,17 @@ report-to csp-endpoint;
 **Перед прод-деплоем** CSP обязательно прогнать через [CSP Evaluator](https://csp-evaluator.withgoogle.com/) или эквивалент. Полиси выше — базовый набросок, он может потребовать подстройки под реальный бандл.
 
 > CSP — это backend/infra-задача, отдельный тикет.
+
+#### Cross-origin isolation (COOP/COEP)
+
+Runtime прерывает зависший QuickJS VM через `SharedArrayBuffer` (Stop / Stop All без потери scope). `SharedArrayBuffer` доступен только в cross-origin isolated контексте, поэтому нужны заголовки:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+В dev они выставляются Vite-плагином (`vite.config.ts`), в prod — nginx (`proxy/`). Важное следствие: `require-corp` блокирует любой cross-origin ресурс без `Cross-Origin-Resource-Policy` / CORS — все сторонние ресурсы (шрифты, картинки, API) должны это учитывать. Без isolation runtime деградирует к fallback `worker.terminate()` (Stop теряет shared scope, но остаётся корректным).
 
 ### 4.4. Слой 4 — output-санитизация выводов code-cell
 
