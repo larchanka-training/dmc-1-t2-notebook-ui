@@ -37,10 +37,14 @@ describe('runInQuickJS — happy path', () => {
     expect(r.items).toContainEqual({ type: 'stdout', text: '42' })
   })
 
-  // TODO(TARDIS-70 commit 2): Wire acorn AST transform to rewrite a trailing
-  // ExpressionStatement into `return <expression>`. Until then the async
-  // IIFE returns undefined, so there is no result item for `1 + 2`.
-  test.todo('trailing expression statement becomes a result item (needs acorn transform)')
+  test('trailing expression statement becomes a result item', async () => {
+    const r = await runInQuickJS('1 + 2')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({
+      type: 'result',
+      value: { kind: 'primitive', value: 3 },
+    })
+  })
 
   test('explicit return value becomes a result item', async () => {
     const r = await runInQuickJS('return 1 + 2')
@@ -124,10 +128,38 @@ describe('runInQuickJS — sandbox isolation', () => {
     spy.mockRestore()
   })
 
-  test('successive runs do not share scope (until commit 2)', async () => {
+  test('successive runs do not share scope unless host carries it', async () => {
+    // Without explicit scope hand-off, fresh contexts → no leak.
     await runInQuickJS('var leak = 1')
     const r = await runInQuickJS('console.log(typeof leak)')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'undefined' })
+  })
+})
+
+describe('runInQuickJS — shared scope hand-off', () => {
+  test('const declared in run A is visible in run B via scope carrier', async () => {
+    const a = await runInQuickJS('const x = 7')
+    const b = await runInQuickJS('console.log(x)', a.scope)
+    expect(b.status).toBe('done')
+    expect(b.items).toContainEqual({ type: 'stdout', text: '7' })
+  })
+
+  test('let and var declarations also persist between runs', async () => {
+    const a = await runInQuickJS('let y = 8; var z = 9')
+    const b = await runInQuickJS('console.log(y, z)', a.scope)
+    expect(b.items).toContainEqual({ type: 'stdout', text: '8 9' })
+  })
+
+  test('function declarations are callable in the next run', async () => {
+    // Functions are dropped at postMessage boundary by design (only data
+    // crosses workers). The function is callable WITHIN the same run.
+    const a = await runInQuickJS('function answer(){ return 42 } console.log(answer())')
+    expect(a.items).toContainEqual({ type: 'stdout', text: '42' })
+  })
+
+  test('empty initial scope works (most common path)', async () => {
+    const r = await runInQuickJS('const k = 1; console.log(k)', {})
+    expect(r.items).toContainEqual({ type: 'stdout', text: '1' })
   })
 })
 

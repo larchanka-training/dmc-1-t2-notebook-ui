@@ -14,6 +14,7 @@
 import { getQuickJS, type QuickJSContext, type QuickJSHandle } from 'quickjs-emscripten'
 
 import { serialize } from './serialize'
+import { transformCellCode } from './transform'
 import type { OutputItem, RuntimeResult, RuntimeStatus, SharedScope } from './types'
 
 export interface RuntimeOptions {
@@ -37,13 +38,28 @@ export async function runInQuickJS(
   try {
     installConsole(vm, items)
     armInterrupt(vm, timeoutMs)
+    installScope(vm, scope)
 
-    const wrapped = `(async () => { ${code}\n })()`
+    // Transform user code: prelude (`const x = globalThis.__ctx.x`), top-level
+    // declarations lifted into __ctx, trailing ExpressionStatement → return.
+    let transformed: string
+    try {
+      transformed = transformCellCode(code, scope).code
+    } catch (err) {
+      items.push({
+        type: 'error',
+        name: 'SyntaxError',
+        message: err instanceof Error ? err.message : String(err),
+      })
+      return { status: 'error', items, scope }
+    }
+
+    const wrapped = `(async () => { ${transformed}\n })()`
     const evalResult = vm.evalCode(wrapped)
     if (evalResult.error) {
       items.push(toErrorItem(vm, evalResult.error))
       evalResult.error.dispose()
-      return { status: 'error', items, scope }
+      return { status: 'error', items, scope: extractScope(vm) }
     }
 
     const promiseHandle = evalResult.value
@@ -64,13 +80,99 @@ export async function runInQuickJS(
       promiseHandle.dispose()
     }
 
-    return { status, items, scope }
+    return { status, items, scope: extractScope(vm) }
   } finally {
     vm.dispose()
   }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Set `globalThis.__ctx` inside the VM. Transformed user code reads from
+ * and writes to this object — prelude binds locals from it, top-level
+ * declarations write back into it.
+ */
+function installScope(vm: QuickJSContext, scope: SharedScope): void {
+  const ctx = vm.newObject()
+  for (const key of Object.keys(scope)) {
+    const handle = jsToHandle(vm, scope[key])
+    if (handle) {
+      vm.setProp(ctx, key, handle)
+      handle.dispose()
+    }
+  }
+  vm.setProp(vm.global, '__ctx', ctx)
+  ctx.dispose()
+}
+
+/**
+ * Read `globalThis.__ctx` out of the VM after a run, converting it back
+ * into a plain JS object for postMessage. Only structured-clone-safe
+ * values are preserved; functions/symbols get dropped at the boundary.
+ */
+function extractScope(vm: QuickJSContext): SharedScope {
+  const handle = vm.getProp(vm.global, '__ctx')
+  try {
+    const dumped = vm.dump(handle) as unknown
+    if (!dumped || typeof dumped !== 'object') return {}
+    const result: SharedScope = {}
+    for (const [key, value] of Object.entries(dumped)) {
+      if (isStructuredCloneSafe(value)) result[key] = value
+    }
+    return result
+  } finally {
+    handle.dispose()
+  }
+}
+
+/**
+ * Convert a host-side JS value into a VM handle. Only the subset we know
+ * survives across postMessage is supported — strings, finite numbers,
+ * booleans, null, plain objects/arrays. Anything else is silently dropped.
+ */
+function jsToHandle(vm: QuickJSContext, value: unknown): QuickJSHandle | null {
+  if (value === null) return vm.null
+  if (value === undefined) return vm.undefined
+  if (typeof value === 'string') return vm.newString(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return vm.newNumber(value)
+  if (typeof value === 'boolean') return value ? vm.true : vm.false
+  if (Array.isArray(value)) {
+    const arr = vm.newArray()
+    value.forEach((item, idx) => {
+      const childHandle = jsToHandle(vm, item)
+      if (childHandle) {
+        vm.setProp(arr, idx, childHandle)
+        childHandle.dispose()
+      }
+    })
+    return arr
+  }
+  if (typeof value === 'object') {
+    const obj = vm.newObject()
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const childHandle = jsToHandle(vm, v)
+      if (childHandle) {
+        vm.setProp(obj, k, childHandle)
+        childHandle.dispose()
+      }
+    }
+    return obj
+  }
+  return null
+}
+
+function isStructuredCloneSafe(value: unknown): boolean {
+  if (value === null) return true
+  const t = typeof value
+  if (t === 'string' || t === 'boolean') return true
+  if (t === 'number') return Number.isFinite(value as number)
+  if (Array.isArray(value)) return value.every(isStructuredCloneSafe)
+  if (t === 'object') {
+    return Object.values(value as Record<string, unknown>).every(isStructuredCloneSafe)
+  }
+  return false
+}
 
 /** Inject a minimal console object that pushes into the host-side `items`. */
 function installConsole(vm: QuickJSContext, items: OutputItem[]): void {

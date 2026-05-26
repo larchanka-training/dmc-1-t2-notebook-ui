@@ -1,4 +1,5 @@
 import { atom, type Atom } from '@reatom/core'
+import type { OutputItem } from '../runtime/types'
 
 export type CellStatus = 'idle' | 'running' | 'done' | 'error'
 export type CellKind = 'code' | 'markdown'
@@ -8,7 +9,7 @@ export interface Cell {
   id: string
   kind: CellKind
   code: Atom<string>
-  output: Atom<string>
+  output: Atom<OutputItem[]>
   status: Atom<CellStatus>
   viewMode: Atom<CellViewMode>
 }
@@ -22,7 +23,7 @@ export function reatomCell(initialCode = '', kind: CellKind = 'code', id = uid()
     id,
     kind,
     code: atom(initialCode, `notebook.cells#${id}.code`),
-    output: atom('', `notebook.cells#${id}.output`),
+    output: atom<OutputItem[]>([], `notebook.cells#${id}.output`),
     status: atom<CellStatus>('idle', `notebook.cells#${id}.status`),
     viewMode: atom<CellViewMode>('edit', `notebook.cells#${id}.viewMode`),
   }

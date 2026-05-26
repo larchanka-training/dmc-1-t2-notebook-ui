@@ -11,7 +11,6 @@ import {
   Pencil,
 } from 'lucide-react'
 import ReactMarkdown, { type Components } from 'react-markdown'
-import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import {
@@ -24,12 +23,14 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
+import type { OutputItem } from '../runtime/types'
+import { OutputView } from './OutputView'
 
 export interface NotebookCellProps {
   index: number
   kind?: CellKind
   code: string
-  output?: string
+  output?: OutputItem[]
   status?: CellStatus
   viewMode?: CellViewMode
   isFirst?: boolean
@@ -85,7 +86,7 @@ export function NotebookCell({
   index,
   kind = 'code',
   code,
-  output = '',
+  output = [],
   status = 'idle',
   viewMode = 'edit',
   isFirst = false,
@@ -268,20 +269,7 @@ export function NotebookCell({
         )}
       </Card>
 
-      {isCode && output && !isError && (
-        <Card
-          size="sm"
-          className="gap-0 py-3 ring-0 border-0 bg-secondary text-foreground font-mono text-sm whitespace-pre-wrap"
-        >
-          <div className="px-4">{output}</div>
-        </Card>
-      )}
-
-      {isCode && output && isError && (
-        <Alert variant="destructive" className="font-mono">
-          <AlertDescription className="whitespace-pre-wrap">{output}</AlertDescription>
-        </Alert>
-      )}
+      {isCode && output.length > 0 && <OutputView items={output} />}
     </div>
   )
 }

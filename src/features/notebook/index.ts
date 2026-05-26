@@ -1,6 +1,5 @@
 export { NotebookView } from './ui/NotebookView'
 export { NotebookCell } from './ui/NotebookCell'
-export { executeJS } from './model/executeJS'
 export {
   cellsAtom,
   addCell,
@@ -8,8 +7,11 @@ export {
   moveCell,
   runCell,
   updateCellCode,
+  sharedScopeAtom,
   SEED_CODE,
 } from './model/notebook'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { reatomCell } from './domain/cell'
 export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'
+export { runInWorker, restartWorker } from './runtime/workerHost'
+export type { OutputItem, RuntimeStatus, SerializedValue, SharedScope } from './runtime/types'

@@ -64,9 +64,25 @@ describe('runInWorker — serialisation', () => {
   })
 })
 
-describe('runInWorker — scope carrier (commit-1 placeholder)', () => {
-  test('input scope round-trips back when run does not modify it', async () => {
+describe('runInWorker — shared scope across runs', () => {
+  test('const from run A is visible in run B', async () => {
+    const a = await runInWorker('const x = 7')
+    const b = await runInWorker('console.log(x)', a.scope)
+    expect(b.items).toContainEqual({ type: 'stdout', text: '7' })
+  })
+
+  test('input scope round-trips when run does not modify it', async () => {
     const r = await runInWorker('1', { x: 'keep' })
     expect(r.scope).toEqual({ x: 'keep' })
+  })
+
+  test('restartWorker after assigning a var clears scope on next run', async () => {
+    const a = await runInWorker('const dropMe = 1')
+    // Restart the worker as if Restart Kernel was hit; pass empty scope.
+    restartWorker()
+    const b = await runInWorker('console.log(typeof dropMe)', {})
+    expect(b.items).toContainEqual({ type: 'stdout', text: 'undefined' })
+    // sanity: scope from `a` is unrelated to `b` here
+    expect(a.scope).toEqual({ dropMe: 1 })
   })
 })

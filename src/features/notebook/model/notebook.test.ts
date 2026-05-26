@@ -15,7 +15,7 @@ describe('notebook store', () => {
     expect(cells).toHaveLength(1)
     expect(cells[0].code()).toBe(SEED_CODE)
     expect(cells[0].status()).toBe('idle')
-    expect(cells[0].output()).toBe('')
+    expect(cells[0].output()).toEqual([])
   })
 
   test('addCell() appends an empty cell to the end', () => {
@@ -25,6 +25,7 @@ describe('notebook store', () => {
     expect(after).toHaveLength(before.length + 1)
     expect(after.at(-1)!.code()).toBe('')
     expect(after.at(-1)!.status()).toBe('idle')
+    expect(after.at(-1)!.output()).toEqual([])
   })
 
   test('addCell(afterId) inserts right after the given cell', () => {
@@ -85,10 +86,10 @@ describe('notebook store', () => {
     updateCellCode(cell.id, 'console.log("answer", 42)')
     const promise = runCell(cell.id)
     expect(cell.status()).toBe('running')
-    expect(cell.output()).toBe('')
+    expect(cell.output()).toEqual([])
     await promise
     expect(cell.status()).toBe('done')
-    expect(cell.output()).toBe('answer 42')
+    expect(cell.output()).toContainEqual({ type: 'stdout', text: 'answer 42' })
   })
 
   test('runCell sets status=error when the code throws', async () => {
@@ -96,7 +97,9 @@ describe('notebook store', () => {
     updateCellCode(cell.id, 'throw new Error("nope")')
     await runCell(cell.id)
     expect(cell.status()).toBe('error')
-    expect(cell.output()).toContain('nope')
+    const err = cell.output().find((it) => it.type === 'error')
+    expect(err).toBeDefined()
+    if (err?.type === 'error') expect(err.message).toContain('nope')
   })
 
   test('runCell on an unknown id is a no-op', async () => {
