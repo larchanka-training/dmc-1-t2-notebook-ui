@@ -37,6 +37,7 @@ export async function runInQuickJS(
 
   try {
     installConsole(vm, items)
+    installDisplay(vm, items)
     armInterrupt(vm, timeoutMs)
     installScope(vm, scope)
 
@@ -172,6 +173,39 @@ function isStructuredCloneSafe(value: unknown): boolean {
     return Object.values(value as Record<string, unknown>).every(isStructuredCloneSafe)
   }
   return false
+}
+
+/**
+ * Inject the Jupyter-style `display()` API: user code calls
+ * `display({ type: 'html', value: '<b>x</b>' })` or
+ * `display({ type: 'image', mime: 'image/png', data: '<base64>' })`
+ * and the host receives a matching OutputItem.
+ *
+ * Why a function and not magic-on-trailing-return: explicit > implicit.
+ * The user controls when a rich block is produced and never has to
+ * worry about a stray `<div>` string getting auto-promoted.
+ */
+function installDisplay(vm: QuickJSContext, items: OutputItem[]): void {
+  const fn = vm.newFunction('display', (payloadHandle) => {
+    if (!payloadHandle) return
+    const payload = vm.dump(payloadHandle) as unknown
+    const item = displayPayloadToItem(payload)
+    if (item) items.push(item)
+  })
+  vm.setProp(vm.global, 'display', fn)
+  fn.dispose()
+}
+
+function displayPayloadToItem(payload: unknown): OutputItem | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as { type?: unknown; value?: unknown; mime?: unknown; data?: unknown }
+  if (p.type === 'html' && typeof p.value === 'string') {
+    return { type: 'html', html: p.value }
+  }
+  if (p.type === 'image' && typeof p.mime === 'string' && typeof p.data === 'string') {
+    return { type: 'image', mime: p.mime, data: p.data }
+  }
+  return null
 }
 
 /** Inject a minimal console object that pushes into the host-side `items`. */

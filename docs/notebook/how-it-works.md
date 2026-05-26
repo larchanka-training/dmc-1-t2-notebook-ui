@@ -107,10 +107,30 @@ type OutputItem =
   | { type: 'stderr'; text: string } // also: console.warn → '[warn] …'
   | { type: 'result'; value: SerializedValue }
   | { type: 'error'; name: string; message: string; stack?: string }
+  | { type: 'html'; html: string } // → sandboxed iframe
+  | { type: 'image'; mime: string; data: string } // base64 → <img>
 ```
 
 `SerializedValue` is recursion-safe up to depth 5; anything deeper, or a
 cyclic reference, becomes `{ kind: 'truncated', placeholder: '[Object]' }`.
+
+### Rich output: `display()`
+
+Inside the sandbox the user calls an explicit Jupyter-style function:
+
+```js
+display({ type: 'html', value: '<b>hi</b>' })
+display({ type: 'image', mime: 'image/png', data: '<base64>' })
+```
+
+HTML items render in an `<iframe sandbox="allow-scripts">` with a unique
+origin (no `allow-same-origin`), so scripts inside cannot read parent
+cookies, storage or DOM. The iframe reports its content height back via
+`postMessage` so we can auto-resize up to a 600 px cap; anything taller
+scrolls inside the frame. Image items render as
+`<img src="data:<mime>;base64,<data>">`. There is no magic
+auto-promotion of strings or `<svg>` tags — a rich output appears only
+when the user explicitly calls `display()`.
 
 ---
 
@@ -207,17 +227,19 @@ Only Restart Kernel resets the counter. A cell that never ran shows
 
 ## Related files
 
-| File                                           | Layer                                                       |
-| ---------------------------------------------- | ----------------------------------------------------------- |
-| `src/features/notebook/runtime/types.ts`       | Worker protocol + OutputItem + SerializedValue              |
-| `src/features/notebook/runtime/serialize.ts`   | Safe walk to depth 5, cycle-safe                            |
-| `src/features/notebook/runtime/transform.ts`   | acorn AST: prelude + lift + trailing return                 |
-| `src/features/notebook/runtime/quickjs.ts`     | QuickJS VM, console, interrupt, async IIFE                  |
-| `src/features/notebook/runtime/worker.ts`      | Worker entrypoint                                           |
-| `src/features/notebook/runtime/workerHost.ts`  | Main-thread facade, timeout, output budget                  |
-| `src/features/notebook/model/notebook.ts`      | `cellsAtom`, CRUD, `sharedScopeAtom`                        |
-| `src/features/notebook/model/runtime.ts`       | `runCell`, `runAll`, `stopCell`, `stopAll`, `restartKernel` |
-| `src/features/notebook/domain/cell.ts`         | `reatomCell()` factory, atomized fields                     |
-| `src/features/notebook/ui/OutputView.tsx`      | Renders `OutputItem[]`                                      |
-| `src/features/notebook/ui/NotebookToolbar.tsx` | Run All / Stop All / Restart                                |
-| `src/features/notebook/ui/NotebookCell.tsx`    | Per-cell UI with Stop button                                |
+| File                                              | Layer                                                                      |
+| ------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/features/notebook/runtime/types.ts`          | Worker protocol + OutputItem + SerializedValue                             |
+| `src/features/notebook/runtime/serialize.ts`      | Safe walk to depth 5, cycle-safe                                           |
+| `src/features/notebook/runtime/transform.ts`      | acorn AST: prelude + lift + trailing return                                |
+| `src/features/notebook/runtime/quickjs.ts`        | QuickJS VM, console, interrupt, async IIFE                                 |
+| `src/features/notebook/runtime/worker.ts`         | Worker entrypoint                                                          |
+| `src/features/notebook/runtime/workerHost.ts`     | Main-thread facade, timeout, output budget, `setWorkerFactory` for tests   |
+| `src/features/notebook/model/notebook.ts`         | `cellsAtom`, CRUD, `sharedScopeAtom`                                       |
+| `src/features/notebook/model/notebookSettings.ts` | `timeoutMsAtom` and default / max limits                                   |
+| `src/features/notebook/model/runtime.ts`          | `runCell`, `runAll`, `resumeQueue`, `stopCell`, `stopAll`, `restartKernel` |
+| `src/features/notebook/domain/cell.ts`            | `reatomCell()` factory, atomized fields                                    |
+| `src/features/notebook/ui/OutputView.tsx`         | Renders `OutputItem[]`                                                     |
+| `src/features/notebook/ui/OutputFrame.tsx`        | Sandboxed iframe for `html` items                                          |
+| `src/features/notebook/ui/NotebookToolbar.tsx`    | Run All / Continue / Stop All / Restart                                    |
+| `src/features/notebook/ui/NotebookCell.tsx`       | Per-cell UI with Stop button                                               |

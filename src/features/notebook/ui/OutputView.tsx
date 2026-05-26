@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Card } from '@/shared/ui/card'
 import { cn } from '@/shared/lib/cn'
 import type { OutputItem, SerializedValue } from '../runtime/types'
+import { OutputFrame } from './OutputFrame'
 
 interface OutputViewProps {
   items: OutputItem[]
@@ -21,6 +22,7 @@ export function OutputView({ items }: OutputViewProps) {
   const streamItems = items.filter((it) => it.type === 'stdout' || it.type === 'stderr')
   const resultItem = items.find((it) => it.type === 'result')
   const errorItems = items.filter((it) => it.type === 'error')
+  const richItems = items.filter((it) => it.type === 'html' || it.type === 'image')
 
   return (
     <div className="flex flex-col gap-2">
@@ -50,6 +52,23 @@ export function OutputView({ items }: OutputViewProps) {
           <div className="px-4 text-muted-foreground">⟹ {formatValue(resultItem.value)}</div>
         </Card>
       )}
+
+      {richItems.map((it, i) => {
+        if (it.type === 'html') {
+          return <OutputFrame key={`rich-${i}`} html={it.html} />
+        }
+        if (it.type === 'image') {
+          return (
+            <img
+              key={`rich-${i}`}
+              src={`data:${it.mime};base64,${it.data}`}
+              alt="cell output"
+              className="block max-w-full rounded border border-border"
+            />
+          )
+        }
+        return null
+      })}
 
       {errorItems.map((err, i) =>
         err.type === 'error' ? (

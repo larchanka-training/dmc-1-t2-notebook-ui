@@ -29,6 +29,10 @@ export type OutputItem =
   | { type: 'stderr'; text: string }
   | { type: 'result'; value: SerializedValue }
   | { type: 'error'; name: string; message: string; stack?: string }
+  /** HTML to render inside a sandboxed iframe. Provided by user code via `display({ type: 'html', value })`. */
+  | { type: 'html'; html: string }
+  /** Base64-encoded image. MIME like `image/png` / `image/svg+xml`. */
+  | { type: 'image'; mime: string; data: string }
 
 /**
  * Shared scope between cells (Jupyter-like). Snapshot of user-defined

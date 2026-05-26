@@ -136,6 +136,38 @@ describe('runInQuickJS — sandbox isolation', () => {
   })
 })
 
+describe('runInQuickJS — display() API', () => {
+  test('display({ type: "html", value }) produces an html item', async () => {
+    const r = await runInQuickJS('display({ type: "html", value: "<b>x</b>" })')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'html', html: '<b>x</b>' })
+  })
+
+  test('display({ type: "image", mime, data }) produces an image item', async () => {
+    const r = await runInQuickJS('display({ type: "image", mime: "image/png", data: "iVBORw0K" })')
+    expect(r.items).toContainEqual({
+      type: 'image',
+      mime: 'image/png',
+      data: 'iVBORw0K',
+    })
+  })
+
+  test('display() with an unknown shape is silently ignored', async () => {
+    const r = await runInQuickJS('display({ type: "weird", whatever: 1 }); console.log("after")')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'after' })
+    expect(r.items.some((it) => it.type === 'html' || it.type === 'image')).toBe(false)
+  })
+
+  test('display() is callable multiple times in the same run', async () => {
+    const r = await runInQuickJS(
+      'display({ type: "html", value: "<i>1</i>" }); display({ type: "html", value: "<i>2</i>" })',
+    )
+    const htmlItems = r.items.filter((it) => it.type === 'html')
+    expect(htmlItems).toHaveLength(2)
+  })
+})
+
 describe('runInQuickJS — shared scope hand-off', () => {
   test('const declared in run A is visible in run B via scope carrier', async () => {
     const a = await runInQuickJS('const x = 7')

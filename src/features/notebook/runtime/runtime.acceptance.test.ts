@@ -24,7 +24,30 @@ beforeEach(async () => {
   first.code.set('')
 })
 
-// ─── Sandbox ─────────────────────────────────────────────────────────────────
+// ─── DOM output via display() ────────────────────────────────────────────────
+
+describe('Epic 01 AC — DOM output (display API)', () => {
+  test('AC: display({ type: "html" }) flows through runCell into cell.output', async () => {
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'display({ type: "html", value: "<div>hi</div>" })')
+    await runCell(cell.id)
+    expect(cell.status()).toBe('done')
+    expect(cell.output()).toContainEqual({ type: 'html', html: '<div>hi</div>' })
+  })
+
+  test('AC: display({ type: "image" }) flows through runCell into cell.output', async () => {
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'display({ type: "image", mime: "image/svg+xml", data: "PHN2Zy8+" })')
+    await runCell(cell.id)
+    expect(cell.output()).toContainEqual({
+      type: 'image',
+      mime: 'image/svg+xml',
+      data: 'PHN2Zy8+',
+    })
+  })
+})
+
+// ─── Sandbox ───────────────────────────────────────────────────────────────
 
 describe('Epic 01 AC — Sandbox', () => {
   test('AC: typeof document is undefined inside sandbox', async () => {

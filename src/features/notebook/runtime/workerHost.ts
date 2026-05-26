@@ -205,5 +205,10 @@ function measureItemBytes(item: OutputItem): number {
       // SerializedValue stringify is fast enough at this scale; the budget
       // is forgiving so an order-of-magnitude estimate is fine.
       return JSON.stringify(item.value).length
+    case 'html':
+      return item.html.length
+    case 'image':
+      // Base64 payload dominates; mime is ~10 chars.
+      return item.data.length + item.mime.length
   }
 }
