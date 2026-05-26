@@ -9,6 +9,7 @@ import {
   stopAll,
   stopCell,
 } from './runtime'
+import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
 import { restartWorker } from '../runtime/workerHost'
 
 beforeEach(async () => {
@@ -129,6 +130,28 @@ describe('runAll', () => {
     expect(c.status()).toBe('skipped')
     expect(c.executionCount()).toBe(null) // never ran
   })
+})
+
+describe('notebookSettings.timeoutMs', () => {
+  test('default is 30 s', () => {
+    expect(timeoutMsAtom()).toBe(DEFAULT_TIMEOUT_MS)
+    expect(DEFAULT_TIMEOUT_MS).toBe(30_000)
+  })
+
+  test('a short user-set timeout interrupts an infinite loop quickly', async () => {
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'while(true){}')
+    timeoutMsAtom.set(200)
+    try {
+      const start = Date.now()
+      await runCell(cell.id)
+      const elapsed = Date.now() - start
+      expect(cell.status()).toBe('error')
+      expect(elapsed).toBeLessThan(1000)
+    } finally {
+      timeoutMsAtom.set(DEFAULT_TIMEOUT_MS)
+    }
+  }, 5000)
 })
 
 describe('stopCell / stopAll', () => {

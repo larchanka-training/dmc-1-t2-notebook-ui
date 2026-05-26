@@ -11,6 +11,7 @@ import { restartWorker, runInWorker } from '../runtime/workerHost'
 import type { OutputItem, RuntimeStatus, SharedScope } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
 import { cellsAtom, sharedScopeAtom } from './notebook'
+import { timeoutMsAtom } from './notebookSettings'
 
 export type KernelStatus = 'idle' | 'busy'
 
@@ -54,7 +55,8 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   cell.executionCount.set(counter)
 
   const scope = sharedScopeAtom()
-  const result = await wrap(runInWorker(cell.code(), scope))
+  const timeoutMs = timeoutMsAtom()
+  const result = await wrap(runInWorker(cell.code(), scope, { timeoutMs }))
   currentCellId = null
   sharedScopeAtom.set(result.scope)
   cell.output.set(result.items)
