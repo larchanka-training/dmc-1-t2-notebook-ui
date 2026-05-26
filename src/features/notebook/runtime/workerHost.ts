@@ -23,6 +23,10 @@ export interface WorkerHostOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
+/** Soft cap on cumulative output size per run. Going above triggers a host
+ *  terminate and a stderr marker, so a runaway `for(;;) console.log(...)`
+ *  cannot OOM the page. 5 MB is roughly Jupyter's default. */
+export const OUTPUT_BUDGET_BYTES = 5 * 1024 * 1024
 
 let worker: Worker | null = null
 let pending: Promise<unknown> = Promise.resolve()
@@ -95,11 +99,25 @@ function runOne(code: string, scope: SharedScope, timeoutMs: number): Promise<Ru
     // Single shared timer reference so cleanup can null it; we keep
     // const-binding via a never-firing nominal value for cleanup symmetry.
     const timer = { ref: 0 as unknown as ReturnType<typeof setTimeout> | null }
+    let bytesSoFar = 0
+    let truncated = false
     const onMessage = (event: MessageEvent<WorkerMsg>) => {
       const m = event.data
       if (m.runId !== runId) return
       if (m.kind === 'output') {
+        if (truncated) return // discard everything after the limit fires
+        bytesSoFar += measureItemBytes(m.item)
         items.push(m.item)
+        if (bytesSoFar > OUTPUT_BUDGET_BYTES) {
+          truncated = true
+          items.push({
+            type: 'stderr',
+            text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`,
+          })
+          cleanup()
+          restartWorker(scope)
+          resolve({ status: 'error', items, scope })
+        }
         return
       }
       // 'done'
@@ -134,4 +152,23 @@ function timedOutResult(timeoutMs: number, scope: SharedScope): RuntimeResult {
   const status: RuntimeStatus = 'timeout'
   const items: OutputItem[] = [{ type: 'stderr', text: `Execution timed out after ${timeoutMs}ms` }]
   return { status, items, scope }
+}
+
+/**
+ * Rough byte budget per output item. We don't need a perfect number —
+ * just enough to stop a `for (let i=0; i<1e7; i++) console.log('xxx')`
+ * loop before it OOMs the page.
+ */
+function measureItemBytes(item: OutputItem): number {
+  switch (item.type) {
+    case 'stdout':
+    case 'stderr':
+      return item.text.length
+    case 'error':
+      return item.name.length + item.message.length + (item.stack?.length ?? 0)
+    case 'result':
+      // SerializedValue stringify is fast enough at this scale; the budget
+      // is forgiving so an order-of-magnitude estimate is fine.
+      return JSON.stringify(item.value).length
+  }
 }

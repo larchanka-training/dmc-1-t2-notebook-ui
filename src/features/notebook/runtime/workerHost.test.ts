@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { restartWorker, runInWorker } from './workerHost'
+import { OUTPUT_BUDGET_BYTES, restartWorker, runInWorker } from './workerHost'
 
 // All worker tests share a single worker instance (singleton inside
 // workerHost). To keep them independent we restart between cases.
@@ -62,6 +62,24 @@ describe('runInWorker — serialisation', () => {
     expect(ra.items).toContainEqual({ type: 'stdout', text: 'first' })
     expect(rb.items).toContainEqual({ type: 'stdout', text: 'second' })
   })
+})
+
+describe('runInWorker — output budget', () => {
+  test('output above 5 MB triggers status=error with a truncation marker', async () => {
+    // Each iteration logs ~80 chars; ~70k iterations exceeds 5 MB. We use
+    // a small inner block so the QuickJS interrupt deadline doesn't fire
+    // first (the host budget check is what we're testing here).
+    const code = `
+      const chunk = 'x'.repeat(80);
+      for (let i = 0; i < 200000; i++) console.log(chunk);
+    `
+    const r = await runInWorker(code, undefined, { timeoutMs: 60_000 })
+    expect(r.status).toBe('error')
+    const marker = r.items.find(
+      (it) => it.type === 'stderr' && it.text.includes(`${OUTPUT_BUDGET_BYTES} bytes`),
+    )
+    expect(marker).toBeDefined()
+  }, 10_000)
 })
 
 describe('runInWorker — shared scope across runs', () => {
