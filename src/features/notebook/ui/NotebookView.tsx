@@ -10,28 +10,22 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
+import { NotebookToolbar } from './NotebookToolbar'
 import type { Cell, CellViewMode } from '../domain/cell'
-import {
-  addCell,
-  cellsAtom,
-  deleteCell,
-  moveCell,
-  runCell,
-  updateCellCode,
-} from '../model/notebook'
+import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
+import { runCell, stopCell } from '../model/runtime'
 
 interface NotebookRowProps {
   cell: Cell
-  index: number
   isFirst: boolean
   isLast: boolean
 }
 
-const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, index, isFirst, isLast }) => {
+const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }) => {
   return (
     <div data-cell-id={cell.id}>
       <NotebookCell
-        index={index}
+        executionCount={cell.executionCount()}
         kind={cell.kind}
         code={cell.code()}
         output={cell.output()}
@@ -42,6 +36,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, index, isFirst, i
         onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
         onViewModeChange={wrap((mode: CellViewMode) => cell.viewMode.set(mode))}
         onRun={wrap(() => runCell(cell.id))}
+        onStop={wrap(() => stopCell(cell.id))}
         onDelete={wrap(() => deleteCell(cell.id))}
         onMoveUp={wrap(() => moveCell(cell.id, -1))}
         onMoveDown={wrap(() => moveCell(cell.id, 1))}
@@ -119,20 +114,18 @@ export const NotebookView = reatomComponent(() => {
     <div className="flex flex-1 min-h-0">
       <main className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          <header className="mb-8">
-            <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Local scratchpad · autosaved</p>
+          <header className="mb-8 flex items-end justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
+              <p className="mt-1 text-sm text-muted-foreground">Local scratchpad · autosaved</p>
+            </div>
+            <NotebookToolbar />
           </header>
 
           <div className="flex flex-col gap-6">
             {cells.map((cell, idx) => (
               <div key={cell.id} className="flex flex-col gap-6">
-                <NotebookRow
-                  cell={cell}
-                  index={idx + 1}
-                  isFirst={idx === 0}
-                  isLast={idx === cells.length - 1}
-                />
+                <NotebookRow cell={cell} isFirst={idx === 0} isLast={idx === cells.length - 1} />
                 {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
               </div>
             ))}

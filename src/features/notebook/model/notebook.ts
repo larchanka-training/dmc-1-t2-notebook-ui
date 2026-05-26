@@ -1,6 +1,5 @@
-import { action, atom, wrap } from '@reatom/core'
+import { action, atom } from '@reatom/core'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
-import { runInWorker } from '../runtime/workerHost'
 import type { SharedScope } from '../runtime/types'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
@@ -47,18 +46,3 @@ export const updateCellCode = action((id: string, code: string) => {
   const cell = cellsAtom().find((c) => c.id === id)
   cell?.code.set(code)
 }, 'notebook.cells.updateCode')
-
-export const runCell = action(async (id: string) => {
-  const cell = cellsAtom().find((c) => c.id === id)
-  if (!cell) return
-  cell.status.set('running')
-  cell.output.set([])
-  const code = cell.code()
-  const scope = sharedScopeAtom()
-  const result = await wrap(runInWorker(code, scope))
-  cell.output.set(result.items)
-  // Always carry the scope forward (even on error — partial assignments
-  // before the throw should still be visible, matching Jupyter).
-  sharedScopeAtom.set(result.scope)
-  cell.status.set(result.status === 'done' ? 'done' : 'error')
-}, 'notebook.cells.run')

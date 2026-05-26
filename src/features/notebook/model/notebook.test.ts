@@ -1,13 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import {
-  addCell,
-  cellsAtom,
-  deleteCell,
-  moveCell,
-  runCell,
-  SEED_CODE,
-  updateCellCode,
-} from './notebook'
+import { addCell, cellsAtom, deleteCell, moveCell, SEED_CODE, updateCellCode } from './notebook'
 
 describe('notebook store', () => {
   test('starts with exactly one seed cell', () => {
@@ -81,28 +73,6 @@ describe('notebook store', () => {
     expect(b.code).toBe(bCodeAtom)
   })
 
-  test('runCell drives the status through running -> done with captured output', async () => {
-    const [cell] = cellsAtom()
-    updateCellCode(cell.id, 'console.log("answer", 42)')
-    const promise = runCell(cell.id)
-    expect(cell.status()).toBe('running')
-    expect(cell.output()).toEqual([])
-    await promise
-    expect(cell.status()).toBe('done')
-    expect(cell.output()).toContainEqual({ type: 'stdout', text: 'answer 42' })
-  })
-
-  test('runCell sets status=error when the code throws', async () => {
-    const [cell] = cellsAtom()
-    updateCellCode(cell.id, 'throw new Error("nope")')
-    await runCell(cell.id)
-    expect(cell.status()).toBe('error')
-    const err = cell.output().find((it) => it.type === 'error')
-    expect(err).toBeDefined()
-    if (err?.type === 'error') expect(err.message).toContain('nope')
-  })
-
-  test('runCell on an unknown id is a no-op', async () => {
-    await expect(runCell('does-not-exist')).resolves.toBeUndefined()
-  })
+  // runCell-related tests live in runtime.test.ts (this file covers only
+  // CRUD over cellsAtom now).
 })

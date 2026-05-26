@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   Play,
+  Square,
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -27,7 +28,8 @@ import type { OutputItem } from '../runtime/types'
 import { OutputView } from './OutputView'
 
 export interface NotebookCellProps {
-  index: number
+  /** Execution counter shown as `[N]`; null means the cell has never run. */
+  executionCount?: number | null
   kind?: CellKind
   code: string
   output?: OutputItem[]
@@ -39,6 +41,7 @@ export interface NotebookCellProps {
   onCodeChange?: (code: string) => void
   onViewModeChange?: (mode: CellViewMode) => void
   onRun?: () => void
+  onStop?: () => void
   onDelete?: () => void
   onMoveUp?: () => void
   onMoveDown?: () => void
@@ -83,7 +86,7 @@ const markdownComponents: Components = {
 }
 
 export function NotebookCell({
-  index,
+  executionCount = null,
   kind = 'code',
   code,
   output = [],
@@ -95,6 +98,7 @@ export function NotebookCell({
   onCodeChange,
   onViewModeChange,
   onRun,
+  onStop,
   onDelete,
   onMoveUp,
   onMoveDown,
@@ -137,7 +141,24 @@ export function NotebookCell({
         )}
       >
         <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/40 rounded-t-xl">
-          {isCode && onRun ? (
+          {isCode && isRunning && onStop ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Stop cell"
+                    className="size-7 text-destructive hover:bg-destructive/10"
+                    onClick={onStop}
+                  >
+                    <Square className="size-4 fill-current" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Stop cell</TooltipContent>
+            </Tooltip>
+          ) : isCode && onRun ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -167,7 +188,9 @@ export function NotebookCell({
           )}
 
           {isCode ? (
-            <span className="text-xs text-muted-foreground font-mono select-none">[{index}]</span>
+            <span className="text-xs text-muted-foreground font-mono select-none">
+              [{executionCount ?? ' '}]
+            </span>
           ) : null}
 
           <div className="ml-auto flex items-center gap-1">

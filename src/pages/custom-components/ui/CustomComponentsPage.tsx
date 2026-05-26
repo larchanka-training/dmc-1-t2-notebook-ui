@@ -108,7 +108,7 @@ function LiveCellDemo() {
 
   return (
     <NotebookCell
-      index={1}
+      executionCount={status === 'idle' ? null : 1}
       code={code}
       output={output}
       status={status}
@@ -140,7 +140,7 @@ export default function CustomComponentsPage() {
         <p className="text-xs text-muted-foreground">Static states:</p>
 
         <NotebookCell
-          index={1}
+          executionCount={1}
           code={`console.log("done state")`}
           output={[{ type: 'stdout', text: 'done state' }]}
           status="done"
@@ -149,7 +149,7 @@ export default function CustomComponentsPage() {
         />
 
         <NotebookCell
-          index={2}
+          executionCount={2}
           code={`throw new Error("something went wrong")`}
           output={[{ type: 'error', name: 'Error', message: 'something went wrong' }]}
           status="error"
@@ -157,7 +157,7 @@ export default function CustomComponentsPage() {
         />
 
         <NotebookCell
-          index={3}
+          executionCount={3}
           code={`await new Promise(r => setTimeout(r, 2000))`}
           status="running"
           readOnly
@@ -169,7 +169,7 @@ export default function CustomComponentsPage() {
 
         <PropTable
           rows={[
-            ['index', 'number', 'Cell number shown in the header badge'],
+            ['executionCount', 'number | null', 'Run-counter shown as [N]; null until first run'],
             ['code', 'string', 'The source code displayed in the editor'],
             ['output', 'OutputItem[]?', 'Structured output items (stdout, stderr, result, error)'],
             [

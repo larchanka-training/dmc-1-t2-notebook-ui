@@ -5,11 +5,20 @@ export {
   addCell,
   deleteCell,
   moveCell,
-  runCell,
   updateCellCode,
   sharedScopeAtom,
   SEED_CODE,
 } from './model/notebook'
+export {
+  runCell,
+  runAll,
+  stopCell,
+  stopAll,
+  restartKernel,
+  runtimeStatusAtom,
+  execCounterAtom,
+  queueAtom,
+} from './model/runtime'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { reatomCell } from './domain/cell'
 export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'

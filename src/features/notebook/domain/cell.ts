@@ -1,7 +1,7 @@
 import { atom, type Atom } from '@reatom/core'
 import type { OutputItem } from '../runtime/types'
 
-export type CellStatus = 'idle' | 'running' | 'done' | 'error'
+export type CellStatus = 'idle' | 'running' | 'done' | 'error' | 'interrupted' | 'skipped'
 export type CellKind = 'code' | 'markdown'
 export type CellViewMode = 'edit' | 'preview'
 
@@ -12,6 +12,12 @@ export interface Cell {
   output: Atom<OutputItem[]>
   status: Atom<CellStatus>
   viewMode: Atom<CellViewMode>
+  /**
+   * Run-counter shown as `[N]` in the cell header. `null` until the cell
+   * is run for the first time. Reset to null only by Restart Kernel —
+   * editing the code does NOT bump or clear this.
+   */
+  executionCount: Atom<number | null>
 }
 
 function uid() {
@@ -26,5 +32,6 @@ export function reatomCell(initialCode = '', kind: CellKind = 'code', id = uid()
     output: atom<OutputItem[]>([], `notebook.cells#${id}.output`),
     status: atom<CellStatus>('idle', `notebook.cells#${id}.status`),
     viewMode: atom<CellViewMode>('edit', `notebook.cells#${id}.viewMode`),
+    executionCount: atom<number | null>(null, `notebook.cells#${id}.executionCount`),
   }
 }

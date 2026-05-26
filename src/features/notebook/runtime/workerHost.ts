@@ -26,6 +26,12 @@ const DEFAULT_TIMEOUT_MS = 30_000
 
 let worker: Worker | null = null
 let pending: Promise<unknown> = Promise.resolve()
+/**
+ * Resolver of the currently in-flight run, if any. Set when a run starts,
+ * cleared on done/timeout. `restartWorker` calls this to free a stuck run
+ * (e.g. while(true) interrupted by an external Stop).
+ */
+let inFlightResolver: ((scope: SharedScope) => void) | null = null
 
 function ensureWorker(): Worker {
   if (worker) return worker
@@ -33,12 +39,23 @@ function ensureWorker(): Worker {
   return worker
 }
 
-/** Drop the current worker so the next run gets a fresh one. */
-export function restartWorker(): void {
+/**
+ * Drop the current worker so the next run gets a fresh one. Also frees
+ * the currently waiting `runInWorker` promise so callers don't hang for
+ * the full timeout.
+ */
+export function restartWorker(scope: SharedScope = {}): void {
   if (worker) {
     worker.terminate()
     worker = null
   }
+  if (inFlightResolver) {
+    const resolver = inFlightResolver
+    inFlightResolver = null
+    resolver(scope)
+  }
+  // Fresh chain — don't let an old run hold up the next call.
+  pending = Promise.resolve()
 }
 
 function nextRunId(): string {
@@ -71,9 +88,13 @@ function runOne(code: string, scope: SharedScope, timeoutMs: number): Promise<Ru
   return new Promise<RuntimeResult>((resolve) => {
     const cleanup = () => {
       w.removeEventListener('message', onMessage)
-      clearTimeout(timer)
+      if (timer.ref) clearTimeout(timer.ref)
+      inFlightResolver = null
     }
 
+    // Single shared timer reference so cleanup can null it; we keep
+    // const-binding via a never-firing nominal value for cleanup symmetry.
+    const timer = { ref: 0 as unknown as ReturnType<typeof setTimeout> | null }
     const onMessage = (event: MessageEvent<WorkerMsg>) => {
       const m = event.data
       if (m.runId !== runId) return
@@ -87,14 +108,22 @@ function runOne(code: string, scope: SharedScope, timeoutMs: number): Promise<Ru
     }
     w.addEventListener('message', onMessage)
 
-    const timer = setTimeout(() => {
+    // Allow external restartWorker() to unstick this run — resolves as
+    // 'interrupted' so the caller can update cell status accordingly.
+    inFlightResolver = (carriedScope) => {
       cleanup()
-      // Hard kill the worker — the QuickJS deadline-interrupt may not be
-      // enough (e.g. a future native blocking call). A fresh worker is
-      // cheap.
-      restartWorker()
+      resolve({ status: 'interrupted', items, scope: carriedScope })
+    }
+
+    timer.ref = setTimeout(() => {
+      cleanup()
+      restartWorker(scope)
       resolve(timedOutResult(timeoutMs, scope))
     }, timeoutMs + 100)
+    // Don't pin the Node event loop — vitest waits for handles to settle.
+    if (typeof (timer.ref as unknown as { unref?: () => void }).unref === 'function') {
+      ;(timer.ref as unknown as { unref: () => void }).unref()
+    }
 
     const runMsg: HostMsg = { kind: 'run', runId, code, scope, timeoutMs }
     w.postMessage(runMsg)
