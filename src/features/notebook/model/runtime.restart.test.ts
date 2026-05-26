@@ -3,7 +3,7 @@
 // causes @vitest/web-worker to hang on pending RPC during teardown.
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { addCell, cellsAtom, deleteCell, sharedScopeAtom, updateCellCode } from './notebook'
+import { addCell, cellsAtom, deleteCell, updateCellCode } from './notebook'
 import { execCounterAtom, queueAtom, restartKernel, runCell } from './runtime'
 import { restartWorker } from '../runtime/workerHost'
 
@@ -32,12 +32,11 @@ describe('restartKernel', () => {
     await runCell(b.id)
 
     expect(execCounterAtom()).toBe(2)
-    expect(sharedScopeAtom()).toEqual({ survives: 1 })
+    expect(b.output()).toContainEqual({ type: 'stdout', text: '1' })
 
     restartKernel()
 
     expect(execCounterAtom()).toBe(0)
-    expect(sharedScopeAtom()).toEqual({})
     expect(queueAtom()).toEqual([])
     expect(a.status()).toBe('idle')
     expect(b.status()).toBe('idle')

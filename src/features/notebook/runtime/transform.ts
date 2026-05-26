@@ -1,55 +1,62 @@
 // AST-level rewriting that wires shared scope between cells.
 //
-// Why an AST is needed:
-//   `with (__ctx)` does NOT capture assignments. `var x = 1` inside `with`
-//   still creates the binding in the surrounding function scope, never
-//   touching __ctx. So we parse the cell, locate top-level declarations,
-//   and emit code that writes them through __ctx.
+// The kernel runs each cell inside a fresh async IIFE, but the QuickJS VM
+// itself is persistent. Declarations made with `const`/`let`/`var`/
+// `function`/`class` are block-local to the IIFE, so to make them visible in
+// later cells we additionally publish each top-level binding onto
+// `globalThis`. A later cell reads a bare identifier (e.g. `x`), which the VM
+// resolves to `globalThis.x`.
 //
-// Three rewrites happen, in order:
+// Two rewrites happen:
 //
-//   1. PRELUDE — for every entry in the incoming scope we emit
-//      `const <name> = globalThis.__ctx.<name>`, so existing identifiers
-//      from previous cells resolve.
+//   1. TOP-LEVEL DECLARATIONS — the original declaration is kept verbatim
+//      (so references later in the *same* cell resolve to the local binding),
+//      followed by `globalThis.<name> = <name>` for every bound identifier.
+//      This covers plain ids, multi-declarators, destructuring patterns,
+//      functions and classes uniformly.
 //
-//   2. TOP-LEVEL DECLARATIONS — `const x = expr` becomes
-//      `globalThis.__ctx.x = (expr); const x = globalThis.__ctx.x`.
-//      `function foo(...) {}` becomes
-//      `function foo(...) {} globalThis.__ctx.foo = foo`.
-//      We keep the local binding because subsequent statements in the
-//      same cell may already reference it directly.
+//   2. TRAILING EXPRESSION — if the last top-level node is an
+//      ExpressionStatement, it becomes `return <expression>` so the value
+//      populates the `result` OutputItem (REPL-like behaviour).
 //
-//   3. TRAILING EXPRESSION — if the last top-level node is an
-//      ExpressionStatement, we rewrite it into `return <expression>`.
-//      That populates the `result` OutputItem (REPL-like behaviour).
+// Because there is no prelude and no `__ctx`, re-running a cell with
+// `const x = 1` is safe: each run is a fresh IIFE with a single `const x`.
 //
 // Nested declarations (inside `if`, `for`, function bodies, etc.) are
-// deliberately NOT lifted: their scope is private to the block.
+// deliberately NOT published: their scope is private to the block.
+//
+// ESM `import`/`export` are rejected with a clear error — QuickJS has no
+// module loader here, and a bare SyntaxError from the VM is cryptic.
 
 import { Parser } from 'acorn'
 import type {
+  ClassDeclaration,
   Expression,
   ExpressionStatement,
   FunctionDeclaration,
-  Identifier,
   ModuleDeclaration,
   Node,
+  Pattern,
   Program,
   Statement,
   VariableDeclaration,
 } from 'acorn'
-import type { SharedScope } from './types'
 
 export interface TransformResult {
-  /** Rewritten source with prelude + lifted declarations + return trailer. */
+  /** Rewritten source: declarations published to globalThis + return trailer. */
   code: string
 }
 
-const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+class UnsupportedSyntaxError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SyntaxError'
+  }
+}
 
-export function transformCellCode(source: string, scope: SharedScope): TransformResult {
+export function transformCellCode(source: string): TransformResult {
   // `allowReturnOutsideFunction` lets us emit `return <expr>` as the trailing
-  // statement; we wrap everything in an async IIFE on the caller side.
+  // statement; the kernel wraps everything in an async IIFE.
   const ast = Parser.parse(source, {
     ecmaVersion: 'latest',
     sourceType: 'module',
@@ -57,18 +64,7 @@ export function transformCellCode(source: string, scope: SharedScope): Transform
     allowReturnOutsideFunction: true,
   }) as Program
 
-  const prelude = buildPrelude(scope)
-  const body = rewriteBody(ast.body, source)
-  return { code: prelude ? `${prelude}\n${body}` : body }
-}
-
-function buildPrelude(scope: SharedScope): string {
-  const lines: string[] = []
-  for (const key of Object.keys(scope)) {
-    if (!IDENTIFIER_RE.test(key)) continue
-    lines.push(`const ${key} = globalThis.__ctx.${key}`)
-  }
-  return lines.join('\n')
+  return { code: rewriteBody(ast.body, source) }
 }
 
 function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string): string {
@@ -76,10 +72,18 @@ function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string)
   for (let i = 0; i < body.length; i++) {
     const node = body[i]
     const isLast = i === body.length - 1
+    if (node.type === 'ImportDeclaration') {
+      throw new UnsupportedSyntaxError('import is not supported in notebook cells yet')
+    }
+    if (node.type.startsWith('Export')) {
+      throw new UnsupportedSyntaxError('export is not supported in notebook cells yet')
+    }
     if (node.type === 'VariableDeclaration') {
       parts.push(rewriteVariableDeclaration(node, source))
     } else if (node.type === 'FunctionDeclaration') {
-      parts.push(rewriteFunctionDeclaration(node, source))
+      parts.push(rewriteNamedDeclaration(node, source, (node as FunctionDeclaration).id?.name))
+    } else if (node.type === 'ClassDeclaration') {
+      parts.push(rewriteNamedDeclaration(node, source, (node as ClassDeclaration).id?.name))
     } else if (isLast && node.type === 'ExpressionStatement') {
       parts.push(rewriteTrailingExpression(node, source))
     } else {
@@ -90,39 +94,63 @@ function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string)
 }
 
 function rewriteVariableDeclaration(node: VariableDeclaration, source: string): string {
-  // `const a = 1, b = 2` → declarations: [{ id: a, init: 1 }, { id: b, init: 2 }]
-  // We keep the original declaration (so locals resolve), then write each
-  // initialised binding through __ctx in a follow-up statement.
-  const assignments: string[] = []
+  // Keep the original declaration (so locals resolve within the cell), then
+  // publish every bound identifier onto globalThis for later cells.
+  const names = new Set<string>()
   for (const decl of node.declarations) {
-    if (decl.id.type !== 'Identifier' || decl.init == null) continue
-    assignments.push(`globalThis.__ctx.${decl.id.name} = ${decl.id.name}`)
+    collectPatternNames(decl.id, names)
   }
-  const original = sliceNode(source, node)
-  return assignments.length ? `${original}\n${assignments.join('\n')}` : original
+  return withGlobalPublish(sliceNode(source, node), names)
 }
 
-function rewriteFunctionDeclaration(node: FunctionDeclaration, source: string): string {
+function rewriteNamedDeclaration(node: Node, source: string, name: string | undefined): string {
   const original = sliceNode(source, node)
-  // Anonymous function declarations only happen as `export default`; we
-  // don't see them at the top level here because of sourceType=module
-  // semantics (would parse but not declare a name).
-  const id = node.id as Identifier | null
-  if (!id) return original
-  return `${original}\nglobalThis.__ctx.${id.name} = ${id.name}`
+  if (!name) return original
+  return withGlobalPublish(original, new Set([name]))
+}
+
+function withGlobalPublish(original: string, names: Set<string>): string {
+  if (names.size === 0) return original
+  const publish = [...names].map((name) => `globalThis.${name} = ${name}`).join('\n')
+  return `${original}\n${publish}`
+}
+
+/**
+ * Recursively collect every bound identifier name from a binding pattern:
+ * plain ids, object/array destructuring, rest elements, defaults.
+ */
+function collectPatternNames(pattern: Pattern, out: Set<string>): void {
+  switch (pattern.type) {
+    case 'Identifier':
+      out.add(pattern.name)
+      return
+    case 'ObjectPattern':
+      for (const prop of pattern.properties) {
+        if (prop.type === 'RestElement') collectPatternNames(prop.argument, out)
+        else collectPatternNames(prop.value, out)
+      }
+      return
+    case 'ArrayPattern':
+      for (const el of pattern.elements) {
+        if (el) collectPatternNames(el, out)
+      }
+      return
+    case 'RestElement':
+      collectPatternNames(pattern.argument, out)
+      return
+    case 'AssignmentPattern':
+      collectPatternNames(pattern.left, out)
+      return
+    default:
+      // MemberExpression etc. cannot appear in a declaration binding.
+      return
+  }
 }
 
 function rewriteTrailingExpression(node: ExpressionStatement, source: string): string {
-  return `return ${sliceExpression(source, node.expression)}`
+  return `return ${sliceNode(source, node.expression as Expression)}`
 }
 
 function sliceNode(source: string, node: Node): string {
-  // acorn nodes carry start/end offsets into the source string.
-  const start = (node as Node & { start: number }).start
-  const end = (node as Node & { end: number }).end
-  return source.slice(start, end)
-}
-
-function sliceExpression(source: string, expr: Expression): string {
-  return sliceNode(source, expr)
+  return source.slice(node.start, node.end)
 }

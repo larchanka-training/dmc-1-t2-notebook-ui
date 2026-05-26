@@ -3,7 +3,7 @@
 // the same rationale.
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { addCell, cellsAtom, deleteCell, sharedScopeAtom, updateCellCode } from '../model/notebook'
+import { addCell, cellsAtom, deleteCell, updateCellCode } from '../model/notebook'
 import { execCounterAtom, queueAtom, restartKernel, runCell } from '../model/runtime'
 import { restartWorker } from './workerHost'
 
@@ -31,12 +31,12 @@ describe('Epic 01 AC — Restart Kernel', () => {
     await runCell(a.id)
     await runCell(b.id)
     expect(execCounterAtom()).toBe(2)
-    expect(sharedScopeAtom()).toEqual({ survives: 1 })
+    // Shared scope lives in the worker VM; observe it through cell B output.
+    expect(b.output()).toContainEqual({ type: 'stdout', text: '1' })
 
     restartKernel()
 
     expect(execCounterAtom()).toBe(0)
-    expect(sharedScopeAtom()).toEqual({})
     expect(queueAtom()).toEqual([])
     expect(a.executionCount()).toBe(null)
     expect(b.executionCount()).toBe(null)

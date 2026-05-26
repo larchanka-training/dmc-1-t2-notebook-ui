@@ -36,7 +36,7 @@ describe('runInWorker — basic round trip', () => {
 describe('runInWorker — timeout and respawn', () => {
   test('infinite loop is stopped within the host deadline', async () => {
     const start = Date.now()
-    const r = await runInWorker('while(true){}', undefined, { timeoutMs: 200 })
+    const r = await runInWorker('while(true){}', { timeoutMs: 200 })
     const elapsed = Date.now() - start
     expect(r.status).toBe('timeout')
     // Either an in-VM interrupt (error item) or a host-side terminate
@@ -45,8 +45,8 @@ describe('runInWorker — timeout and respawn', () => {
     expect(elapsed).toBeLessThan(700)
   }, 3000)
 
-  test('next call after a timeout still works (worker respawns)', async () => {
-    await runInWorker('while(true){}', undefined, { timeoutMs: 150 })
+  test('next call after a timeout still works (kernel survives)', async () => {
+    await runInWorker('while(true){}', { timeoutMs: 150 })
     const r = await runInWorker('console.log(42)')
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'stdout', text: '42' })
@@ -73,7 +73,7 @@ describe('runInWorker — output budget', () => {
       const chunk = 'x'.repeat(80);
       for (let i = 0; i < 200000; i++) console.log(chunk);
     `
-    const r = await runInWorker(code, undefined, { timeoutMs: 60_000 })
+    const r = await runInWorker(code, { timeoutMs: 60_000 })
     expect(r.status).toBe('error')
     const marker = r.items.find(
       (it) => it.type === 'stderr' && it.text.includes(`${OUTPUT_BUDGET_BYTES} bytes`),
@@ -82,25 +82,17 @@ describe('runInWorker — output budget', () => {
   }, 10_000)
 })
 
-describe('runInWorker — shared scope across runs', () => {
-  test('const from run A is visible in run B', async () => {
-    const a = await runInWorker('const x = 7')
-    const b = await runInWorker('console.log(x)', a.scope)
+describe('runInWorker — persistent shared scope across runs', () => {
+  test('const from run A is visible in run B (scope lives in the worker VM)', async () => {
+    await runInWorker('const x = 7')
+    const b = await runInWorker('console.log(x)')
     expect(b.items).toContainEqual({ type: 'stdout', text: '7' })
   })
 
-  test('input scope round-trips when run does not modify it', async () => {
-    const r = await runInWorker('1', { x: 'keep' })
-    expect(r.scope).toEqual({ x: 'keep' })
-  })
-
-  test('restartWorker after assigning a var clears scope on next run', async () => {
-    const a = await runInWorker('const dropMe = 1')
-    // Restart the worker as if Restart Kernel was hit; pass empty scope.
+  test('restartWorker drops the VM so previous variables become undefined', async () => {
+    await runInWorker('const dropMe = 1')
     restartWorker()
-    const b = await runInWorker('console.log(typeof dropMe)', {})
+    const b = await runInWorker('console.log(typeof dropMe)')
     expect(b.items).toContainEqual({ type: 'stdout', text: 'undefined' })
-    // sanity: scope from `a` is unrelated to `b` here
-    expect(a.scope).toEqual({ dropMe: 1 })
   })
 })

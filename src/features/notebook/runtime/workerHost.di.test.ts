@@ -49,7 +49,7 @@ describe('workerHost — DI via setWorkerFactory', () => {
   test('routes through an inline WorkerLike without quickjs / web-worker shim', async () => {
     const fake = createFakeWorker((msg) => [
       { kind: 'output', runId: msg.runId, item: { type: 'stdout', text: 'fake-out' } },
-      { kind: 'done', runId: msg.runId, status: 'done', scope: msg.scope },
+      { kind: 'done', runId: msg.runId, status: 'done' },
     ])
     const restore = setWorkerFactory(() => fake.worker)
     try {
@@ -91,7 +91,7 @@ describe('workerHost — DI via setWorkerFactory', () => {
     }))
     const listeners: Array<(event: MessageEvent<WorkerMsg>) => void> = []
     try {
-      const r = await runInWorker('whatever', undefined, { timeoutMs: 60_000 })
+      const r = await runInWorker('whatever', { timeoutMs: 60_000 })
       expect(r.status).toBe('error')
       expect(terminated).toBe(true)
     } finally {

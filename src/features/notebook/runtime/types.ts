@@ -2,10 +2,13 @@
 //
 // Two layers communicate here:
 //   1. Host facade (workerHost.ts) ↔ Web Worker (worker.ts) via postMessage.
-//   2. Worker thread ↔ QuickJS sandbox (quickjs.ts) — pure function call.
+//   2. Worker thread ↔ QuickJS kernel (quickjs.ts) — pure function call.
 //
-// Both layers speak the same OutputItem[] and SerializedValue types, so a
-// notebook cell ends up with structured output it can render directly.
+// The kernel is *persistent*: a single QuickJS VM lives for the lifetime of
+// the worker, so `let`/`const`/`function`/`class` declared in one cell stay
+// visible in the next (real Jupyter-like shared scope). Because the scope
+// lives inside the VM, it never crosses the postMessage boundary — there is
+// no serialized scope snapshot in the protocol.
 
 /** Terminal status of a single run. */
 export type RuntimeStatus = 'done' | 'error' | 'timeout' | 'interrupted'
@@ -34,32 +37,21 @@ export type OutputItem =
   /** Base64-encoded image. MIME like `image/png` / `image/svg+xml`. */
   | { type: 'image'; mime: string; data: string }
 
-/**
- * Shared scope between cells (Jupyter-like). Snapshot of user-defined
- * top-level bindings carried between runs as plain values (serialized
- * via structured clone — postMessage friendly).
- *
- * Commit 1 carries this through as a placeholder (empty object). The
- * acorn-based transform in Commit 2 fills it.
- */
-export type SharedScope = Record<string, unknown>
-
-/** Final result of a single run, regardless of whether it ran in main thread or worker. */
+/** Final result of a single run. Scope is not returned — it lives in the VM. */
 export interface RuntimeResult {
   status: RuntimeStatus
   items: OutputItem[]
-  /** Updated shared scope to carry into the next run. */
-  scope: SharedScope
 }
 
 // ─── Worker protocol ─────────────────────────────────────────────────────────
 
 /** Messages sent host → worker. */
 export type HostMsg =
-  | { kind: 'run'; runId: string; code: string; scope: SharedScope; timeoutMs: number }
+  | { kind: 'run'; runId: string; code: string; timeoutMs: number }
+  /** Drop the VM and create a fresh one — Restart Kernel. */
   | { kind: 'reset' }
 
 /** Messages sent worker → host. */
 export type WorkerMsg =
   | { kind: 'output'; runId: string; item: OutputItem }
-  | { kind: 'done'; runId: string; status: RuntimeStatus; scope: SharedScope }
+  | { kind: 'done'; runId: string; status: RuntimeStatus }

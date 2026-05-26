@@ -8,9 +8,9 @@
 
 import { action, atom, wrap } from '@reatom/core'
 import { restartWorker, runInWorker } from '../runtime/workerHost'
-import type { OutputItem, RuntimeStatus, SharedScope } from '../runtime/types'
+import type { OutputItem, RuntimeStatus } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
-import { cellsAtom, sharedScopeAtom } from './notebook'
+import { cellsAtom } from './notebook'
 import { timeoutMsAtom } from './notebookSettings'
 
 export type KernelStatus = 'idle' | 'busy'
@@ -62,11 +62,11 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   execCounterAtom.set(counter)
   cell.executionCount.set(counter)
 
-  const scope = sharedScopeAtom()
   const timeoutMs = timeoutMsAtom()
-  const result = await wrap(runInWorker(cell.code(), scope, { timeoutMs }))
+  // Shared scope lives inside the persistent worker VM — no snapshot is
+  // passed here or carried back.
+  const result = await wrap(runInWorker(cell.code(), { timeoutMs }))
   currentCellId = null
-  sharedScopeAtom.set(result.scope)
   cell.output.set(result.items)
   const finalStatus = mapStatus(cell.id, result.status, result.items)
   cell.status.set(finalStatus)
@@ -179,8 +179,9 @@ export const stopAll = action(() => {
 // ─── Restart Kernel ──────────────────────────────────────────────────────────
 
 export const restartKernel = action(() => {
+  // Terminating the worker drops the persistent VM; the next run spins up a
+  // fresh kernel with an empty scope.
   restartWorker()
-  sharedScopeAtom.set({} as SharedScope)
   execCounterAtom.set(0)
   queueAtom.set([])
   skippedCellsAtom.set([])

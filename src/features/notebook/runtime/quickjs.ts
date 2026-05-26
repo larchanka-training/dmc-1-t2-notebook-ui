@@ -1,196 +1,151 @@
 // Sandboxed JS runtime built on quickjs-emscripten.
 //
-// Public contract:
-//   runInQuickJS(code, scope?, options?) → Promise<RuntimeResult>
+// Public contract — a *kernel* (persistent VM) with two methods:
 //
-// - `code` is wrapped in an async IIFE so top-level await works.
-// - `console.log/info/warn/error` are injected; everything else is gone
-//   (no window, no document, no fetch — that's the whole point).
-// - A deadline-based interrupt handler stops infinite loops.
-// - The trailing value of the IIFE is collected as a `result` OutputItem.
-// - The function never throws — any failure surfaces as an `error` item
-//   with status='error'.
+//   const kernel = await createKernel(options?)
+//   const result = await kernel.run(code, { timeoutMs })  // → RuntimeResult
+//   kernel.dispose()
+//
+// The kernel holds a single QuickJSContext for its entire lifetime, so
+// `let`/`const`/`function`/`class` declared in cell N are visible in cell
+// N+1 natively — no hand-rolled scope snapshot, no serialization. Each call
+// to `run`:
+//   - wraps the user code in an async IIFE so top-level `await` works;
+//   - rewrites top-level declarations through `transformCellCode` so they
+//     also publish to `globalThis` (otherwise the IIFE body would scope
+//     them locally and the next cell could not see them);
+//   - installs a fresh deadline-based interrupt handler — an infinite loop
+//     is broken without destroying the VM, the scope survives;
+//   - returns structured `OutputItem[]` plus a terminal status.
+//
+// `run` never throws — any failure surfaces as an `error` item.
 
 import { getQuickJS, type QuickJSContext, type QuickJSHandle } from 'quickjs-emscripten'
 
 import { serialize } from './serialize'
 import { transformCellCode } from './transform'
-import type { OutputItem, RuntimeResult, RuntimeStatus, SharedScope } from './types'
+import type { OutputItem, RuntimeResult, RuntimeStatus } from './types'
 
 export interface RuntimeOptions {
   /** Hard upper bound for execution time, in ms. Default 30_000. */
   timeoutMs?: number
 }
 
+export interface Kernel {
+  run(code: string, options?: RuntimeOptions): Promise<RuntimeResult>
+  dispose(): void
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000
 
-/** Run user `code` inside a fresh QuickJS context. */
-export async function runInQuickJS(
-  code: string,
-  scope: SharedScope = {},
-  options: RuntimeOptions = {},
-): Promise<RuntimeResult> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+/** Create a fresh persistent kernel. */
+export async function createKernel(): Promise<Kernel> {
   const QuickJS = await getQuickJS()
   const vm = QuickJS.newContext()
-  const items: OutputItem[] = []
+  // Items array is rebound per-run, but console / display capture it via
+  // this mutable ref so we only have to install them once.
+  const sink: { items: OutputItem[] } = { items: [] }
+  installConsole(vm, sink)
+  installDisplay(vm, sink)
 
-  try {
-    installConsole(vm, items)
-    installDisplay(vm, items)
-    armInterrupt(vm, timeoutMs)
-    installScope(vm, scope)
-
-    // Transform user code: prelude (`const x = globalThis.__ctx.x`), top-level
-    // declarations lifted into __ctx, trailing ExpressionStatement → return.
-    let transformed: string
-    try {
-      transformed = transformCellCode(code, scope).code
-    } catch (err) {
-      items.push({
-        type: 'error',
-        name: 'SyntaxError',
-        message: err instanceof Error ? err.message : String(err),
-      })
-      return { status: 'error', items, scope }
-    }
-
-    const wrapped = `(async () => { ${transformed}\n })()`
-    const evalResult = vm.evalCode(wrapped)
-    if (evalResult.error) {
-      items.push(toErrorItem(vm, evalResult.error))
-      evalResult.error.dispose()
-      return { status: 'error', items, scope: extractScope(vm) }
-    }
-
-    const promiseHandle = evalResult.value
-    let status: RuntimeStatus = 'done'
-    try {
-      const resolved = vm.resolvePromise(promiseHandle)
-      vm.runtime.executePendingJobs()
-      const awaited = await resolved
-      if (awaited.error) {
-        items.push(toErrorItem(vm, awaited.error))
-        awaited.error.dispose()
-        status = 'error'
-      } else {
-        pushResultIfMeaningful(vm, awaited.value, items)
-        awaited.value.dispose()
-      }
-    } finally {
-      promiseHandle.dispose()
-    }
-
-    return { status, items, scope: extractScope(vm) }
-  } finally {
-    vm.dispose()
+  return {
+    async run(code, options = {}): Promise<RuntimeResult> {
+      return runOne(vm, sink, code, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    },
+    dispose() {
+      vm.dispose()
+    },
   }
+}
+
+async function runOne(
+  vm: QuickJSContext,
+  sink: { items: OutputItem[] },
+  code: string,
+  timeoutMs: number,
+): Promise<RuntimeResult> {
+  const items: OutputItem[] = []
+  sink.items = items
+
+  // 1) AST transform: publish top-level declarations to globalThis + return
+  //    the trailing expression (if any). Reject import/export early with a
+  //    readable SyntaxError.
+  let transformed: string
+  try {
+    transformed = transformCellCode(code).code
+  } catch (err) {
+    items.push({
+      type: 'error',
+      name: 'SyntaxError',
+      message: err instanceof Error ? err.message : String(err),
+    })
+    return { status: 'error', items }
+  }
+
+  // 2) Arm a deadline-based interrupt. The handler runs synchronously
+  //    between bytecode ops — it does NOT destroy the VM, only aborts the
+  //    current evaluation. Scope survives a timeout.
+  armDeadlineInterrupt(vm, timeoutMs)
+
+  // 3) Eval wrapped in async IIFE — supports `await` and returns a Promise.
+  const wrapped = `(async () => { ${transformed}\n })()`
+  const evalResult = vm.evalCode(wrapped)
+  if (evalResult.error) {
+    items.push(toErrorItem(vm, evalResult.error))
+    evalResult.error.dispose()
+    return { status: classifyError(items), items }
+  }
+
+  let status: RuntimeStatus = 'done'
+  try {
+    const resolved = vm.resolvePromise(evalResult.value)
+    vm.runtime.executePendingJobs()
+    const awaited = await resolved
+    if (awaited.error) {
+      items.push(toErrorItem(vm, awaited.error))
+      awaited.error.dispose()
+      status = classifyError(items)
+    } else {
+      pushResultIfMeaningful(vm, awaited.value, items)
+      awaited.value.dispose()
+    }
+  } finally {
+    evalResult.value.dispose()
+    vm.runtime.removeInterruptHandler()
+  }
+
+  return { status, items }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Set `globalThis.__ctx` inside the VM. Transformed user code reads from
- * and writes to this object — prelude binds locals from it, top-level
- * declarations write back into it.
+ * QuickJS calls this handler frequently while interpreting bytecode.
+ * Returning true tells the VM to abort with an InternalError("interrupted").
+ * After abort, the VM stays alive — only the current eval is unwound.
  */
-function installScope(vm: QuickJSContext, scope: SharedScope): void {
-  const ctx = vm.newObject()
-  for (const key of Object.keys(scope)) {
-    const handle = jsToHandle(vm, scope[key])
-    if (handle) {
-      vm.setProp(ctx, key, handle)
-      handle.dispose()
-    }
-  }
-  vm.setProp(vm.global, '__ctx', ctx)
-  ctx.dispose()
+function armDeadlineInterrupt(vm: QuickJSContext, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs
+  vm.runtime.setInterruptHandler(() => Date.now() > deadline)
 }
 
 /**
- * Read `globalThis.__ctx` out of the VM after a run, converting it back
- * into a plain JS object for postMessage. Only structured-clone-safe
- * values are preserved; functions/symbols get dropped at the boundary.
- */
-function extractScope(vm: QuickJSContext): SharedScope {
-  const handle = vm.getProp(vm.global, '__ctx')
-  try {
-    const dumped = vm.dump(handle) as unknown
-    if (!dumped || typeof dumped !== 'object') return {}
-    const result: SharedScope = {}
-    for (const [key, value] of Object.entries(dumped)) {
-      if (isStructuredCloneSafe(value)) result[key] = value
-    }
-    return result
-  } finally {
-    handle.dispose()
-  }
-}
-
-/**
- * Convert a host-side JS value into a VM handle. Only the subset we know
- * survives across postMessage is supported — strings, finite numbers,
- * booleans, null, plain objects/arrays. Anything else is silently dropped.
- */
-function jsToHandle(vm: QuickJSContext, value: unknown): QuickJSHandle | null {
-  if (value === null) return vm.null
-  if (value === undefined) return vm.undefined
-  if (typeof value === 'string') return vm.newString(value)
-  if (typeof value === 'number' && Number.isFinite(value)) return vm.newNumber(value)
-  if (typeof value === 'boolean') return value ? vm.true : vm.false
-  if (Array.isArray(value)) {
-    const arr = vm.newArray()
-    value.forEach((item, idx) => {
-      const childHandle = jsToHandle(vm, item)
-      if (childHandle) {
-        vm.setProp(arr, idx, childHandle)
-        childHandle.dispose()
-      }
-    })
-    return arr
-  }
-  if (typeof value === 'object') {
-    const obj = vm.newObject()
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      const childHandle = jsToHandle(vm, v)
-      if (childHandle) {
-        vm.setProp(obj, k, childHandle)
-        childHandle.dispose()
-      }
-    }
-    return obj
-  }
-  return null
-}
-
-function isStructuredCloneSafe(value: unknown): boolean {
-  if (value === null) return true
-  const t = typeof value
-  if (t === 'string' || t === 'boolean') return true
-  if (t === 'number') return Number.isFinite(value as number)
-  if (Array.isArray(value)) return value.every(isStructuredCloneSafe)
-  if (t === 'object') {
-    return Object.values(value as Record<string, unknown>).every(isStructuredCloneSafe)
-  }
-  return false
-}
-
-/**
- * Inject the Jupyter-style `display()` API: user code calls
- * `display({ type: 'html', value: '<b>x</b>' })` or
- * `display({ type: 'image', mime: 'image/png', data: '<base64>' })`
+ * Inject the Jupyter-style `display()` API. User code calls
+ *   display({ type: 'html', value: '<b>x</b>' })
+ *   display({ type: 'image', mime: 'image/png', data: '<base64>' })
  * and the host receives a matching OutputItem.
- *
- * Why a function and not magic-on-trailing-return: explicit > implicit.
- * The user controls when a rich block is produced and never has to
- * worry about a stray `<div>` string getting auto-promoted.
  */
-function installDisplay(vm: QuickJSContext, items: OutputItem[]): void {
+function installDisplay(vm: QuickJSContext, sink: { items: OutputItem[] }): void {
   const fn = vm.newFunction('display', (payloadHandle) => {
     if (!payloadHandle) return
-    const payload = vm.dump(payloadHandle) as unknown
+    let payload: unknown
+    try {
+      payload = vm.dump(payloadHandle) as unknown
+    } catch {
+      return
+    }
     const item = displayPayloadToItem(payload)
-    if (item) items.push(item)
+    if (item) sink.items.push(item)
   })
   vm.setProp(vm.global, 'display', fn)
   fn.dispose()
@@ -203,13 +158,16 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
     return { type: 'html', html: p.value }
   }
   if (p.type === 'image' && typeof p.mime === 'string' && typeof p.data === 'string') {
+    // Only well-known image MIME types are allowed — `<img>` shouldn't
+    // receive arbitrary user-controlled MIME strings.
+    if (!/^image\/(png|jpeg|gif|webp|svg\+xml)$/.test(p.mime)) return null
     return { type: 'image', mime: p.mime, data: p.data }
   }
   return null
 }
 
 /** Inject a minimal console object that pushes into the host-side `items`. */
-function installConsole(vm: QuickJSContext, items: OutputItem[]): void {
+function installConsole(vm: QuickJSContext, sink: { items: OutputItem[] }): void {
   const consoleHandle = vm.newObject()
   const channels: Array<{
     name: 'log' | 'info' | 'warn' | 'error'
@@ -222,8 +180,10 @@ function installConsole(vm: QuickJSContext, items: OutputItem[]): void {
   ]
   for (const { name, toItem } of channels) {
     const fn = vm.newFunction(name, (...args) => {
+      // quickjs-emscripten auto-disposes argument handles when the
+      // callback returns; we MUST NOT call `dispose()` on them ourselves.
       const text = args.map((arg) => stringifyArg(vm, arg)).join(' ')
-      items.push(toItem(text))
+      sink.items.push(toItem(text))
     })
     vm.setProp(consoleHandle, name, fn)
     fn.dispose()
@@ -233,21 +193,17 @@ function installConsole(vm: QuickJSContext, items: OutputItem[]): void {
 }
 
 /**
- * QuickJS calls this handler frequently while interpreting bytecode.
- * Returning true tells the VM to abort with an InternalError("interrupted").
- */
-function armInterrupt(vm: QuickJSContext, timeoutMs: number): void {
-  const deadline = Date.now() + timeoutMs
-  vm.runtime.setInterruptHandler(() => Date.now() > deadline)
-}
-
-/**
  * Build an `error` OutputItem from a QuickJS exception handle.
  * Best-effort: pulls name/message/stack if shaped like an Error,
  * otherwise serializes the dumped value into the message.
  */
 function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem {
-  const dumped = vm.dump(errorHandle) as unknown
+  let dumped: unknown
+  try {
+    dumped = vm.dump(errorHandle) as unknown
+  } catch {
+    return { type: 'error', name: 'Error', message: 'unknown error (failed to dump)' }
+  }
   if (dumped && typeof dumped === 'object') {
     const e = dumped as { name?: unknown; message?: unknown; stack?: unknown }
     const name = typeof e.name === 'string' && e.name ? e.name : 'Error'
@@ -256,6 +212,18 @@ function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem
     return { type: 'error', name, message, stack }
   }
   return { type: 'error', name: 'Error', message: safeToString(dumped) }
+}
+
+/**
+ * Differentiate a deadline-triggered interrupt from a regular error. The
+ * VM raises `InternalError: interrupted` when the interrupt handler returns
+ * true; we use it as the timeout signal.
+ */
+function classifyError(items: OutputItem[]): RuntimeStatus {
+  const interrupt = items.find(
+    (it) => it.type === 'error' && it.name === 'InternalError' && /interrupt/i.test(it.message),
+  )
+  return interrupt ? 'timeout' : 'error'
 }
 
 function safeToString(value: unknown): string {
@@ -270,19 +238,22 @@ function safeToString(value: unknown): string {
 }
 
 /**
- * Stringify a single console.log argument. Primitives go straight, objects
- * are rendered as JSON via the serialize step (so cycles and depth are safe).
+ * Stringify a single console.log argument. The argument handle is borrowed
+ * from quickjs-emscripten; do NOT dispose it here.
  */
 function stringifyArg(vm: QuickJSContext, handle: QuickJSHandle): string {
-  const dumped = vm.dump(handle) as unknown
-  handle.dispose()
+  let dumped: unknown
+  try {
+    dumped = vm.dump(handle) as unknown
+  } catch {
+    return '[unprintable]'
+  }
   if (dumped === undefined) return 'undefined'
   if (dumped === null) return 'null'
   if (typeof dumped === 'string') return dumped
   if (typeof dumped === 'number' || typeof dumped === 'boolean') return String(dumped)
-  // Object-ish — go through serialize and render compactly.
   try {
-    return JSON.stringify(dumped)
+    return JSON.stringify(dumped) ?? safeToString(serialize(dumped))
   } catch {
     return safeToString(serialize(dumped))
   }
@@ -297,7 +268,12 @@ function pushResultIfMeaningful(
   valueHandle: QuickJSHandle,
   items: OutputItem[],
 ): void {
-  const dumped = vm.dump(valueHandle) as unknown
+  let dumped: unknown
+  try {
+    dumped = vm.dump(valueHandle) as unknown
+  } catch {
+    return
+  }
   if (dumped === undefined) return
   items.push({ type: 'result', value: serialize(dumped) })
 }

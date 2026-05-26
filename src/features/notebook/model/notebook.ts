@@ -1,17 +1,9 @@
 import { action, atom } from '@reatom/core'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
-import type { SharedScope } from '../runtime/types'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
 export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
-
-/**
- * Shared scope carried between cell runs (Jupyter-like). Updated by
- * `runCell` after each successful run. Cleared by Restart Kernel
- * (commit 3).
- */
-export const sharedScopeAtom = atom<SharedScope>({}, 'notebook.sharedScope')
 
 export const addCell = action((afterId?: string, kind: CellKind = 'code') => {
   const cell = reatomCell('', kind)

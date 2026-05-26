@@ -11,7 +11,7 @@
 // @vitest/web-worker shim happy when running both groups.
 
 import { beforeEach, describe, expect, test } from 'vitest'
-import { addCell, cellsAtom, deleteCell, sharedScopeAtom, updateCellCode } from '../model/notebook'
+import { addCell, cellsAtom, deleteCell, updateCellCode } from '../model/notebook'
 import { execCounterAtom, restartKernel, runAll, runCell } from '../model/runtime'
 
 beforeEach(async () => {
@@ -281,7 +281,7 @@ describe('Epic 01 AC — Limits', () => {
     // mechanism via the lower-level entry point instead, since this is an
     // AC about the *mechanism*, not the default value.
     const { runInWorker } = await import('./workerHost')
-    const r = await runInWorker('while(true){}', undefined, { timeoutMs: 200 })
+    const r = await runInWorker('while(true){}', { timeoutMs: 200 })
     expect(r.status).toBe('timeout')
     expect(r.items.some((it) => it.type === 'stderr' || it.type === 'error')).toBe(true)
     // Sanity: cell still shows running state until runCell completes; for
@@ -295,7 +295,7 @@ describe('Epic 01 AC — Limits', () => {
       const chunk = 'x'.repeat(80);
       for (let i = 0; i < 200000; i++) console.log(chunk);
     `
-    const r = await runInWorker(code, undefined, { timeoutMs: 60_000 })
+    const r = await runInWorker(code, { timeoutMs: 60_000 })
     expect(r.status).toBe('error')
     expect(
       r.items.some(
@@ -304,11 +304,13 @@ describe('Epic 01 AC — Limits', () => {
     ).toBe(true)
   }, 10_000)
 
-  test('AC: sharedScopeAtom carries values across runs', async () => {
-    // Extra coverage: shared scope is the carrier; verify it directly.
+  test('AC: shared scope carries values across runs (observed via a later cell)', async () => {
     const [a] = cellsAtom()
+    const b = addCell()
     updateCellCode(a.id, 'const carried = 7')
+    updateCellCode(b.id, 'console.log(carried)')
     await runCell(a.id)
-    expect(sharedScopeAtom()).toEqual({ carried: 7 })
+    await runCell(b.id)
+    expect(b.output()).toContainEqual({ type: 'stdout', text: '7' })
   })
 })

@@ -1,90 +1,105 @@
 import { describe, expect, test } from 'vitest'
 import { transformCellCode } from './transform'
 
-describe('transformCellCode — top-level declarations are exposed via __ctx', () => {
-  test('const declaration is moved to __ctx and shadowed locally', () => {
-    const out = transformCellCode('const x = 1', {})
-    // Local `const x` must remain valid (so existing references work),
-    // and __ctx.x must end up with the value.
-    expect(out.code).toContain('__ctx.x =')
-    expect(out.code).toContain('const x =')
+describe('transformCellCode — top-level declarations publish to globalThis', () => {
+  test('const declaration is kept and published', () => {
+    const out = transformCellCode('const x = 1').code
+    expect(out).toMatch(/const x = 1/)
+    expect(out).toContain('globalThis.x = x')
   })
 
   test('let declaration', () => {
-    const out = transformCellCode('let y = 2', {})
-    expect(out.code).toContain('__ctx.y =')
-    expect(out.code).toMatch(/\blet y\b/)
+    const out = transformCellCode('let y = 2').code
+    expect(out).toMatch(/\blet y = 2\b/)
+    expect(out).toContain('globalThis.y = y')
   })
 
   test('var declaration', () => {
-    const out = transformCellCode('var z = 3', {})
-    expect(out.code).toContain('__ctx.z =')
-    expect(out.code).toMatch(/\bvar z\b/)
+    const out = transformCellCode('var z = 3').code
+    expect(out).toMatch(/\bvar z = 3\b/)
+    expect(out).toContain('globalThis.z = z')
   })
 
-  test('multiple declarations in one statement', () => {
-    const out = transformCellCode('const a = 1, b = 2', {})
-    expect(out.code).toContain('__ctx.a =')
-    expect(out.code).toContain('__ctx.b =')
+  test('multiple declarations in one statement publish each binding', () => {
+    const out = transformCellCode('const a = 1, b = 2').code
+    expect(out).toContain('globalThis.a = a')
+    expect(out).toContain('globalThis.b = b')
   })
 
-  test('function declaration', () => {
-    const out = transformCellCode('function greet() { return 1 }', {})
-    expect(out.code).toContain('__ctx.greet =')
-    // Should keep the function available locally as well.
-    expect(out.code).toMatch(/function greet/)
+  test('function declaration is published', () => {
+    const out = transformCellCode('function greet() { return 1 }').code
+    expect(out).toMatch(/function greet/)
+    expect(out).toContain('globalThis.greet = greet')
   })
 
-  test('nested declarations inside a block are NOT lifted', () => {
-    const out = transformCellCode('if (true) { const inner = 1 }', {})
-    expect(out.code).not.toContain('__ctx.inner')
+  test('class declaration is published', () => {
+    const out = transformCellCode('class Box {}').code
+    expect(out).toMatch(/class Box/)
+    expect(out).toContain('globalThis.Box = Box')
+  })
+
+  test('object destructuring publishes every bound name', () => {
+    const out = transformCellCode('const { a, b: c } = obj').code
+    expect(out).toContain('globalThis.a = a')
+    expect(out).toContain('globalThis.c = c')
+  })
+
+  test('array destructuring with rest publishes every bound name', () => {
+    const out = transformCellCode('const [first, ...rest] = arr').code
+    expect(out).toContain('globalThis.first = first')
+    expect(out).toContain('globalThis.rest = rest')
+  })
+
+  test('nested declarations inside a block are NOT published', () => {
+    const out = transformCellCode('if (true) { const inner = 1 }').code
+    expect(out).not.toContain('globalThis.inner')
   })
 })
 
-describe('transformCellCode — prelude inlines previous scope', () => {
-  test('prelude binds every incoming key as a local const', () => {
-    const out = transformCellCode('console.log(prev)', { prev: 7 })
-    expect(out.code).toMatch(/const prev = globalThis\.__ctx\.prev/)
-    // and original code is preserved after the prelude
-    expect(out.code).toContain('console.log(prev)')
+describe('transformCellCode — no prelude / re-run safety', () => {
+  test('produces no __ctx prelude (scope lives in the VM now)', () => {
+    const out = transformCellCode('console.log(prev)').code
+    expect(out).not.toContain('__ctx')
+    expect(out).toContain('console.log(prev)')
   })
 
-  test('skips invalid identifiers in the incoming scope', () => {
-    // A key like "1bad" or " with space" can't be a JS identifier; the
-    // transform must drop it from the prelude (a hard error would block
-    // unrelated cells from running).
-    const out = transformCellCode('1', { '1bad': 1, ok: 2 })
-    expect(out.code).not.toContain('1bad')
-    expect(out.code).toContain('const ok = globalThis.__ctx.ok')
-  })
-
-  test('empty scope produces no prelude bindings', () => {
-    const out = transformCellCode('1', {})
-    expect(out.code).not.toContain('globalThis.__ctx.')
+  test('re-running a const cell does not duplicate the declaration', () => {
+    // The same source transformed twice yields a single `const x` each time;
+    // there is no injected `const x` from a prelude that would clash.
+    const out = transformCellCode('const x = 1').code
+    const matches = out.match(/const x =/g) ?? []
+    expect(matches.length).toBe(1)
   })
 })
 
 describe('transformCellCode — trailing expression statement', () => {
   test('rewrites trailing ExpressionStatement into a return', () => {
-    const out = transformCellCode('1 + 2', {})
-    expect(out.code).toMatch(/return\s+1 \+ 2/)
+    const out = transformCellCode('1 + 2').code
+    expect(out).toMatch(/return\s+1 \+ 2/)
   })
 
   test('does not add return if the last statement is not an expression', () => {
-    const out = transformCellCode('const a = 1', {})
-    expect(out.code).not.toMatch(/^return/m)
+    const out = transformCellCode('const a = 1').code
+    expect(out).not.toMatch(/^return/m)
   })
 
   test('does not touch return inside a function declaration', () => {
-    const out = transformCellCode('function f(){ return 1 }', {})
-    // there should be exactly one `return 1` — the original inside f
-    const matches = out.code.match(/return 1/g) ?? []
+    const out = transformCellCode('function f(){ return 1 }').code
+    const matches = out.match(/return 1/g) ?? []
     expect(matches.length).toBe(1)
   })
 })
 
-describe('transformCellCode — syntax errors are surfaced', () => {
-  test('throws SyntaxError on garbage input', () => {
-    expect(() => transformCellCode('this is not js', {})).toThrow()
+describe('transformCellCode — unsupported syntax surfaces clear errors', () => {
+  test('throws on garbage input', () => {
+    expect(() => transformCellCode('this is not js')).toThrow()
+  })
+
+  test('throws a readable error on import', () => {
+    expect(() => transformCellCode('import x from "y"')).toThrow(/import is not supported/)
+  })
+
+  test('throws a readable error on export', () => {
+    expect(() => transformCellCode('export const x = 1')).toThrow(/export is not supported/)
   })
 })

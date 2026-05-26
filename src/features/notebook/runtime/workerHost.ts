@@ -1,21 +1,16 @@
 // Host facade for the sandbox worker.
 //
 // Public API:
-//   runInWorker(code, scope?, options?) → Promise<RuntimeResult>
-//   restartWorker() — drop the current worker (used by Restart Kernel later).
+//   runInWorker(code, options?) → Promise<RuntimeResult>
+//   restartWorker() — drop the current worker (Restart Kernel / Stop).
 //
-// Single worker per page. Calls serialise through a chain of promises:
-//   a double-click on Run won't race two postMessages. The worker is lazy
-//   (created on first run), and a hard timeout terminates + respawns it.
+// Single worker per page, holding a persistent QuickJS kernel. Calls
+// serialise through a chain of promises so a double-click on Run won't race
+// two postMessages. The worker is lazy (created on first run); a hard
+// timeout terminates + respawns it as a safety net, and an external
+// `restartWorker()` unsticks an in-flight run (used by Stop).
 
-import type {
-  HostMsg,
-  OutputItem,
-  RuntimeResult,
-  RuntimeStatus,
-  SharedScope,
-  WorkerMsg,
-} from './types'
+import type { HostMsg, OutputItem, RuntimeResult, WorkerMsg } from './types'
 
 export interface WorkerHostOptions {
   /** Maximum execution time, in ms. Default 30_000. */
@@ -48,8 +43,6 @@ let workerFactory: WorkerFactory = defaultWorkerFactory
 export function setWorkerFactory(factory: WorkerFactory): () => void {
   const previous = workerFactory
   workerFactory = factory
-  // Drop any worker built by the previous factory so the next run uses
-  // the new one.
   restartWorker()
   return () => {
     workerFactory = previous
@@ -58,8 +51,8 @@ export function setWorkerFactory(factory: WorkerFactory): () => void {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
-/** Soft cap on cumulative output size per run. Going above triggers a host
- *  terminate and a stderr marker, so a runaway `for(;;) console.log(...)`
+/** Soft cap on cumulative output size per run. Going above terminates the
+ *  worker and appends a stderr marker, so a runaway `for(;;) console.log(...)`
  *  cannot OOM the page. 5 MB is roughly Jupyter's default. */
 export const OUTPUT_BUDGET_BYTES = 5 * 1024 * 1024
 
@@ -70,7 +63,7 @@ let pending: Promise<unknown> = Promise.resolve()
  * cleared on done/timeout. `restartWorker` calls this to free a stuck run
  * (e.g. while(true) interrupted by an external Stop).
  */
-let inFlightResolver: ((scope: SharedScope) => void) | null = null
+let inFlightResolver: (() => void) | null = null
 
 function ensureWorker(): WorkerLike {
   if (worker) return worker
@@ -79,11 +72,12 @@ function ensureWorker(): WorkerLike {
 }
 
 /**
- * Drop the current worker so the next run gets a fresh one. Also frees
- * the currently waiting `runInWorker` promise so callers don't hang for
- * the full timeout.
+ * Drop the current worker so the next run gets a fresh kernel. Also frees
+ * the currently waiting `runInWorker` promise (as 'interrupted') so callers
+ * don't hang for the full timeout. Used by Restart Kernel and by Stop's
+ * terminate fallback.
  */
-export function restartWorker(scope: SharedScope = {}): void {
+export function restartWorker(): void {
   if (worker) {
     worker.terminate()
     worker = null
@@ -91,14 +85,16 @@ export function restartWorker(scope: SharedScope = {}): void {
   if (inFlightResolver) {
     const resolver = inFlightResolver
     inFlightResolver = null
-    resolver(scope)
+    resolver()
   }
-  // Fresh chain — don't let an old run hold up the next call.
   pending = Promise.resolve()
 }
 
 function nextRunId(): string {
-  return Math.random().toString(36).slice(2)
+  // crypto.randomUUID is available in both browser and worker contexts.
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2)
 }
 
 /**
@@ -106,93 +102,87 @@ function nextRunId(): string {
  * preceding calls, terminates the worker on timeout, returns a structured
  * result either way.
  */
-export function runInWorker(
-  code: string,
-  scope: SharedScope = {},
-  options: WorkerHostOptions = {},
-): Promise<RuntimeResult> {
+export function runInWorker(code: string, options: WorkerHostOptions = {}): Promise<RuntimeResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const task = pending.then(() => runOne(code, scope, timeoutMs))
-  // We swallow errors of the inner task in `pending` — they're already
-  // captured in RuntimeResult; we just need a non-rejecting chain.
+  const task = pending.then(() => runOne(code, timeoutMs))
+  // Swallow inner errors in the chain — they're captured in RuntimeResult;
+  // we just need a non-rejecting `pending`.
   pending = task.catch(() => undefined)
   return task
 }
 
-function runOne(code: string, scope: SharedScope, timeoutMs: number): Promise<RuntimeResult> {
+function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
   const w = ensureWorker()
   const runId = nextRunId()
   const items: OutputItem[] = []
 
   return new Promise<RuntimeResult>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+
     const cleanup = () => {
       w.removeEventListener('message', onMessage)
-      if (timer.ref) clearTimeout(timer.ref)
+      if (timer) clearTimeout(timer)
+      timer = null
       inFlightResolver = null
     }
 
-    // Single shared timer reference so cleanup can null it; we keep
-    // const-binding via a never-firing nominal value for cleanup symmetry.
-    const timer = { ref: 0 as unknown as ReturnType<typeof setTimeout> | null }
     let bytesSoFar = 0
     let truncated = false
     const onMessage = (event: MessageEvent<WorkerMsg>) => {
       const m = event.data
       if (m.runId !== runId) return
       if (m.kind === 'output') {
-        if (truncated) return // discard everything after the limit fires
-        bytesSoFar += measureItemBytes(m.item)
-        items.push(m.item)
-        if (bytesSoFar > OUTPUT_BUDGET_BYTES) {
+        if (truncated) return
+        const itemBytes = measureItemBytes(m.item)
+        if (bytesSoFar + itemBytes > OUTPUT_BUDGET_BYTES) {
+          // Enforce the budget BEFORE accepting the item, so a single huge
+          // item can't blow past the limit.
           truncated = true
           items.push({
             type: 'stderr',
             text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`,
           })
           cleanup()
-          restartWorker(scope)
-          resolve({ status: 'error', items, scope })
+          restartWorker()
+          resolve({ status: 'error', items })
+          return
         }
+        bytesSoFar += itemBytes
+        items.push(m.item)
         return
       }
       // 'done'
       cleanup()
-      resolve({ status: m.status, items, scope: m.scope })
+      resolve({ status: m.status, items })
     }
     w.addEventListener('message', onMessage)
 
     // Allow external restartWorker() to unstick this run — resolves as
-    // 'interrupted' so the caller can update cell status accordingly.
-    inFlightResolver = (carriedScope) => {
+    // 'interrupted', carrying any output streamed before the stop.
+    inFlightResolver = () => {
       cleanup()
-      resolve({ status: 'interrupted', items, scope: carriedScope })
+      resolve({ status: 'interrupted', items })
     }
 
-    timer.ref = setTimeout(() => {
+    timer = setTimeout(() => {
       cleanup()
-      restartWorker(scope)
-      resolve(timedOutResult(timeoutMs, scope))
+      restartWorker()
+      // Preserve output streamed before the hang; append the timeout marker.
+      resolve({
+        status: 'timeout',
+        items: [...items, { type: 'stderr', text: `Execution timed out after ${timeoutMs}ms` }],
+      })
     }, timeoutMs + 100)
-    // Don't pin the Node event loop — vitest waits for handles to settle.
-    if (typeof (timer.ref as unknown as { unref?: () => void }).unref === 'function') {
-      ;(timer.ref as unknown as { unref: () => void }).unref()
-    }
 
-    const runMsg: HostMsg = { kind: 'run', runId, code, scope, timeoutMs }
+    const runMsg: HostMsg = { kind: 'run', runId, code, timeoutMs }
     w.postMessage(runMsg)
   })
 }
 
-function timedOutResult(timeoutMs: number, scope: SharedScope): RuntimeResult {
-  const status: RuntimeStatus = 'timeout'
-  const items: OutputItem[] = [{ type: 'stderr', text: `Execution timed out after ${timeoutMs}ms` }]
-  return { status, items, scope }
-}
-
 /**
- * Rough byte budget per output item. We don't need a perfect number —
- * just enough to stop a `for (let i=0; i<1e7; i++) console.log('xxx')`
- * loop before it OOMs the page.
+ * Rough byte budget per output item. An order-of-magnitude estimate is
+ * enough to stop a `for (let i=0; i<1e7; i++) console.log('xxx')` loop
+ * before it OOMs the page.
  */
 function measureItemBytes(item: OutputItem): number {
   switch (item.type) {
@@ -202,13 +192,14 @@ function measureItemBytes(item: OutputItem): number {
     case 'error':
       return item.name.length + item.message.length + (item.stack?.length ?? 0)
     case 'result':
-      // SerializedValue stringify is fast enough at this scale; the budget
-      // is forgiving so an order-of-magnitude estimate is fine.
-      return JSON.stringify(item.value).length
+      try {
+        return JSON.stringify(item.value).length
+      } catch {
+        return 0
+      }
     case 'html':
       return item.html.length
     case 'image':
-      // Base64 payload dominates; mime is ~10 chars.
       return item.data.length + item.mime.length
   }
 }

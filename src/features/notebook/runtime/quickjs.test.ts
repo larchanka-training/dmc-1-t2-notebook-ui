@@ -1,92 +1,87 @@
 import { describe, expect, test, vi } from 'vitest'
-import { runInQuickJS } from './quickjs'
+import { createKernel, type Kernel } from './quickjs'
 
-// These tests pin the public contract of runInQuickJS. Worker integration
-// lives in workerHost.test.ts; here we focus on the sandbox itself.
+// These tests pin the public contract of the persistent kernel. Worker
+// integration lives in workerHost.test.ts; here we focus on the VM itself.
+//
+// Most tests want a clean scope, so they spin up a fresh kernel. The
+// shared-scope suite deliberately reuses one kernel across runs.
 
-describe('runInQuickJS — happy path', () => {
+async function runFresh(code: string, timeoutMs?: number) {
+  const kernel = await createKernel()
+  try {
+    return await kernel.run(code, timeoutMs ? { timeoutMs } : undefined)
+  } finally {
+    kernel.dispose()
+  }
+}
+
+describe('kernel.run — happy path', () => {
   test('captures single console.log', async () => {
-    const r = await runInQuickJS('console.log("hello")')
+    const r = await runFresh('console.log("hello")')
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'hello' })
   })
 
   test('joins multi-argument console.log with spaces', async () => {
-    const r = await runInQuickJS('console.log(1, 2, 3)')
+    const r = await runFresh('console.log(1, 2, 3)')
     expect(r.items).toContainEqual({ type: 'stdout', text: '1 2 3' })
   })
 
   test('console.warn → stderr with [warn] prefix', async () => {
-    const r = await runInQuickJS('console.warn("oops")')
+    const r = await runFresh('console.warn("oops")')
     expect(r.items).toContainEqual({ type: 'stderr', text: '[warn] oops' })
   })
 
   test('console.error → stderr with [error] prefix', async () => {
-    const r = await runInQuickJS('console.error("nope")')
+    const r = await runFresh('console.error("nope")')
     expect(r.items).toContainEqual({ type: 'stderr', text: '[error] nope' })
   })
 
   test('console.info → stdout (no prefix)', async () => {
-    const r = await runInQuickJS('console.info("note")')
+    const r = await runFresh('console.info("note")')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'note' })
   })
 
   test('top-level await is supported', async () => {
-    const r = await runInQuickJS('const v = await Promise.resolve(42); console.log(v)')
+    const r = await runFresh('const v = await Promise.resolve(42); console.log(v)')
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'stdout', text: '42' })
   })
 
   test('trailing expression statement becomes a result item', async () => {
-    const r = await runInQuickJS('1 + 2')
+    const r = await runFresh('1 + 2')
     expect(r.status).toBe('done')
-    expect(r.items).toContainEqual({
-      type: 'result',
-      value: { kind: 'primitive', value: 3 },
-    })
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 3 } })
   })
 
   test('explicit return value becomes a result item', async () => {
-    const r = await runInQuickJS('return 1 + 2')
+    const r = await runFresh('return 1 + 2')
     expect(r.status).toBe('done')
-    expect(r.items).toContainEqual({
-      type: 'result',
-      value: { kind: 'primitive', value: 3 },
-    })
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 3 } })
   })
 
   test('console.log(undefined) prints "undefined"', async () => {
-    const r = await runInQuickJS('console.log(undefined)')
+    const r = await runFresh('console.log(undefined)')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'undefined' })
   })
 
   test('object argument is serialized to readable form', async () => {
-    const r = await runInQuickJS('console.log({ a: 1 })')
-    // We do not commit to a specific pretty-printer; just check it has
-    // both the key and the value somewhere in the text representation.
+    const r = await runFresh('console.log({ a: 1 })')
     const stdout = r.items.find((it) => it.type === 'stdout')
-    expect(stdout).toBeDefined()
     expect(stdout?.type).toBe('stdout')
     if (stdout?.type === 'stdout') {
       expect(stdout.text).toContain('a')
       expect(stdout.text).toContain('1')
     }
   })
-
-  test('returns initial scope unchanged in commit-1 stub', async () => {
-    // Shared scope is wired only in commit 2; until then runtime carries
-    // the input through, so the API shape is stable.
-    const r = await runInQuickJS('1', { x: 1, y: 'a' })
-    expect(r.scope).toEqual({ x: 1, y: 'a' })
-  })
 })
 
-describe('runInQuickJS — errors', () => {
+describe('kernel.run — errors', () => {
   test('throw new Error → error item, status=error', async () => {
-    const r = await runInQuickJS('throw new Error("boom")')
+    const r = await runFresh('throw new Error("boom")')
     expect(r.status).toBe('error')
     const err = r.items.find((it) => it.type === 'error')
-    expect(err).toBeDefined()
     if (err?.type === 'error') {
       expect(err.message).toBe('boom')
       expect(err.name).toBe('Error')
@@ -94,20 +89,27 @@ describe('runInQuickJS — errors', () => {
   })
 
   test('syntax error → error item, status=error', async () => {
-    const r = await runInQuickJS('this is not js')
+    const r = await runFresh('this is not js')
     expect(r.status).toBe('error')
     expect(r.items.some((it) => it.type === 'error')).toBe(true)
   })
 
   test('reference error → error item', async () => {
-    const r = await runInQuickJS('definitelyNotDefined()')
+    const r = await runFresh('definitelyNotDefined()')
     expect(r.status).toBe('error')
     const err = r.items.find((it) => it.type === 'error')
     expect(err?.type === 'error' && err.name).toMatch(/ReferenceError|Error/)
   })
+
+  test('import is rejected with a readable SyntaxError', async () => {
+    const r = await runFresh('import x from "y"')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.message).toMatch(/import is not supported/)
+  })
 })
 
-describe('runInQuickJS — sandbox isolation', () => {
+describe('kernel.run — sandbox isolation', () => {
   test.each([
     ['window'],
     ['document'],
@@ -117,98 +119,168 @@ describe('runInQuickJS — sandbox isolation', () => {
     ['sessionStorage'],
     ['navigator'],
   ])('typeof %s === "undefined" inside sandbox', async (name) => {
-    const r = await runInQuickJS(`console.log(typeof ${name})`)
+    const r = await runFresh(`console.log(typeof ${name})`)
     expect(r.items).toContainEqual({ type: 'stdout', text: 'undefined' })
   })
 
   test('does not call host console.log when user code logs', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
-    await runInQuickJS('console.log("inside")')
+    await runFresh('console.log("inside")')
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
 
-  test('successive runs do not share scope unless host carries it', async () => {
-    // Without explicit scope hand-off, fresh contexts → no leak.
-    await runInQuickJS('var leak = 1')
-    const r = await runInQuickJS('console.log(typeof leak)')
+  test('a fresh kernel does not see another kernel scope', async () => {
+    await runFresh('var leak = 1')
+    const r = await runFresh('console.log(typeof leak)')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'undefined' })
   })
 })
 
-describe('runInQuickJS — display() API', () => {
+describe('kernel.run — persistent shared scope', () => {
+  let kernel: Kernel
+
+  test('const / let / var from run A are visible in run B', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('const x = 7; let y = 8; var z = 9')
+      const r = await kernel.run('console.log(x, y, z)')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '7 8 9' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('re-running a cell with const declarations does NOT throw', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('const k = 1')
+      const r = await kernel.run('const k = 1; console.log(k)')
+      expect(r.status).toBe('done')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '1' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('mutation in a later run updates the shared binding', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('let counter = 1')
+      await kernel.run('counter += 1')
+      const r = await kernel.run('console.log(counter)')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '2' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('function declared in run A is callable in run B', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('function answer(){ return 42 }')
+      const r = await kernel.run('console.log(answer())')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '42' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('class instance survives across runs (closures + state)', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('class Box { constructor(v){ this.v = v } get(){ return this.v } }')
+      await kernel.run('const box = new Box(99)')
+      const r = await kernel.run('console.log(box.get())')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '99' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('closure keeps captured state between runs', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('function mk(){ let n = 0; return () => ++n }')
+      await kernel.run('const inc = mk()')
+      const r1 = await kernel.run('console.log(inc())')
+      const r2 = await kernel.run('console.log(inc())')
+      expect(r1.items).toContainEqual({ type: 'stdout', text: '1' })
+      expect(r2.items).toContainEqual({ type: 'stdout', text: '2' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('destructuring bindings persist across runs', async () => {
+    kernel = await createKernel()
+    try {
+      await kernel.run('const { a, b: c } = { a: 1, b: 2 }')
+      const r = await kernel.run('console.log(a, c)')
+      expect(r.items).toContainEqual({ type: 'stdout', text: '1 2' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+})
+
+describe('kernel.run — timeout', () => {
+  test('infinite loop is interrupted by deadline with status=timeout', async () => {
+    const start = Date.now()
+    const r = await runFresh('while(true){}', 200)
+    const elapsed = Date.now() - start
+    expect(r.status).toBe('timeout')
+    expect(elapsed).toBeLessThan(1000)
+    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+
+  test('the VM survives a timeout — a later run on the same kernel works', async () => {
+    const kernel = await createKernel()
+    try {
+      const timedOut = await kernel.run('while(true){}', { timeoutMs: 150 })
+      expect(timedOut.status).toBe('timeout')
+      const ok = await kernel.run('console.log("alive")')
+      expect(ok.status).toBe('done')
+      expect(ok.items).toContainEqual({ type: 'stdout', text: 'alive' })
+    } finally {
+      kernel.dispose()
+    }
+  }, 5000)
+
+  test('default timeout accepts undefined options', async () => {
+    const r = await runFresh('1 + 1')
+    expect(r.status).toBe('done')
+  })
+})
+
+describe('kernel.run — display() API', () => {
   test('display({ type: "html", value }) produces an html item', async () => {
-    const r = await runInQuickJS('display({ type: "html", value: "<b>x</b>" })')
+    const r = await runFresh('display({ type: "html", value: "<b>x</b>" })')
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'html', html: '<b>x</b>' })
   })
 
   test('display({ type: "image", mime, data }) produces an image item', async () => {
-    const r = await runInQuickJS('display({ type: "image", mime: "image/png", data: "iVBORw0K" })')
-    expect(r.items).toContainEqual({
-      type: 'image',
-      mime: 'image/png',
-      data: 'iVBORw0K',
-    })
+    const r = await runFresh('display({ type: "image", mime: "image/png", data: "iVBORw0K" })')
+    expect(r.items).toContainEqual({ type: 'image', mime: 'image/png', data: 'iVBORw0K' })
+  })
+
+  test('display() with a disallowed image mime is ignored', async () => {
+    const r = await runFresh('display({ type: "image", mime: "text/html", data: "x" })')
+    expect(r.items.some((it) => it.type === 'image')).toBe(false)
   })
 
   test('display() with an unknown shape is silently ignored', async () => {
-    const r = await runInQuickJS('display({ type: "weird", whatever: 1 }); console.log("after")')
+    const r = await runFresh('display({ type: "weird", whatever: 1 }); console.log("after")')
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'after' })
     expect(r.items.some((it) => it.type === 'html' || it.type === 'image')).toBe(false)
   })
 
   test('display() is callable multiple times in the same run', async () => {
-    const r = await runInQuickJS(
+    const r = await runFresh(
       'display({ type: "html", value: "<i>1</i>" }); display({ type: "html", value: "<i>2</i>" })',
     )
-    const htmlItems = r.items.filter((it) => it.type === 'html')
-    expect(htmlItems).toHaveLength(2)
-  })
-})
-
-describe('runInQuickJS — shared scope hand-off', () => {
-  test('const declared in run A is visible in run B via scope carrier', async () => {
-    const a = await runInQuickJS('const x = 7')
-    const b = await runInQuickJS('console.log(x)', a.scope)
-    expect(b.status).toBe('done')
-    expect(b.items).toContainEqual({ type: 'stdout', text: '7' })
-  })
-
-  test('let and var declarations also persist between runs', async () => {
-    const a = await runInQuickJS('let y = 8; var z = 9')
-    const b = await runInQuickJS('console.log(y, z)', a.scope)
-    expect(b.items).toContainEqual({ type: 'stdout', text: '8 9' })
-  })
-
-  test('function declarations are callable in the next run', async () => {
-    // Functions are dropped at postMessage boundary by design (only data
-    // crosses workers). The function is callable WITHIN the same run.
-    const a = await runInQuickJS('function answer(){ return 42 } console.log(answer())')
-    expect(a.items).toContainEqual({ type: 'stdout', text: '42' })
-  })
-
-  test('empty initial scope works (most common path)', async () => {
-    const r = await runInQuickJS('const k = 1; console.log(k)', {})
-    expect(r.items).toContainEqual({ type: 'stdout', text: '1' })
-  })
-})
-
-describe('runInQuickJS — timeout', () => {
-  test('infinite loop is interrupted by deadline', async () => {
-    const start = Date.now()
-    const r = await runInQuickJS('while(true){}', undefined, { timeoutMs: 200 })
-    const elapsed = Date.now() - start
-    expect(r.status).toBe('error')
-    expect(elapsed).toBeLessThan(1000)
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
-  })
-
-  test('default timeout is permissive (~30s constant lives in workerHost)', async () => {
-    // Sanity: quickjs.ts itself should accept undefined options. We don't
-    // actually run a long sleep here.
-    const r = await runInQuickJS('1 + 1')
-    expect(r.status).toBe('done')
+    expect(r.items.filter((it) => it.type === 'html')).toHaveLength(2)
   })
 })
