@@ -22,13 +22,48 @@ export interface WorkerHostOptions {
   timeoutMs?: number
 }
 
+/**
+ * Minimal Worker contract used by the host facade. Real production code
+ * gets the browser `Worker`; tests can plug an inline implementation via
+ * `setWorkerFactory` for synchronous behavior without `@vitest/web-worker`.
+ */
+export interface WorkerLike {
+  postMessage(msg: HostMsg): void
+  addEventListener(type: 'message', listener: (event: MessageEvent<WorkerMsg>) => void): void
+  removeEventListener(type: 'message', listener: (event: MessageEvent<WorkerMsg>) => void): void
+  terminate(): void
+}
+
+export type WorkerFactory = () => WorkerLike
+
+const defaultWorkerFactory: WorkerFactory = () =>
+  new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }) as unknown as WorkerLike
+
+let workerFactory: WorkerFactory = defaultWorkerFactory
+
+/**
+ * Swap the worker factory. Returns a restorer so a test can put the
+ * default back without coupling to the production import.
+ */
+export function setWorkerFactory(factory: WorkerFactory): () => void {
+  const previous = workerFactory
+  workerFactory = factory
+  // Drop any worker built by the previous factory so the next run uses
+  // the new one.
+  restartWorker()
+  return () => {
+    workerFactory = previous
+    restartWorker()
+  }
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000
 /** Soft cap on cumulative output size per run. Going above triggers a host
  *  terminate and a stderr marker, so a runaway `for(;;) console.log(...)`
  *  cannot OOM the page. 5 MB is roughly Jupyter's default. */
 export const OUTPUT_BUDGET_BYTES = 5 * 1024 * 1024
 
-let worker: Worker | null = null
+let worker: WorkerLike | null = null
 let pending: Promise<unknown> = Promise.resolve()
 /**
  * Resolver of the currently in-flight run, if any. Set when a run starts,
@@ -37,9 +72,9 @@ let pending: Promise<unknown> = Promise.resolve()
  */
 let inFlightResolver: ((scope: SharedScope) => void) | null = null
 
-function ensureWorker(): Worker {
+function ensureWorker(): WorkerLike {
   if (worker) return worker
-  worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+  worker = workerFactory()
   return worker
 }
 
