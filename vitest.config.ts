@@ -12,7 +12,7 @@ export default defineConfig({
       jsdom: { url: 'http://localhost' },
     },
     globals: true,
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['./src/test/setup.ts', '@vitest/web-worker'],
     css: false,
     coverage: {
       provider: 'v8',
