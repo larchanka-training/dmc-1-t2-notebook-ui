@@ -36,10 +36,19 @@ export interface Kernel {
   dispose(): void
 }
 
+export interface KernelOptions {
+  /**
+   * Optional user-stop signal. When it returns true the current run aborts
+   * with status `interrupted` (distinct from a deadline `timeout`). Backed
+   * by a SharedArrayBuffer flag in the worker, so it can break a blocked VM.
+   */
+  shouldInterrupt?: () => boolean
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Create a fresh persistent kernel. */
-export async function createKernel(): Promise<Kernel> {
+export async function createKernel(options: KernelOptions = {}): Promise<Kernel> {
   const QuickJS = await getQuickJS()
   const vm = QuickJS.newContext()
   // Items array is rebound per-run, but console / display capture it via
@@ -49,8 +58,14 @@ export async function createKernel(): Promise<Kernel> {
   installDisplay(vm, sink)
 
   return {
-    async run(code, options = {}): Promise<RuntimeResult> {
-      return runOne(vm, sink, code, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    async run(code, runOptions = {}): Promise<RuntimeResult> {
+      return runOne(
+        vm,
+        sink,
+        code,
+        runOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        options.shouldInterrupt,
+      )
     },
     dispose() {
       vm.dispose()
@@ -63,6 +78,7 @@ async function runOne(
   sink: { items: OutputItem[] },
   code: string,
   timeoutMs: number,
+  shouldInterrupt?: () => boolean,
 ): Promise<RuntimeResult> {
   const items: OutputItem[] = []
   sink.items = items
@@ -82,10 +98,12 @@ async function runOne(
     return { status: 'error', items }
   }
 
-  // 2) Arm a deadline-based interrupt. The handler runs synchronously
-  //    between bytecode ops — it does NOT destroy the VM, only aborts the
-  //    current evaluation. Scope survives a timeout.
-  armDeadlineInterrupt(vm, timeoutMs)
+  // 2) Arm the interrupt handler. It aborts on either the deadline (timeout)
+  //    or a user stop (shouldInterrupt). The handler runs synchronously
+  //    between bytecode ops and does NOT destroy the VM, only aborts the
+  //    current evaluation — so the shared scope survives. We record which
+  //    cause fired to classify the abort precisely (no message sniffing).
+  const abort = armInterrupt(vm, timeoutMs, shouldInterrupt)
 
   // 3) Eval wrapped in async IIFE — supports `await` and returns a Promise.
   const wrapped = `(async () => { ${transformed}\n })()`
@@ -93,7 +111,7 @@ async function runOne(
   if (evalResult.error) {
     items.push(toErrorItem(vm, evalResult.error))
     evalResult.error.dispose()
-    return { status: classifyError(items), items }
+    return { status: classifyAbort(abort.cause), items }
   }
 
   let status: RuntimeStatus = 'done'
@@ -104,7 +122,7 @@ async function runOne(
     if (awaited.error) {
       items.push(toErrorItem(vm, awaited.error))
       awaited.error.dispose()
-      status = classifyError(items)
+      status = classifyAbort(abort.cause)
     } else {
       pushResultIfMeaningful(vm, awaited.value, items)
       awaited.value.dispose()
@@ -119,14 +137,36 @@ async function runOne(
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
+type AbortCause = 'none' | 'timeout' | 'interrupt'
+
 /**
  * QuickJS calls this handler frequently while interpreting bytecode.
  * Returning true tells the VM to abort with an InternalError("interrupted").
  * After abort, the VM stays alive — only the current eval is unwound.
+ *
+ * Two causes can fire: the deadline (timeout) or a user stop
+ * (shouldInterrupt). We record the first one so the caller can map the
+ * abort to the right status without sniffing the error message.
  */
-function armDeadlineInterrupt(vm: QuickJSContext, timeoutMs: number): void {
+function armInterrupt(
+  vm: QuickJSContext,
+  timeoutMs: number,
+  shouldInterrupt?: () => boolean,
+): { readonly cause: AbortCause } {
   const deadline = Date.now() + timeoutMs
-  vm.runtime.setInterruptHandler(() => Date.now() > deadline)
+  const state = { cause: 'none' as AbortCause }
+  vm.runtime.setInterruptHandler(() => {
+    if (shouldInterrupt?.()) {
+      state.cause = 'interrupt'
+      return true
+    }
+    if (Date.now() > deadline) {
+      state.cause = 'timeout'
+      return true
+    }
+    return false
+  })
+  return state
 }
 
 /**
@@ -215,15 +255,13 @@ function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem
 }
 
 /**
- * Differentiate a deadline-triggered interrupt from a regular error. The
- * VM raises `InternalError: interrupted` when the interrupt handler returns
- * true; we use it as the timeout signal.
+ * Map an abort cause to a run status. A plain error (cause 'none') stays
+ * 'error'; a deadline abort is 'timeout'; a user stop is 'interrupted'.
  */
-function classifyError(items: OutputItem[]): RuntimeStatus {
-  const interrupt = items.find(
-    (it) => it.type === 'error' && it.name === 'InternalError' && /interrupt/i.test(it.message),
-  )
-  return interrupt ? 'timeout' : 'error'
+function classifyAbort(cause: AbortCause): RuntimeStatus {
+  if (cause === 'timeout') return 'timeout'
+  if (cause === 'interrupt') return 'interrupted'
+  return 'error'
 }
 
 function safeToString(value: unknown): string {

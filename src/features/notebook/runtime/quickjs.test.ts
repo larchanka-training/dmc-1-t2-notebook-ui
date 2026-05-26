@@ -253,6 +253,38 @@ describe('kernel.run — timeout', () => {
   })
 })
 
+describe('kernel.run — cooperative interrupt', () => {
+  test('shouldInterrupt aborts a tight loop with status=interrupted (not timeout)', async () => {
+    // Mirrors the SAB-backed Stop: the flag is already set, so the very
+    // first interrupt-handler tick aborts. Generous timeout proves the
+    // abort is the user-stop cause, not the deadline.
+    const kernel = await createKernel({ shouldInterrupt: () => true })
+    try {
+      const r = await kernel.run('while(true){}', { timeoutMs: 60_000 })
+      expect(r.status).toBe('interrupted')
+    } finally {
+      kernel.dispose()
+    }
+  }, 5000)
+
+  test('VM survives a user interrupt — scope and later runs still work', async () => {
+    let stop = false
+    const kernel = await createKernel({ shouldInterrupt: () => stop })
+    try {
+      await kernel.run('const kept = 5')
+      stop = true
+      const interrupted = await kernel.run('while(true){}', { timeoutMs: 60_000 })
+      expect(interrupted.status).toBe('interrupted')
+      stop = false
+      const after = await kernel.run('console.log(kept)')
+      expect(after.status).toBe('done')
+      expect(after.items).toContainEqual({ type: 'stdout', text: '5' })
+    } finally {
+      kernel.dispose()
+    }
+  }, 5000)
+})
+
 describe('kernel.run — display() API', () => {
   test('display({ type: "html", value }) produces an html item', async () => {
     const r = await runFresh('display({ type: "html", value: "<b>x</b>" })')

@@ -65,10 +65,48 @@ let pending: Promise<unknown> = Promise.resolve()
  */
 let inFlightResolver: (() => void) | null = null
 
+/**
+ * Shared interrupt flag (`Int32Array` over a `SharedArrayBuffer`). Created
+ * once per worker when the page is cross-origin isolated. The worker reads
+ * slot 0 from its interrupt handler, so the host can stop a blocked VM by
+ * writing 1 here — without terminating the worker, so the scope survives.
+ * `null` when isolation is unavailable; Stop then falls back to terminate.
+ */
+let interruptFlag: Int32Array | null = null
+
+function isolated(): boolean {
+  return (
+    typeof globalThis !== 'undefined' &&
+    (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true
+  )
+}
+
 function ensureWorker(): WorkerLike {
   if (worker) return worker
   worker = workerFactory()
+  // Hand the fresh worker a shared interrupt buffer when isolation allows it.
+  if (isolated() && typeof SharedArrayBuffer !== 'undefined') {
+    const buffer = new SharedArrayBuffer(4)
+    interruptFlag = new Int32Array(buffer)
+    worker.postMessage({ kind: 'init', interruptBuffer: buffer })
+  } else {
+    interruptFlag = null
+  }
   return worker
+}
+
+/**
+ * Request a cooperative interrupt of the in-flight run (Stop / Stop All).
+ * When a shared buffer is available the VM aborts itself and keeps its
+ * scope; otherwise we terminate the worker as a fallback (scope is lost,
+ * the next run spins up a fresh kernel).
+ */
+export function requestInterrupt(): void {
+  if (interruptFlag) {
+    Atomics.store(interruptFlag, 0, 1)
+    return
+  }
+  restartWorker()
 }
 
 /**
@@ -82,6 +120,7 @@ export function restartWorker(): void {
     worker.terminate()
     worker = null
   }
+  interruptFlag = null
   if (inFlightResolver) {
     const resolver = inFlightResolver
     inFlightResolver = null
@@ -174,6 +213,8 @@ function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
       })
     }, timeoutMs + 100)
 
+    // Clear any stale interrupt request from a previous run before starting.
+    if (interruptFlag) Atomics.store(interruptFlag, 0, 0)
     const runMsg: HostMsg = { kind: 'run', runId, code, timeoutMs }
     w.postMessage(runMsg)
   })

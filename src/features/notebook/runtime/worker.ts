@@ -7,12 +7,13 @@
 // @vitest/web-worker in tests) understands as "bundle this as a worker".
 
 import { createKernel, type Kernel } from './quickjs'
+import { isInterruptRequested, setInterruptBuffer } from './interrupt'
 import type { HostMsg, WorkerMsg } from './types'
 
 let kernelPromise: Promise<Kernel> | null = null
 
 function getKernel(): Promise<Kernel> {
-  if (!kernelPromise) kernelPromise = createKernel()
+  if (!kernelPromise) kernelPromise = createKernel({ shouldInterrupt: isInterruptRequested })
   return kernelPromise
 }
 
@@ -21,11 +22,19 @@ async function resetKernel(): Promise<void> {
     const kernel = await kernelPromise
     kernel.dispose()
   }
-  kernelPromise = createKernel()
+  kernelPromise = createKernel({ shouldInterrupt: isInterruptRequested })
 }
 
 self.onmessage = async (event: MessageEvent<HostMsg>) => {
   const msg = event.data
+
+  if (msg.kind === 'init') {
+    // Host shares a SAB whose first int32 is the interrupt flag. The kernel's
+    // interrupt handler reads it to abort a blocked VM (Stop / Stop All)
+    // without destroying the VM, so the shared scope survives.
+    setInterruptBuffer(msg.interruptBuffer)
+    return
+  }
 
   if (msg.kind === 'reset') {
     await resetKernel()

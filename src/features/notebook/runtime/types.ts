@@ -47,6 +47,11 @@ export interface RuntimeResult {
 
 /** Messages sent host → worker. */
 export type HostMsg =
+  /** Hand the worker a SharedArrayBuffer whose first int32 is the interrupt
+   *  flag. Sent once, right after the worker is created, only in a
+   *  cross-origin isolated context. Lets the host stop a blocked VM without
+   *  destroying it (the shared scope survives). */
+  | { kind: 'init'; interruptBuffer: SharedArrayBuffer }
   | { kind: 'run'; runId: string; code: string; timeoutMs: number }
   /** Drop the VM and create a fresh one — Restart Kernel. */
   | { kind: 'reset' }

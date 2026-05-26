@@ -7,7 +7,7 @@
 // (which is just CRUD over cellsAtom) lets either file stay readable.
 
 import { action, atom, wrap } from '@reatom/core'
-import { restartWorker, runInWorker } from '../runtime/workerHost'
+import { requestInterrupt, restartWorker, runInWorker } from '../runtime/workerHost'
 import type { OutputItem, RuntimeStatus } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
 import { cellsAtom } from './notebook'
@@ -161,9 +161,10 @@ async function processQueue(ids: string[]): Promise<void> {
 
 export const stopCell = action((id: string) => {
   markStopRequest(id)
-  // Hard-terminate the worker — sandbox VM may be in a tight loop where
-  // postMessage cannot reach it.
-  restartWorker()
+  // Cooperative interrupt: when cross-origin isolated, the VM aborts the
+  // tight loop via the shared flag and keeps its scope. Otherwise this
+  // falls back to terminating the worker.
+  requestInterrupt()
 }, 'runtime.stopCell')
 
 export const stopAll = action(() => {
@@ -173,7 +174,7 @@ export const stopAll = action(() => {
   // as 'interrupted'.
   if (currentCellId) markStopRequest(currentCellId)
   for (const id of queueAtom()) markStopRequest(id)
-  restartWorker()
+  requestInterrupt()
 }, 'runtime.stopAll')
 
 // ─── Restart Kernel ──────────────────────────────────────────────────────────
