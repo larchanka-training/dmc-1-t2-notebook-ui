@@ -12,12 +12,14 @@ export {
 export {
   runCell,
   runAll,
+  resumeQueue,
   stopCell,
   stopAll,
   restartKernel,
   runtimeStatusAtom,
   execCounterAtom,
   queueAtom,
+  skippedCellsAtom,
 } from './model/runtime'
 export { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, timeoutMsAtom } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'

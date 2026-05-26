@@ -3,9 +3,11 @@ import { addCell, cellsAtom, deleteCell, updateCellCode } from './notebook'
 import {
   queueAtom,
   restartKernel,
+  resumeQueue,
   runAll,
   runCell,
   runtimeStatusAtom,
+  skippedCellsAtom,
   stopAll,
   stopCell,
 } from './runtime'
@@ -152,6 +154,50 @@ describe('notebookSettings.timeoutMs', () => {
       timeoutMsAtom.set(DEFAULT_TIMEOUT_MS)
     }
   }, 5000)
+})
+
+describe('resumeQueue (continue from skipped)', () => {
+  test('after an error in the middle, resumeQueue runs the skipped cells', async () => {
+    const [a] = cellsAtom()
+    const b = addCell()
+    const c = addCell()
+    updateCellCode(a.id, 'console.log("a")')
+    updateCellCode(b.id, 'throw new Error("middle")')
+    updateCellCode(c.id, 'console.log("c")')
+
+    await runAll()
+    expect(c.status()).toBe('skipped')
+    expect(skippedCellsAtom()).toEqual([c.id])
+
+    // Fix the broken cell so the queue can progress.
+    updateCellCode(b.id, 'console.log("b-fixed")')
+    // Resume picks up only what was skipped — does NOT re-run b.
+    await resumeQueue()
+    expect(c.status()).toBe('done')
+    expect(c.output()).toContainEqual({ type: 'stdout', text: 'c' })
+    // skippedCellsAtom is drained after a successful resume.
+    expect(skippedCellsAtom()).toEqual([])
+  }, 10_000)
+
+  test('runAll clears any previous skipped list before scheduling', async () => {
+    const [a] = cellsAtom()
+    const b = addCell()
+    updateCellCode(a.id, 'throw new Error("boom")')
+    updateCellCode(b.id, 'console.log("b")')
+    await runAll()
+    expect(skippedCellsAtom()).toEqual([b.id])
+
+    // Fix a, run again — the previous skipped trail must be gone.
+    updateCellCode(a.id, 'console.log("a")')
+    await runAll()
+    expect(skippedCellsAtom()).toEqual([])
+  }, 10_000)
+
+  test('resumeQueue is a no-op when there is nothing skipped', async () => {
+    expect(skippedCellsAtom()).toEqual([])
+    await resumeQueue() // must not throw, must not block
+    expect(skippedCellsAtom()).toEqual([])
+  })
 })
 
 describe('stopCell / stopAll', () => {

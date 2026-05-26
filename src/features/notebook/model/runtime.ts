@@ -25,6 +25,14 @@ export const execCounterAtom = atom<number>(0, 'runtime.execCounter')
 export const queueAtom = atom<string[]>([], 'runtime.queue')
 
 /**
+ * Cells that were short-circuited as `skipped` by the most recent
+ * `runAll` (because an earlier cell failed). Drives the Continue button:
+ * non-empty means the user can resume the queue from this list without
+ * re-running the cells that already succeeded.
+ */
+export const skippedCellsAtom = atom<string[]>([], 'runtime.skippedCells')
+
+/**
  * Cells the user has explicitly stopped during the current run. Module-
  * level mutable state (not an atom) so that synchronous stopCell handlers
  * are guaranteed to be observable by the in-flight executeCell without
@@ -86,19 +94,47 @@ function mapStatus(id: string, status: RuntimeStatus, items: OutputItem[]): Cell
 // ─── Run All ─────────────────────────────────────────────────────────────────
 
 export const runAll = action(async () => {
-  stopAllRequested = false
+  // Fresh queue invalidates any previous skipped trail.
+  skippedCellsAtom.set([])
   const ids = cellsAtom()
     .filter((c) => c.kind === 'code')
     .map((c) => c.id)
+  await processQueue(ids)
+}, 'runtime.runAll')
+
+/**
+ * Resume execution from cells that were marked `skipped` by the previous
+ * `runAll`. Cells that are no longer skipped (e.g. user ran one manually)
+ * are filtered out so we never run the same cell twice in a row.
+ */
+export const resumeQueue = action(async () => {
+  const candidates = skippedCellsAtom()
+  const stillSkipped = candidates.filter((id) => {
+    const cell = cellsAtom().find((c) => c.id === id)
+    return cell?.status() === 'skipped'
+  })
+  skippedCellsAtom.set([])
+  if (stillSkipped.length === 0) return
+  await processQueue(stillSkipped)
+}, 'runtime.resumeQueue')
+
+/**
+ * Sequential queue worker. Shared between `runAll` and `resumeQueue` so
+ * the skip-on-error / stopAll semantics live in exactly one place.
+ */
+async function processQueue(ids: string[]): Promise<void> {
+  stopAllRequested = false
   queueAtom.set(ids)
 
   while (queueAtom().length > 0) {
     if (stopAllRequested) {
-      // Mark remaining as skipped, drain the queue.
+      // Stop All: don't carry the rest forward as skipped (they were not
+      // skipped by an error, the user explicitly stopped the queue).
       for (const rest of queueAtom()) {
         const cell = cellsAtom().find((c) => c.id === rest)
         cell?.status.set('skipped')
       }
+      skippedCellsAtom.set(queueAtom())
       queueAtom.set([])
       stopAllRequested = false
       return
@@ -109,16 +145,17 @@ export const runAll = action(async () => {
     if (!cell) continue
     const status = await executeCell(cell)
     if (status !== 'done') {
-      // Skip the remaining cells on first error / timeout / interrupt.
-      for (const rest of queueAtom()) {
+      const remaining = queueAtom()
+      for (const rest of remaining) {
         const restCell = cellsAtom().find((c) => c.id === rest)
         restCell?.status.set('skipped')
       }
+      skippedCellsAtom.set(remaining)
       queueAtom.set([])
       return
     }
   }
-}, 'runtime.runAll')
+}
 
 // ─── Stop ────────────────────────────────────────────────────────────────────
 
@@ -146,6 +183,7 @@ export const restartKernel = action(() => {
   sharedScopeAtom.set({} as SharedScope)
   execCounterAtom.set(0)
   queueAtom.set([])
+  skippedCellsAtom.set([])
   stopAllRequested = false
   stopRequested.clear()
   currentCellId = null

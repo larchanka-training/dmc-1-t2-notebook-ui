@@ -1,9 +1,16 @@
-import { PlayCircle, RotateCcw, StopCircle } from 'lucide-react'
+import { PlayCircle, RotateCcw, SkipForward, StopCircle } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
-import { restartKernel, runAll, runtimeStatusAtom, stopAll } from '../model/runtime'
+import {
+  restartKernel,
+  resumeQueue,
+  runAll,
+  runtimeStatusAtom,
+  skippedCellsAtom,
+  stopAll,
+} from '../model/runtime'
 
 /**
  * Notebook-wide control bar: Run All, Stop All, Restart Kernel.
@@ -11,6 +18,7 @@ import { restartKernel, runAll, runtimeStatusAtom, stopAll } from '../model/runt
  */
 export const NotebookToolbar = reatomComponent(() => {
   const isBusy = runtimeStatusAtom() === 'busy'
+  const canResume = !isBusy && skippedCellsAtom().length > 0
 
   return (
     <div className="flex items-center gap-1">
@@ -31,6 +39,25 @@ export const NotebookToolbar = reatomComponent(() => {
         />
         <TooltipContent>Run every code cell in order</TooltipContent>
       </Tooltip>
+
+      {canResume && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={wrap(() => resumeQueue())}
+              >
+                <SkipForward className="size-4" />
+                Continue
+              </Button>
+            }
+          />
+          <TooltipContent>Resume the queue from the cells that were skipped</TooltipContent>
+        </Tooltip>
+      )}
 
       <Tooltip>
         <TooltipTrigger
