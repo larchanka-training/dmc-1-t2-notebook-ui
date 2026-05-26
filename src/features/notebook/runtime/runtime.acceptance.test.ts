@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { addCell, cellsAtom, deleteCell, updateCellCode } from '../model/notebook'
 import { execCounterAtom, restartKernel, runAll, runCell } from '../model/runtime'
+import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from '../model/notebookSettings'
 
 beforeEach(async () => {
   restartKernel()
@@ -271,22 +272,21 @@ describe('Epic 01 AC — ExecutionCount', () => {
 // ─── Limits ──────────────────────────────────────────────────────────────────
 
 describe('Epic 01 AC — Limits', () => {
-  test('AC: an explicit short timeout interrupts a tight loop and surfaces as an error status', async () => {
-    // Mirror the production 30 s default with a much shorter limit so the
-    // test is cheap. Production uses runtime/workerHost.ts: DEFAULT_TIMEOUT_MS.
+  test('AC: a timeout surfaces as cell.status === "timeout" with an explicit marker', async () => {
+    // Exercises the full product path: runCell → worker → deadline interrupt
+    // → mapStatus → cell.status. A short per-cell timeout keeps it cheap.
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'while(true){}')
-    // Drop the per-cell budget by talking to runInWorker directly via the
-    // worker host export: in runCell we always use the default. Verify the
-    // mechanism via the lower-level entry point instead, since this is an
-    // AC about the *mechanism*, not the default value.
-    const { runInWorker } = await import('./workerHost')
-    const r = await runInWorker('while(true){}', { timeoutMs: 200 })
-    expect(r.status).toBe('timeout')
-    expect(r.items.some((it) => it.type === 'stderr' || it.type === 'error')).toBe(true)
-    // Sanity: cell still shows running state until runCell completes; for
-    // an explicit-timeout case we just assert the runInWorker contract.
-    void cell // silence unused-var
+    timeoutMsAtom.set(200)
+    try {
+      await runCell(cell.id)
+      expect(cell.status()).toBe('timeout')
+      expect(cell.output().some((it) => it.type === 'stderr' && /timed out/i.test(it.text))).toBe(
+        true,
+      )
+    } finally {
+      timeoutMsAtom.set(DEFAULT_TIMEOUT_MS)
+    }
   }, 5000)
 
   test('AC: output larger than the host budget is truncated with a stderr marker', async () => {

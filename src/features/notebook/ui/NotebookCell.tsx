@@ -114,6 +114,10 @@ export function NotebookCell({
   const isMarkdown = kind === 'markdown'
   const isRunning = status === 'running'
   const isError = status === 'error'
+  // A user Stop or a timeout is not a code error — flag it distinctly so the
+  // cell that the user halted is not mistaken for a clean run or a crash.
+  const isHalted = status === 'interrupted' || status === 'timeout'
+  const isSkipped = status === 'skipped'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -136,6 +140,8 @@ export function NotebookCell({
         className={cn(
           'relative gap-0 py-0 ring-0 border border-border overflow-visible transition-shadow',
           isError && 'border-destructive',
+          isHalted && 'border-amber-500/60',
+          isSkipped && 'border-dashed border-muted-foreground/40',
           isRunning &&
             'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary before:rounded-l-xl',
         )}

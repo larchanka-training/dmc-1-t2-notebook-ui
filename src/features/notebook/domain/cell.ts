@@ -1,7 +1,14 @@
 import { atom, type Atom } from '@reatom/core'
 import type { OutputItem } from '../runtime/types'
 
-export type CellStatus = 'idle' | 'running' | 'done' | 'error' | 'interrupted' | 'skipped'
+export type CellStatus =
+  | 'idle'
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'interrupted'
+  | 'timeout'
+  | 'skipped'
 export type CellKind = 'code' | 'markdown'
 export type CellViewMode = 'edit' | 'preview'
 

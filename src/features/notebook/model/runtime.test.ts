@@ -140,7 +140,7 @@ describe('notebookSettings.timeoutMs', () => {
     expect(DEFAULT_TIMEOUT_MS).toBe(30_000)
   })
 
-  test('a short user-set timeout interrupts an infinite loop quickly', async () => {
+  test('a short user-set timeout interrupts an infinite loop with status=timeout', async () => {
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'while(true){}')
     timeoutMsAtom.set(200)
@@ -148,7 +148,7 @@ describe('notebookSettings.timeoutMs', () => {
       const start = Date.now()
       await runCell(cell.id)
       const elapsed = Date.now() - start
-      expect(cell.status()).toBe('error')
+      expect(cell.status()).toBe('timeout')
       expect(elapsed).toBeLessThan(1000)
     } finally {
       timeoutMsAtom.set(DEFAULT_TIMEOUT_MS)

@@ -84,11 +84,22 @@ function mapStatus(id: string, status: RuntimeStatus, items: OutputItem[]): Cell
     items.push({ type: 'stderr', text: 'Execution interrupted by user' })
     return 'interrupted'
   }
-  if (status === 'done') return 'done'
-  // 'timeout' and 'interrupted' surface as 'error' for now — the structured
-  // status name is preserved in the cell.output stderr text. We could add
-  // a 'timeout' cell status later if the UI needs to differentiate.
-  return 'error'
+  // Runtime statuses map 1:1 onto cell statuses so the UI and the queue can
+  // tell a timeout from a plain error. Add an explicit output marker for the
+  // non-error terminal states (a deadline interrupt aborts inside the VM, so
+  // there is no host-side message otherwise).
+  switch (status) {
+    case 'done':
+      return 'done'
+    case 'timeout':
+      items.push({ type: 'stderr', text: 'Execution timed out' })
+      return 'timeout'
+    case 'interrupted':
+      items.push({ type: 'stderr', text: 'Execution interrupted by user' })
+      return 'interrupted'
+    case 'error':
+      return 'error'
+  }
 }
 
 // ─── Run All ─────────────────────────────────────────────────────────────────
