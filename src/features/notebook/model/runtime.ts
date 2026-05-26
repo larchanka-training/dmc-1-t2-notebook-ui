@@ -46,16 +46,28 @@ let currentCellId: string | null = null
 // ─── Run a single cell ───────────────────────────────────────────────────────
 
 export const runCell = action(async (id: string) => {
+  // Single kernel per page: refuse a manual run while busy so two runs can't
+  // race the queue, the currentCellId slot, or the runtime status.
+  if (runtimeStatusAtom() === 'busy') return
   const cell = cellsAtom().find((c) => c.id === id)
   if (!cell) return
-  await executeCell(cell)
+  runtimeStatusAtom.set('busy')
+  try {
+    await executeCell(cell)
+  } finally {
+    runtimeStatusAtom.set('idle')
+  }
 }, 'runtime.runCell')
 
+/**
+ * Run one cell end to end. Owns per-cell state (status, output, counter) but
+ * NOT the kernel-level `runtimeStatusAtom` — the caller (runCell or the queue)
+ * holds 'busy' across the whole operation so it never flickers to 'idle'
+ * between queued cells.
+ */
 async function executeCell(cell: Cell): Promise<RuntimeStatus> {
-  // Reset stop request for this cell, mark running, allocate a counter slot.
   clearStopRequest(cell.id)
   currentCellId = cell.id
-  runtimeStatusAtom.set('busy')
   cell.status.set('running')
   cell.output.set([])
   const counter = execCounterAtom() + 1
@@ -70,7 +82,6 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   cell.output.set(result.items)
   const finalStatus = mapStatus(cell.id, result.status, result.items)
   cell.status.set(finalStatus)
-  runtimeStatusAtom.set('idle')
   return result.status
 }
 
@@ -105,12 +116,18 @@ function mapStatus(id: string, status: RuntimeStatus, items: OutputItem[]): Cell
 // ─── Run All ─────────────────────────────────────────────────────────────────
 
 export const runAll = action(async () => {
+  if (runtimeStatusAtom() === 'busy') return
   // Fresh queue invalidates any previous skipped trail.
   skippedCellsAtom.set([])
   const ids = cellsAtom()
     .filter((c) => c.kind === 'code')
     .map((c) => c.id)
-  await processQueue(ids)
+  runtimeStatusAtom.set('busy')
+  try {
+    await processQueue(ids)
+  } finally {
+    runtimeStatusAtom.set('idle')
+  }
 }, 'runtime.runAll')
 
 /**
@@ -119,6 +136,7 @@ export const runAll = action(async () => {
  * are filtered out so we never run the same cell twice in a row.
  */
 export const resumeQueue = action(async () => {
+  if (runtimeStatusAtom() === 'busy') return
   const candidates = skippedCellsAtom()
   const stillSkipped = candidates.filter((id) => {
     const cell = cellsAtom().find((c) => c.id === id)
@@ -126,7 +144,12 @@ export const resumeQueue = action(async () => {
   })
   skippedCellsAtom.set([])
   if (stillSkipped.length === 0) return
-  await processQueue(stillSkipped)
+  runtimeStatusAtom.set('busy')
+  try {
+    await processQueue(stillSkipped)
+  } finally {
+    runtimeStatusAtom.set('idle')
+  }
 }, 'runtime.resumeQueue')
 
 /**
@@ -138,44 +161,61 @@ async function processQueue(ids: string[]): Promise<void> {
   queueAtom.set(ids)
 
   while (queueAtom().length > 0) {
-    if (stopAllRequested) {
-      // Stop All: don't carry the rest forward as skipped (they were not
-      // skipped by an error, the user explicitly stopped the queue).
-      for (const rest of queueAtom()) {
-        const cell = cellsAtom().find((c) => c.id === rest)
-        cell?.status.set('skipped')
-      }
-      skippedCellsAtom.set(queueAtom())
-      queueAtom.set([])
-      stopAllRequested = false
-      return
-    }
     const [head, ...tail] = queueAtom()
     queueAtom.set(tail)
     const cell = cellsAtom().find((c) => c.id === head)
     if (!cell) continue
     const status = await executeCell(cell)
+
+    if (stopAllRequested) {
+      // Stop All is a user action, not an error: drain the rest back to
+      // 'idle' and leave NO resume trail — the user explicitly stopped, so
+      // a Continue button would let them resume what they just halted.
+      drainQueue('idle')
+      skippedCellsAtom.set([])
+      stopAllRequested = false
+      return
+    }
+
     if (status !== 'done') {
+      // Error / timeout: mark the rest skipped so the user can fix-and-resume.
       const remaining = queueAtom()
-      for (const rest of remaining) {
-        const restCell = cellsAtom().find((c) => c.id === rest)
-        restCell?.status.set('skipped')
-      }
+      drainQueue('skipped')
       skippedCellsAtom.set(remaining)
-      queueAtom.set([])
       return
     }
   }
 }
 
+/** Empty the queue, setting every still-pending cell to `status`. */
+function drainQueue(status: CellStatus): void {
+  for (const id of queueAtom()) {
+    cellsAtom()
+      .find((c) => c.id === id)
+      ?.status.set(status)
+  }
+  queueAtom.set([])
+}
+
 // ─── Stop ────────────────────────────────────────────────────────────────────
 
 export const stopCell = action((id: string) => {
-  markStopRequest(id)
-  // Cooperative interrupt: when cross-origin isolated, the VM aborts the
-  // tight loop via the shared flag and keeps its scope. Otherwise this
-  // falls back to terminating the worker.
-  requestInterrupt()
+  if (currentCellId === id) {
+    // The cell is actually running — interrupt the VM. Cooperative when
+    // cross-origin isolated (scope survives), terminate as a fallback.
+    markStopRequest(id)
+    requestInterrupt()
+    return
+  }
+  // The cell is only queued, not running: drop it from the queue and reset
+  // it to idle. Do NOT touch the worker — that would kill the cell that IS
+  // running (e.g. during Run All).
+  if (queueAtom().includes(id)) {
+    queueAtom.set((q) => q.filter((x) => x !== id))
+    cellsAtom()
+      .find((c) => c.id === id)
+      ?.status.set('idle')
+  }
 }, 'runtime.stopCell')
 
 export const stopAll = action(() => {
@@ -194,6 +234,9 @@ export const restartKernel = action(() => {
   // Terminating the worker drops the persistent VM; the next run spins up a
   // fresh kernel with an empty scope.
   restartWorker()
+  // Always return to idle: a kernel stuck 'busy' (e.g. a hung run) must be
+  // unblocked by Restart, otherwise the toolbar stays disabled forever.
+  runtimeStatusAtom.set('idle')
   execCounterAtom.set(0)
   queueAtom.set([])
   skippedCellsAtom.set([])

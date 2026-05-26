@@ -243,6 +243,75 @@ describe('stopCell / stopAll', () => {
     expect(c.executionCount()).toBe(null)
     expect(queueAtom()).toEqual([])
   }, 5000)
+
+  test('stopAll leaves no resume trail (no Continue after an explicit stop)', async () => {
+    const [a] = cellsAtom()
+    const b = addCell()
+    updateCellCode(a.id, 'while(true){}')
+    updateCellCode(b.id, 'console.log("b")')
+    const promise = runAll()
+    await Promise.resolve()
+    await Promise.resolve()
+    stopAll()
+    await promise
+    // A user stop is not a skip-on-error: the skipped list must be empty so
+    // the toolbar shows no Continue button.
+    expect(skippedCellsAtom()).toEqual([])
+    expect(runtimeStatusAtom()).toBe('idle')
+  }, 5000)
+})
+
+describe('concurrency guards', () => {
+  test('runCell is ignored while the kernel is busy (no double execution)', async () => {
+    // Guard is synchronous, so we assert it directly without spinning a real
+    // worker (a tight-loop + timing approach trips the @vitest/web-worker
+    // teardown quirk). Pretend a run is in flight:
+    runtimeStatusAtom.set('busy')
+    try {
+      const [cell] = cellsAtom()
+      updateCellCode(cell.id, 'console.log("should not run")')
+      await runCell(cell.id)
+      // Busy-guard short-circuited: the cell never ran.
+      expect(cell.status()).toBe('idle')
+      expect(cell.executionCount()).toBe(null)
+    } finally {
+      runtimeStatusAtom.set('idle')
+    }
+  })
+
+  test('runAll is ignored while the kernel is busy', async () => {
+    runtimeStatusAtom.set('busy')
+    try {
+      const [cell] = cellsAtom()
+      updateCellCode(cell.id, 'console.log("nope")')
+      await runAll()
+      expect(cell.executionCount()).toBe(null)
+      expect(queueAtom()).toEqual([])
+    } finally {
+      runtimeStatusAtom.set('idle')
+    }
+  })
+
+  test('stopCell on a queued (not running) cell drops it without killing the running one', async () => {
+    const [a] = cellsAtom()
+    const b = addCell()
+    const c = addCell()
+    updateCellCode(a.id, 'while(true){}')
+    updateCellCode(b.id, 'console.log("b")')
+    updateCellCode(c.id, 'console.log("c")')
+    const promise = runAll()
+    await Promise.resolve()
+    await Promise.resolve()
+    // c is only queued; stopping it must not interrupt the running a.
+    stopCell(c.id)
+    expect(queueAtom()).not.toContain(c.id)
+    expect(c.status()).toBe('idle')
+    // Now stop the actually-running a to let the queue finish.
+    stopAll()
+    await promise
+    expect(a.status()).toBe('interrupted')
+    expect(c.executionCount()).toBe(null)
+  }, 5000)
 })
 
 // restartKernel scenarios live in `runtime.restart.test.ts` — they share
