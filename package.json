@@ -26,8 +26,6 @@
     "@reatom/core": "^1001.0.0",
     "@reatom/react": "^1001.0.0",
     "acorn": "^8.16.0",
-    "acorn-walk": "^8.3.5",
-    "astring": "^1.9.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
