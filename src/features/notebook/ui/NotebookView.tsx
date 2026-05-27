@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Code2, Plus, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -14,6 +15,7 @@ import { NotebookToolbar } from './NotebookToolbar'
 import type { Cell, CellViewMode } from '../domain/cell'
 import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
 import { runCell, stopCell } from '../model/runtime'
+import { prewarmWorker } from '../runtime/workerHost'
 
 interface NotebookRowProps {
   cell: Cell
@@ -109,6 +111,13 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
+
+  // Spin up the sandbox worker (chunk fetch + QuickJS init) as soon as the
+  // notebook is on screen, so the user's first Run feels instant instead of
+  // paying the cold-start cost.
+  useEffect(() => {
+    prewarmWorker()
+  }, [])
 
   return (
     <div className="flex flex-1 min-h-0">

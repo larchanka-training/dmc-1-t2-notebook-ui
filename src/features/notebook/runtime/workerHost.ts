@@ -101,6 +101,16 @@ function isolated(): boolean {
   )
 }
 
+/**
+ * Eagerly create the worker (and its QuickJS kernel) so the first real run
+ * doesn't pay the cold-start cost (worker chunk fetch + WASM init, ~50-300ms).
+ * Safe to call repeatedly — it's a no-op once a worker exists. Call it when the
+ * notebook view mounts.
+ */
+export function prewarmWorker(): void {
+  ensureWorker()
+}
+
 function ensureWorker(): WorkerLike {
   if (worker) return worker
   worker = workerFactory()
