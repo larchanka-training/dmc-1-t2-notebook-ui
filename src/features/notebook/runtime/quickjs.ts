@@ -22,6 +22,7 @@
 
 import { getQuickJS, type QuickJSContext, type QuickJSHandle } from 'quickjs-emscripten'
 
+import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
 import { transformCellCode } from './transform'
@@ -74,8 +75,6 @@ export interface KernelOptions {
    */
   shouldInterrupt?: () => boolean
 }
-
-const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Create a fresh persistent kernel. */
 export async function createKernel(options: KernelOptions = {}): Promise<Kernel> {

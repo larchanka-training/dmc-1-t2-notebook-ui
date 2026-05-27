@@ -10,6 +10,7 @@
 // timeout terminates + respawns it as a safety net, and an external
 // `restartWorker()` unsticks an in-flight run (used by Stop).
 
+import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
 import type { HostMsg, OutputItem, RuntimeResult, WorkerMsg } from './types'
 
@@ -53,8 +54,6 @@ export function setWorkerFactory(factory: WorkerFactory): () => void {
     restartWorker()
   }
 }
-
-const DEFAULT_TIMEOUT_MS = 30_000
 
 /**
  * How long Stop waits for a cooperative SAB-interrupt to land before it falls
@@ -242,11 +241,11 @@ function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
     timer = setTimeout(() => {
       cleanup()
       restartWorker()
-      // Preserve output streamed before the hang; append the timeout marker.
-      resolve({
-        status: 'timeout',
-        items: [...items, { type: 'stderr', text: `Execution timed out after ${timeoutMs}ms` }],
-      })
+      // Preserve any output streamed before the hang. The human-readable
+      // timeout marker is added by the runtime model (mapStatus), the single
+      // source for terminal-status messages — so both the in-VM deadline path
+      // and this host-watchdog path produce exactly one marker.
+      resolve({ status: 'timeout', items })
     }, timeoutMs + 100)
 
     // Clear any stale interrupt request from a previous run before starting.

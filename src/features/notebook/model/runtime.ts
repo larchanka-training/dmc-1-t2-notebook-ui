@@ -8,6 +8,7 @@
 
 import { action, atom, wrap } from '@reatom/core'
 import { requestInterrupt, restartWorker, runInWorker } from '../runtime/workerHost'
+import { clampTimeoutMs } from '../runtime/limits'
 import type { OutputItem, RuntimeStatus } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
 import { cellsAtom } from './notebook'
@@ -81,7 +82,9 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   cell.executionCount.set(counter)
 
   const generation = kernelGeneration
-  const timeoutMs = timeoutMsAtom()
+  // Clamp the user-set timeout into the supported range so a bad/zero value
+  // can't make every cell time out instantly or run effectively forever.
+  const timeoutMs = clampTimeoutMs(timeoutMsAtom())
   // Shared scope lives inside the persistent worker VM — no snapshot is
   // passed here or carried back.
   const result = await wrap(runInWorker(cell.code(), { timeoutMs }))

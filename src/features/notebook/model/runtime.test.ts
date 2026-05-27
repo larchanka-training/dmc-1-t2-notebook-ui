@@ -150,6 +150,11 @@ describe('notebookSettings.timeoutMs', () => {
       const elapsed = Date.now() - start
       expect(cell.status()).toBe('timeout')
       expect(elapsed).toBeLessThan(1000)
+      // Exactly one timeout marker — not a host-side + a model-side duplicate.
+      const markers = cell
+        .output()
+        .filter((it) => it.type === 'stderr' && /timed out/i.test(it.text))
+      expect(markers).toHaveLength(1)
     } finally {
       timeoutMsAtom.set(DEFAULT_TIMEOUT_MS)
     }
