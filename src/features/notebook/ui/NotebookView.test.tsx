@@ -48,8 +48,12 @@ describe('NotebookView (RTL integration)', () => {
     await user.clear(textarea)
     await user.type(textarea, 'console.log(1+1)')
     await user.click(screen.getByRole('button', { name: /run cell/i }))
-    expect(await screen.findByText('2')).toBeInTheDocument()
-  })
+    // This is the only test that drives the REAL QuickJS WASM kernel through
+    // the UI. Cold WASM init + a busy parallel vitest pool can push the
+    // round-trip past RTL's default 1000ms findBy timeout (observed ~1.3s),
+    // so wait explicitly with a generous budget instead of flaking.
+    expect(await screen.findByText('2', undefined, { timeout: 8000 })).toBeInTheDocument()
+  }, 15000)
 
   test('editing one cell leaves other cells untouched (atomization)', async () => {
     const user = userEvent.setup()
