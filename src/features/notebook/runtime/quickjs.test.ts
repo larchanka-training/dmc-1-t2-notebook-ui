@@ -49,6 +49,25 @@ describe('kernel.run — happy path', () => {
     expect(r.items).toContainEqual({ type: 'stdout', text: '42' })
   })
 
+  test('multi-step await chain settles in one job drain', async () => {
+    // Regression guard for issue #8: several chained microtasks must all run,
+    // not just the first. A single executePendingJobs() drains the whole VM
+    // queue, so the accumulated value reaches the result.
+    const r = await runFresh(
+      'let n = 0; n += await Promise.resolve(1); n += await Promise.resolve(2); n += await Promise.resolve(3); n',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 6 } })
+  })
+
+  test('await inside a loop accumulates across iterations', async () => {
+    const r = await runFresh(
+      'let sum = 0; for (let i = 1; i <= 5; i++) { sum += await Promise.resolve(i) } console.log(sum)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '15' })
+  })
+
   test('trailing expression statement becomes a result item', async () => {
     const r = await runFresh('1 + 2')
     expect(r.status).toBe('done')

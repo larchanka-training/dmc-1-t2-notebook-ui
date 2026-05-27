@@ -151,7 +151,12 @@ async function runOne(
     let status: RuntimeStatus = 'done'
     try {
       const resolved = vm.resolvePromise(evalResult.value)
-      vm.runtime.executePendingJobs()
+      // Drain the VM microtask queue so the IIFE promise (and every chained
+      // `await` inside it) settles. `executePendingJobs()` with no argument
+      // runs ALL queued jobs, including ones scheduled while draining, so a
+      // multi-step `await a; await b` chain completes in this single call.
+      // The result is Disposable — dispose it to avoid leaking the handle.
+      vm.runtime.executePendingJobs().dispose()
       const awaited = await resolved
       if (awaited.error) {
         pushAbortAware(sink, abort.cause, () => toErrorItem(vm, awaited.error))
