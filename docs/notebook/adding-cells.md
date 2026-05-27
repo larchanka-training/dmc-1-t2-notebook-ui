@@ -57,33 +57,40 @@ Cells live in `cellsAtom`, an in-memory Reatom atom. Each cell's editable fields
 // src/features/notebook/domain/cell.ts
 interface Cell {
   id: string
+  kind: 'code' | 'markdown'
   code: Atom<string>
-  output: Atom<string>
-  status: Atom<'idle' | 'running' | 'done' | 'error'>
+  output: Atom<OutputItem[]>
+  status: Atom<'idle' | 'running' | 'done' | 'error' | 'interrupted' | 'timeout' | 'skipped'>
+  viewMode: Atom<'edit' | 'preview'>
+  executionCount: Atom<number | null>
 }
 ```
 
 This means:
 
 - **Refreshing the page clears all cells** — there is no persistence yet (no `withLocalStorage`).
-- **Cells are independent** — running cell 3 does not re-run cells 1 and 2.
-- **Variables defined in one cell are not available in another** — each `runCell` invocation wraps code in a fresh `new Function(...)` scope.
+- **Cells share scope** — a variable declared in cell N is visible in cell N+1 (Jupyter-style). The code runs inside a persistent QuickJS VM in a Web Worker, not on the main thread — see [How it works — Shared scope](./how-it-works.md#shared-scope-jupyter-style).
+- **Output is structured** — `output` is an `OutputItem[]` (stdout / stderr / result / error / html / image), not a flat string. `executionCount` drives the `[N]` badge and is reset only by Restart Kernel.
 - **Updating one field on one cell does not re-render others** — atomized fields produce focused updates (see [Atomization](../../.claude/skills/reatom/SKILL.md#atomization) in the Reatom skill).
 
 ### Sharing data between cells
 
-Since cells don't share lexical scope, use `window` (or `globalThis`) to pass values:
+Declare a value in one cell and read it in the next — top-level `var` / `let` / `const` / `function` / `class` declarations are shared through the kernel's persistent scope:
 
 ```js
 // Cell 1
-window.myData = [1, 2, 3, 4, 5]
+const myData = [1, 2, 3, 4, 5]
 ```
 
 ```js
 // Cell 2
-console.log(window.myData.map((n) => n * 2))
+console.log(myData.map((n) => n * 2))
 // output: 2,4,6,8,10
 ```
+
+> `window` / `globalThis` are **not** a sharing channel: the sandbox has no
+> `window`, and host globals are unreachable from user code by design.
+> `Restart Kernel` clears the shared scope; deleting a cell does **not**.
 
 ---
 
@@ -94,9 +101,10 @@ Each cell renders a `<NotebookCell />`. The component is **stateless** — the p
 ```tsx
 import { wrap } from '@reatom/core'
 import { NotebookCell } from '@/features/notebook'
-import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebook'
+import { updateCellCode, runCell, stopCell, deleteCell, moveCell } from '@/features/notebook'
 ;<NotebookCell
-  index={idx + 1}
+  executionCount={cell.executionCount()}
+  kind={cell.kind}
   code={cell.code()}
   output={cell.output()}
   status={cell.status()}
@@ -104,6 +112,7 @@ import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebo
   isLast={idx === cells.length - 1}
   onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
   onRun={wrap(() => runCell(cell.id))}
+  onStop={wrap(() => stopCell(cell.id))}
   onDelete={wrap(() => deleteCell(cell.id))}
   onMoveUp={wrap(() => moveCell(cell.id, -1))}
   onMoveDown={wrap(() => moveCell(cell.id, 1))}
@@ -118,10 +127,11 @@ See [Custom Components — NotebookCell](../components/custom.md#notebookcell) f
 
 Ideas for future additions:
 
-| Feature                        | Approach                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------- |
-| **Persist cells**              | Extend `cellsAtom` with `withLocalStorage` (or serialise atomized fields manually)       |
-| **Markdown cells**             | Add `type: 'code' \| 'markdown'` to the `Cell` type, render with a markdown parser       |
-| **Shared scope between cells** | Execute prior cells' code in sequence inside one `Function` scope before the current one |
-| **Cell output formatting**     | Detect arrays/objects and pretty-print with JSON syntax highlighting                     |
-| **Export notebook**            | Serialise `cellsAtom()` to JSON and trigger a file download                              |
+| Feature                    | Approach                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| **Persist cells**          | Extend `cellsAtom` with `withLocalStorage` (or serialise atomized fields manually) |
+| **Cell output formatting** | Richer inspector for `result` items (collapsible trees, syntax highlighting)       |
+| **Export notebook**        | Serialise `cellsAtom()` to JSON and trigger a file download                        |
+
+> Markdown cells and shared scope between cells are already implemented — see
+> `kind: 'markdown'` and [How it works](./how-it-works.md).
