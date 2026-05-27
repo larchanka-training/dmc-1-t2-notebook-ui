@@ -20,13 +20,17 @@
 //
 // `run` never throws — any failure surfaces as an `error` item.
 
+// Import the variant DIRECTLY from its subpackage (not via the
+// `quickjs-emscripten` umbrella, whose re-exports drag every WASM variant
+// into the bundle). This way the bundler emits exactly one
+// `emscripten-module-*.wasm` instead of four.
 import {
   newQuickJSWASMModuleFromVariant,
-  RELEASE_SYNC,
   type QuickJSContext,
   type QuickJSHandle,
   type QuickJSWASMModule,
-} from 'quickjs-emscripten'
+} from 'quickjs-emscripten-core'
+import RELEASE_SYNC from '@jitl/quickjs-wasmfile-release-sync'
 
 import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
