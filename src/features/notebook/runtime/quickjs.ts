@@ -20,7 +20,13 @@
 //
 // `run` never throws — any failure surfaces as an `error` item.
 
-import { getQuickJS, type QuickJSContext, type QuickJSHandle } from 'quickjs-emscripten'
+import {
+  newQuickJSWASMModuleFromVariant,
+  RELEASE_SYNC,
+  type QuickJSContext,
+  type QuickJSHandle,
+  type QuickJSWASMModule,
+} from 'quickjs-emscripten'
 
 import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
@@ -76,9 +82,21 @@ export interface KernelOptions {
   shouldInterrupt?: () => boolean
 }
 
+/**
+ * Load exactly one QuickJS WASM variant (single-file release-sync) instead of
+ * the multi-variant `getQuickJS()` default, which makes the bundler emit
+ * several `emscripten-module-*.wasm` files of which only one is ever used.
+ * Memoized so all kernels share a single module instance.
+ */
+let modulePromise: Promise<QuickJSWASMModule> | null = null
+function getModule(): Promise<QuickJSWASMModule> {
+  if (!modulePromise) modulePromise = newQuickJSWASMModuleFromVariant(RELEASE_SYNC)
+  return modulePromise
+}
+
 /** Create a fresh persistent kernel. */
 export async function createKernel(options: KernelOptions = {}): Promise<Kernel> {
-  const QuickJS = await getQuickJS()
+  const QuickJS = await getModule()
   const vm = QuickJS.newContext()
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
