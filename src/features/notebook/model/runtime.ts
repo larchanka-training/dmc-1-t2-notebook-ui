@@ -85,9 +85,19 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   // Clamp the user-set timeout into the supported range so a bad/zero value
   // can't make every cell time out instantly or run effectively forever.
   const timeoutMs = clampTimeoutMs(timeoutMsAtom())
+  // Stream items into the cell as the worker produces them, so a long run
+  // shows output incrementally instead of all at once at the end. `wrap`
+  // captures the current Reatom context so the callback (fired later from the
+  // worker message listener) can touch atoms. A stale generation (Restart
+  // during the run) makes it a no-op. The final `cell.output.set` below still
+  // overwrites with the authoritative list (incl. status markers).
+  const onItem = wrap((item: OutputItem) => {
+    if (generation !== kernelGeneration) return
+    cell.output.set((prev) => [...prev, item])
+  })
   // Shared scope lives inside the persistent worker VM — no snapshot is
   // passed here or carried back.
-  const result = await wrap(runInWorker(cell.code(), { timeoutMs }))
+  const result = await wrap(runInWorker(cell.code(), { timeoutMs, onItem }))
 
   // A Restart Kernel during the run bumped the generation and already reset
   // this cell to idle. Writing the result now would resurrect stale output on

@@ -61,6 +61,31 @@ describe('workerHost — DI via setWorkerFactory', () => {
     }
   })
 
+  test('onItem streams each output item before the run resolves', async () => {
+    const fake = createFakeWorker((msg) => [
+      { kind: 'output', runId: msg.runId, item: { type: 'stdout', text: 'one' } },
+      { kind: 'output', runId: msg.runId, item: { type: 'stdout', text: 'two' } },
+      { kind: 'done', runId: msg.runId, status: 'done' },
+    ])
+    const restore = setWorkerFactory(() => fake.worker)
+    const streamed: string[] = []
+    try {
+      const r = await runInWorker('whatever', {
+        onItem: (item) => {
+          if (item.type === 'stdout') streamed.push(item.text)
+        },
+      })
+      // Callback saw items in order, and the final result carries the same set.
+      expect(streamed).toEqual(['one', 'two'])
+      expect(r.items).toEqual([
+        { type: 'stdout', text: 'one' },
+        { type: 'stdout', text: 'two' },
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   test('host budget triggers terminate on the injected worker too', async () => {
     let terminated = false
     const restore = setWorkerFactory(() => ({

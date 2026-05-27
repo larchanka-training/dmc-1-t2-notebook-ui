@@ -20,6 +20,14 @@ export { OUTPUT_BUDGET_BYTES } from './outputBudget'
 export interface WorkerHostOptions {
   /** Maximum execution time, in ms. Default 30_000. */
   timeoutMs?: number
+  /**
+   * Called for each output item as the worker streams it in, before the run
+   * finishes. Lets the UI render output incrementally (a long `console.log`
+   * loop shows progress instead of appearing all at once at the end). The
+   * same items are still returned in the final result. Not called for the
+   * synthetic truncation/timeout markers added on the host side.
+   */
+  onItem?: (item: OutputItem) => void
 }
 
 /**
@@ -177,14 +185,18 @@ function nextRunId(): string {
  */
 export function runInWorker(code: string, options: WorkerHostOptions = {}): Promise<RuntimeResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const task = pending.then(() => runOne(code, timeoutMs))
+  const task = pending.then(() => runOne(code, timeoutMs, options.onItem))
   // Swallow inner errors in the chain — they're captured in RuntimeResult;
   // we just need a non-rejecting `pending`.
   pending = task.catch(() => undefined)
   return task
 }
 
-function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
+function runOne(
+  code: string,
+  timeoutMs: number,
+  onItem?: (item: OutputItem) => void,
+): Promise<RuntimeResult> {
   const w = ensureWorker()
   const runId = nextRunId()
   const items: OutputItem[] = []
@@ -223,6 +235,7 @@ function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
         }
         bytesSoFar += itemBytes
         items.push(m.item)
+        onItem?.(m.item)
         return
       }
       // 'done'
