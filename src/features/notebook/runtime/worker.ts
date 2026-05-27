@@ -17,14 +17,6 @@ function getKernel(): Promise<Kernel> {
   return kernelPromise
 }
 
-async function resetKernel(): Promise<void> {
-  if (kernelPromise) {
-    const kernel = await kernelPromise
-    kernel.dispose()
-  }
-  kernelPromise = createKernel({ shouldInterrupt: isInterruptRequested })
-}
-
 self.onmessage = async (event: MessageEvent<HostMsg>) => {
   const msg = event.data
 
@@ -33,11 +25,6 @@ self.onmessage = async (event: MessageEvent<HostMsg>) => {
     // interrupt handler reads it to abort a blocked VM (Stop / Stop All)
     // without destroying the VM, so the shared scope survives.
     setInterruptBuffer(msg.interruptBuffer)
-    return
-  }
-
-  if (msg.kind === 'reset') {
-    await resetKernel()
     return
   }
 

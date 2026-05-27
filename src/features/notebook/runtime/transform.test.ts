@@ -107,4 +107,16 @@ describe('transformCellCode — unsupported syntax surfaces clear errors', () =>
   test('throws a readable error on export', () => {
     expect(() => transformCellCode('export const x = 1')).toThrow(/export is not supported/)
   })
+
+  test('throws a readable error on dynamic import()', () => {
+    expect(() => transformCellCode('const m = await import("x")')).toThrow(
+      /import is not supported/,
+    )
+  })
+
+  test('throws a readable error on import.meta', () => {
+    expect(() => transformCellCode('console.log(import.meta.url)')).toThrow(
+      /import is not supported/,
+    )
+  })
 })

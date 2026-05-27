@@ -17,27 +17,36 @@ import type { OutputItem } from './types'
 /** Cumulative output size cap per run. ~Jupyter's default. */
 export const OUTPUT_BUDGET_BYTES = 5 * 1024 * 1024
 
+// Reused across calls; available in both Worker and jsdom contexts.
+const encoder = new TextEncoder()
+
+/** UTF-8 byte length of a string (so the "bytes" budget is honest about
+ *  multibyte characters, not UTF-16 code units). */
+function byteLength(text: string): number {
+  return encoder.encode(text).length
+}
+
 /**
- * Rough byte size of a single output item. An order-of-magnitude estimate is
- * enough to stop a runaway output loop before it OOMs; precision is not the
- * goal here.
+ * Byte size of a single output item. Used to enforce the cumulative output
+ * budget; counts UTF-8 bytes so the truncation marker's "<N> bytes" is
+ * accurate.
  */
 export function measureItemBytes(item: OutputItem): number {
   switch (item.type) {
     case 'stdout':
     case 'stderr':
-      return item.text.length
+      return byteLength(item.text)
     case 'error':
-      return item.name.length + item.message.length + (item.stack?.length ?? 0)
+      return byteLength(item.name) + byteLength(item.message) + byteLength(item.stack ?? '')
     case 'result':
       try {
-        return JSON.stringify(item.value).length
+        return byteLength(JSON.stringify(item.value))
       } catch {
         return 0
       }
     case 'html':
-      return item.html.length
+      return byteLength(item.html)
     case 'image':
-      return item.data.length + item.mime.length
+      return byteLength(item.data) + byteLength(item.mime)
   }
 }

@@ -53,8 +53,6 @@ export type HostMsg =
    *  destroying it (the shared scope survives). */
   | { kind: 'init'; interruptBuffer: SharedArrayBuffer }
   | { kind: 'run'; runId: string; code: string; timeoutMs: number }
-  /** Drop the VM and create a fresh one — Restart Kernel. */
-  | { kind: 'reset' }
 
 /** Messages sent worker → host. */
 export type WorkerMsg =

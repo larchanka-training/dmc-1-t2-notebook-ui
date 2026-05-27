@@ -67,7 +67,38 @@ export function transformCellCode(source: string): TransformResult {
     allowReturnOutsideFunction: true,
   }) as Program
 
+  // Static `import`/`export` are caught per-statement in rewriteBody, but
+  // dynamic `import(...)` and `import.meta` hide inside expressions anywhere
+  // in the tree. Reject them up front with the same readable error instead of
+  // letting the VM throw a cryptic one at runtime.
+  rejectDynamicImport(ast)
+
   return { code: rewriteBody(ast.body, source) }
+}
+
+/**
+ * Walk the AST and throw on `ImportExpression` (dynamic `import(...)`) or
+ * `import.meta` (`MetaProperty`). A tiny hand-rolled walk avoids pulling in
+ * `acorn-walk` for two node types.
+ */
+function rejectDynamicImport(root: Node): void {
+  const stack: unknown[] = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node || typeof node !== 'object') continue
+    if (Array.isArray(node)) {
+      for (const child of node) stack.push(child)
+      continue
+    }
+    const type = (node as { type?: unknown }).type
+    if (type === 'ImportExpression' || type === 'MetaProperty') {
+      throw new UnsupportedSyntaxError('import is not supported in notebook cells yet')
+    }
+    for (const key in node) {
+      if (key === 'type') continue
+      stack.push((node as Record<string, unknown>)[key])
+    }
+  }
 }
 
 function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string): string {

@@ -241,6 +241,22 @@ describe('Epic 01 AC — Structured output', () => {
     // Status is 'done' — runtime survived the cycle.
     expect(cell.status()).toBe('done')
   })
+
+  test('AC: a cyclic object as the result is serialised with an [Object] marker', async () => {
+    // End-to-end (runCell → worker → vm.dump → serialize), not just the unit
+    // serializer: the self-reference must become the truncated placeholder
+    // rather than crashing or producing an infinite structure.
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'const a = { name: "x" }; a.self = a; a')
+    await runCell(cell.id)
+    expect(cell.status()).toBe('done')
+    const result = cell.output().find((it) => it.type === 'result')
+    expect(result).toBeDefined()
+    if (result?.type === 'result' && result.value.kind === 'object') {
+      const self = result.value.entries.find(([k]) => k === 'self')?.[1]
+      expect(self).toEqual({ kind: 'truncated', placeholder: '[Object]' })
+    }
+  })
 })
 
 // ─── ExecutionCount ──────────────────────────────────────────────────────────
