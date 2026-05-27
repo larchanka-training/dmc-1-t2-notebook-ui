@@ -141,18 +141,29 @@ Mechanism:
 
 1. `runtime/transform.ts` walks the cell's AST.
 2. Each cell runs inside a fresh async IIFE (so top-level `await` works).
-   Because IIFE-local declarations would not escape, every top-level
-   declaration emits a follow-up `globalThis.<name> = <name>` (covering
-   plain ids, multi-declarators, and destructuring patterns).
+   Every top-level declaration is **rewritten into a plain assignment to a
+   `globalThis` slot**, dropping the declaration keyword entirely — there
+   is NO local lexical binding left behind:
+   - `const x = e` / `let x = e` / `var x = e` → `;(globalThis.x = (e));`
+   - destructuring → the binding pattern becomes an assignment pattern whose
+     targets are `globalThis.<name>` members;
+   - `function f(){}` / `class C {}` → `globalThis.f = function f(){}` /
+     `globalThis.C = class C {}` (the named expression keeps self-recursion).
 3. A later cell reads a bare identifier (`x`), which the VM resolves to
    `globalThis.x`. There is no prelude and no `__ctx` snapshot — the
    value lives in the VM, never crossing the postMessage boundary.
-4. Re-running a cell with `const x = 1` is therefore safe: each run is a
-   fresh IIFE with a single `const x`, no redeclaration clash.
+4. Because there is a single storage slot per name (`globalThis.x`) and no
+   local binding, a top-level function that closes over `x` and a later cell
+   that reads `x` resolve to the **same** slot — a mutation is observed
+   everywhere (true Jupyter-like sharing, not a stale copy). Re-running a
+   cell with `const x = 1` is also safe: it is just a re-assignment of
+   `globalThis.x`, never a redeclaration clash.
 
 Because scope is real interpreter state (not a serialized copy), functions,
 closures and class instances survive across cells — unlike a data-only
-snapshot, which could only carry plain values.
+snapshot, which could only carry plain values. Nested declarations (inside
+`if`, `for`, function bodies, etc.) are left untouched: their scope stays
+private to the block.
 
 **Restart Kernel** terminates the worker (dropping the VM), and resets
 `execCounterAtom`, `queueAtom`, and every cell's `executionCount` /
@@ -161,8 +172,10 @@ snapshot, which could only carry plain values.
 **Deleting a cell does NOT remove its variables.** Jupyter semantics:
 once a binding made it into the kernel, it stays until Restart.
 
-`import` / `export` are rejected with a clear error — the kernel has no
-ESM module loader.
+`import` / `export` (static, dynamic `import(...)`, and `import.meta`) are
+rejected with a clear error — the kernel has no ESM module loader.
+`new.target` is **not** affected: it shares the `MetaProperty` AST node with
+`import.meta` but is left untouched.
 
 ---
 
