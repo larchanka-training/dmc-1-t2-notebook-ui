@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from 'vitest'
 import type { HostMsg, WorkerMsg } from './types'
-import { runInWorker, setWorkerFactory, type WorkerLike } from './workerHost'
+import { requestInterrupt, runInWorker, setWorkerFactory, type WorkerLike } from './workerHost'
 
 /**
  * Build an inline worker that captures listeners and lets the test drive
@@ -93,6 +93,34 @@ describe('workerHost — DI via setWorkerFactory', () => {
     try {
       const r = await runInWorker('whatever', { timeoutMs: 60_000 })
       expect(r.status).toBe('error')
+      expect(terminated).toBe(true)
+    } finally {
+      restore()
+    }
+  }, 5000)
+
+  test('requestInterrupt promptly stops a run that never replies (Stop fallback)', async () => {
+    // A worker that accepts the run but never posts `done` models code parked
+    // in a pending promise. Without a SAB (jsdom is not cross-origin
+    // isolated) Stop must fall back to terminate so the run resolves quickly
+    // as `interrupted`, well under the host timeout.
+    let terminated = false
+    const restore = setWorkerFactory(() => ({
+      postMessage: (msg: HostMsg) => void msg,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      terminate: () => {
+        terminated = true
+      },
+    }))
+    try {
+      const run = runInWorker('await new Promise(() => {})', { timeoutMs: 60_000 })
+      await Promise.resolve()
+      const start = Date.now()
+      requestInterrupt()
+      const r = await run
+      expect(Date.now() - start).toBeLessThan(500)
+      expect(r.status).toBe('interrupted')
       expect(terminated).toBe(true)
     } finally {
       restore()

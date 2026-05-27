@@ -22,9 +22,39 @@
 
 import { getQuickJS, type QuickJSContext, type QuickJSHandle } from 'quickjs-emscripten'
 
+import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
 import { transformCellCode } from './transform'
 import type { OutputItem, RuntimeResult, RuntimeStatus } from './types'
+
+/**
+ * Output accumulator shared by console / display capture and the result
+ * push. Tracks the cumulative byte size so the kernel can abort a run that
+ * blows past the output budget *while it is still producing output* — the
+ * host-side check only sees data after the run finishes.
+ */
+interface Sink {
+  items: OutputItem[]
+  bytes: number
+  budgetHit: boolean
+}
+
+/**
+ * Append an item unless the per-run output budget is already exhausted. On
+ * the first overflow it records a single truncation marker and flips
+ * `budgetHit`, which the interrupt handler reads to abort the run.
+ */
+function pushItem(sink: Sink, item: OutputItem): void {
+  if (sink.budgetHit) return
+  const size = measureItemBytes(item)
+  if (sink.bytes + size > OUTPUT_BUDGET_BYTES) {
+    sink.budgetHit = true
+    sink.items.push({ type: 'stderr', text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes` })
+    return
+  }
+  sink.bytes += size
+  sink.items.push(item)
+}
 
 export interface RuntimeOptions {
   /** Hard upper bound for execution time, in ms. Default 30_000. */
@@ -53,7 +83,7 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   const vm = QuickJS.newContext()
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
-  const sink: { items: OutputItem[] } = { items: [] }
+  const sink: Sink = { items: [], bytes: 0, budgetHit: false }
   installConsole(vm, sink)
   installDisplay(vm, sink)
 
@@ -75,13 +105,15 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
 
 async function runOne(
   vm: QuickJSContext,
-  sink: { items: OutputItem[] },
+  sink: Sink,
   code: string,
   timeoutMs: number,
   shouldInterrupt?: () => boolean,
 ): Promise<RuntimeResult> {
   const items: OutputItem[] = []
   sink.items = items
+  sink.bytes = 0
+  sink.budgetHit = false
 
   // 1) AST transform: publish top-level declarations to globalThis + return
   //    the trailing expression (if any). Reject import/export early with a
@@ -98,59 +130,64 @@ async function runOne(
     return { status: 'error', items }
   }
 
-  // 2) Arm the interrupt handler. It aborts on either the deadline (timeout)
-  //    or a user stop (shouldInterrupt). The handler runs synchronously
-  //    between bytecode ops and does NOT destroy the VM, only aborts the
-  //    current evaluation — so the shared scope survives. We record which
-  //    cause fired to classify the abort precisely (no message sniffing).
-  const abort = armInterrupt(vm, timeoutMs, shouldInterrupt)
-
-  // 3) Eval wrapped in async IIFE — supports `await` and returns a Promise.
-  const wrapped = `(async () => { ${transformed}\n })()`
-  const evalResult = vm.evalCode(wrapped)
-  if (evalResult.error) {
-    items.push(toErrorItem(vm, evalResult.error))
-    evalResult.error.dispose()
-    return { status: classifyAbort(abort.cause), items }
-  }
-
-  let status: RuntimeStatus = 'done'
+  // 2) Arm the interrupt handler. It aborts on the deadline (timeout), a user
+  //    stop (shouldInterrupt), or the output budget being exhausted. The
+  //    handler runs synchronously between bytecode ops and does NOT destroy
+  //    the VM, only aborts the current evaluation — so the shared scope
+  //    survives. We record which cause fired to classify the abort precisely
+  //    (no message sniffing). Everything after arming is wrapped so the
+  //    handler is always removed, even on an early eval error.
+  const abort = armInterrupt(vm, timeoutMs, sink, shouldInterrupt)
   try {
-    const resolved = vm.resolvePromise(evalResult.value)
-    vm.runtime.executePendingJobs()
-    const awaited = await resolved
-    if (awaited.error) {
-      items.push(toErrorItem(vm, awaited.error))
-      awaited.error.dispose()
-      status = classifyAbort(abort.cause)
-    } else {
-      pushResultIfMeaningful(vm, awaited.value, items)
-      awaited.value.dispose()
+    // 3) Eval wrapped in async IIFE — supports `await`, returns a Promise.
+    const wrapped = `(async () => { ${transformed}\n })()`
+    const evalResult = vm.evalCode(wrapped)
+    if (evalResult.error) {
+      pushAbortAware(sink, abort.cause, () => toErrorItem(vm, evalResult.error))
+      evalResult.error.dispose()
+      return { status: classifyAbort(abort.cause), items }
     }
+
+    let status: RuntimeStatus = 'done'
+    try {
+      const resolved = vm.resolvePromise(evalResult.value)
+      vm.runtime.executePendingJobs()
+      const awaited = await resolved
+      if (awaited.error) {
+        pushAbortAware(sink, abort.cause, () => toErrorItem(vm, awaited.error))
+        awaited.error.dispose()
+        status = classifyAbort(abort.cause)
+      } else {
+        pushResultIfMeaningful(vm, awaited.value, sink)
+        awaited.value.dispose()
+      }
+    } finally {
+      evalResult.value.dispose()
+    }
+    return { status, items }
   } finally {
-    evalResult.value.dispose()
     vm.runtime.removeInterruptHandler()
   }
-
-  return { status, items }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-type AbortCause = 'none' | 'timeout' | 'interrupt'
+type AbortCause = 'none' | 'timeout' | 'interrupt' | 'budget'
 
 /**
  * QuickJS calls this handler frequently while interpreting bytecode.
  * Returning true tells the VM to abort with an InternalError("interrupted").
  * After abort, the VM stays alive — only the current eval is unwound.
  *
- * Two causes can fire: the deadline (timeout) or a user stop
- * (shouldInterrupt). We record the first one so the caller can map the
- * abort to the right status without sniffing the error message.
+ * Three causes can fire: the deadline (timeout), a user stop
+ * (shouldInterrupt), or the output budget being exhausted (sink.budgetHit,
+ * set by pushItem). We record the first one so the caller can map the abort
+ * to the right status without sniffing the error message.
  */
 function armInterrupt(
   vm: QuickJSContext,
   timeoutMs: number,
+  sink: Sink,
   shouldInterrupt?: () => boolean,
 ): { readonly cause: AbortCause } {
   const deadline = Date.now() + timeoutMs
@@ -158,6 +195,10 @@ function armInterrupt(
   vm.runtime.setInterruptHandler(() => {
     if (shouldInterrupt?.()) {
       state.cause = 'interrupt'
+      return true
+    }
+    if (sink.budgetHit) {
+      state.cause = 'budget'
       return true
     }
     if (Date.now() > deadline) {
@@ -170,12 +211,24 @@ function armInterrupt(
 }
 
 /**
+ * Push an error item only for a genuine error. A timeout / user-interrupt /
+ * budget abort surfaces a synthetic InternalError("interrupted") from
+ * QuickJS that carries no user value — the caller already adds an explicit
+ * status marker, so swallowing the synthetic error avoids a confusing double
+ * output (red "InternalError: interrupted" + the friendly note).
+ */
+function pushAbortAware(sink: Sink, cause: AbortCause, makeItem: () => OutputItem): void {
+  if (cause !== 'none') return
+  pushItem(sink, makeItem())
+}
+
+/**
  * Inject the Jupyter-style `display()` API. User code calls
  *   display({ type: 'html', value: '<b>x</b>' })
  *   display({ type: 'image', mime: 'image/png', data: '<base64>' })
  * and the host receives a matching OutputItem.
  */
-function installDisplay(vm: QuickJSContext, sink: { items: OutputItem[] }): void {
+function installDisplay(vm: QuickJSContext, sink: Sink): void {
   const fn = vm.newFunction('display', (payloadHandle) => {
     if (!payloadHandle) return
     let payload: unknown
@@ -185,7 +238,7 @@ function installDisplay(vm: QuickJSContext, sink: { items: OutputItem[] }): void
       return
     }
     const item = displayPayloadToItem(payload)
-    if (item) sink.items.push(item)
+    if (item) pushItem(sink, item)
   })
   vm.setProp(vm.global, 'display', fn)
   fn.dispose()
@@ -207,7 +260,7 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
 }
 
 /** Inject a minimal console object that pushes into the host-side `items`. */
-function installConsole(vm: QuickJSContext, sink: { items: OutputItem[] }): void {
+function installConsole(vm: QuickJSContext, sink: Sink): void {
   const consoleHandle = vm.newObject()
   const channels: Array<{
     name: 'log' | 'info' | 'warn' | 'error'
@@ -223,7 +276,7 @@ function installConsole(vm: QuickJSContext, sink: { items: OutputItem[] }): void
       // quickjs-emscripten auto-disposes argument handles when the
       // callback returns; we MUST NOT call `dispose()` on them ourselves.
       const text = args.map((arg) => stringifyArg(vm, arg)).join(' ')
-      sink.items.push(toItem(text))
+      pushItem(sink, toItem(text))
     })
     vm.setProp(consoleHandle, name, fn)
     fn.dispose()
@@ -261,6 +314,9 @@ function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem
 function classifyAbort(cause: AbortCause): RuntimeStatus {
   if (cause === 'timeout') return 'timeout'
   if (cause === 'interrupt') return 'interrupted'
+  // A budget overflow is a hard stop: the truncation marker is already in the
+  // output, and the run did not complete, so surface it as an error.
+  if (cause === 'budget') return 'error'
   return 'error'
 }
 
@@ -301,11 +357,7 @@ function stringifyArg(vm: QuickJSContext, handle: QuickJSHandle): string {
  * The async IIFE has a final completion value. Skip undefined, otherwise
  * push it as a `result` item.
  */
-function pushResultIfMeaningful(
-  vm: QuickJSContext,
-  valueHandle: QuickJSHandle,
-  items: OutputItem[],
-): void {
+function pushResultIfMeaningful(vm: QuickJSContext, valueHandle: QuickJSHandle, sink: Sink): void {
   let dumped: unknown
   try {
     dumped = vm.dump(valueHandle) as unknown
@@ -313,5 +365,5 @@ function pushResultIfMeaningful(
     return
   }
   if (dumped === undefined) return
-  items.push({ type: 'result', value: serialize(dumped) })
+  pushItem(sink, { type: 'result', value: serialize(dumped) })
 }

@@ -170,7 +170,7 @@ ESM module loader.
 
 The kernel's `setInterruptHandler` runs synchronously between bytecode ops
 and can abort the current evaluation **without destroying the VM**, so the
-shared scope survives. It fires on either of two causes, and records which:
+shared scope survives. It fires on three causes, and records which:
 
 1. **Timeout.** A per-run deadline (`timeoutMs`). Aborts `while(true){}`
    even though the VM has no `await` point → status `'timeout'`.
@@ -178,11 +178,23 @@ shared scope survives. It fires on either of two causes, and records which:
    that the handler reads. Because the buffer is shared, the host can set
    it even while the worker thread is blocked in a tight loop → status
    `'interrupted'`, scope preserved.
+3. **Output budget.** The kernel itself aborts once cumulative output
+   exceeds the budget (see Limits) → status `'error'`.
+
+A deadline / user-stop / budget abort surfaces a synthetic
+`InternalError("interrupted")` inside the VM. The kernel **swallows** that
+synthetic error (it carries no user value) and lets the status drive a
+single explicit marker — no confusing red "InternalError" on top of the
+friendly note.
 
 The SAB path requires a cross-origin isolated context (COOP/COEP headers,
-see `auth.md` § Cross-origin isolation). **Without isolation** the runtime
-falls back to `worker.terminate()` + respawn: the run is still stopped
-`'interrupted'`, but the VM (and shared scope) is lost. A host-side
+see `auth.md` § Cross-origin isolation). The SAB flag only aborts a VM that
+is **running bytecode**; code parked in a pending promise
+(`await new Promise(() => {})`) never reaches the handler. So a Stop arms a
+**watchdog** (`INTERRUPT_WATCHDOG_MS`, 250 ms): if the cooperative interrupt
+hasn't landed, the host falls back to `worker.terminate()` + respawn — the
+run still stops `'interrupted'` (scope is lost in that case). The same
+fallback is the only path **without isolation**. A host-side
 `setTimeout(timeoutMs + 100)` terminate remains as a last-resort safety net.
 
 `stopCell` only interrupts when its cell is the one actually running; a
@@ -193,15 +205,27 @@ cell gets an explicit stderr marker in its output.
 
 ## Limits
 
-| Limit          | Default                 | Configurable via                             |
-| -------------- | ----------------------- | -------------------------------------------- |
-| Execution time | 30 s                    | `runInWorker(code, { timeoutMs })`           |
-| Output size    | 5 MB cumulative per run | `runtime/workerHost.ts: OUTPUT_BUDGET_BYTES` |
+| Limit          | Default                 | Configurable via                               |
+| -------------- | ----------------------- | ---------------------------------------------- |
+| Execution time | 30 s                    | `runInWorker(code, { timeoutMs })`             |
+| Output size    | 5 MB cumulative per run | `runtime/outputBudget.ts: OUTPUT_BUDGET_BYTES` |
 
-The budget is checked **before** each item is accepted, so a single huge
-item cannot blow past the limit. When exceeded, the host appends
-`{ type: 'stderr', text: 'Output truncated at <N> bytes' }`, terminates the
-worker, and resolves the run as `error`. Further output is discarded.
+The budget is enforced in **two layers** (`runtime/outputBudget.ts` is the
+shared definition):
+
+1. **In the kernel (primary).** `pushItem` tracks cumulative bytes as
+   `console.*` / `display` / result items are produced. On overflow it
+   records one `{ type: 'stderr', text: 'Output truncated at <N> bytes' }`
+   marker and trips the interrupt handler, so a runaway
+   `for(;;) console.log(...)` is stopped **while running** — the worker
+   cannot grow its memory without bound. Status → `error`.
+2. **In the host (defense-in-depth).** `workerHost` re-checks the size of
+   items it receives, covering an injected / fake worker that bypasses the
+   kernel. On overflow it appends the same marker, terminates the worker,
+   and resolves the run as `error`.
+
+The check happens **before** each item is accepted, so a single huge item
+cannot blow past the limit.
 
 ---
 

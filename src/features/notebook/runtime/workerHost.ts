@@ -10,7 +10,11 @@
 // timeout terminates + respawns it as a safety net, and an external
 // `restartWorker()` unsticks an in-flight run (used by Stop).
 
+import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
 import type { HostMsg, OutputItem, RuntimeResult, WorkerMsg } from './types'
+
+// Re-export so existing importers (tests, runtime model) keep their path.
+export { OUTPUT_BUDGET_BYTES } from './outputBudget'
 
 export interface WorkerHostOptions {
   /** Maximum execution time, in ms. Default 30_000. */
@@ -51,10 +55,16 @@ export function setWorkerFactory(factory: WorkerFactory): () => void {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
-/** Soft cap on cumulative output size per run. Going above terminates the
- *  worker and appends a stderr marker, so a runaway `for(;;) console.log(...)`
- *  cannot OOM the page. 5 MB is roughly Jupyter's default. */
-export const OUTPUT_BUDGET_BYTES = 5 * 1024 * 1024
+
+/**
+ * How long Stop waits for a cooperative SAB-interrupt to land before it falls
+ * back to terminating the worker. The SAB flag only aborts a VM that is
+ * running bytecode; code parked in a pending promise (`await new Promise(()
+ * => {})`) never hits the interrupt handler, so without this watchdog Stop
+ * would hang until the full execution timeout. 250 ms keeps Stop well under
+ * the ≤500 ms acceptance budget while giving the fast path room to win.
+ */
+const INTERRUPT_WATCHDOG_MS = 250
 
 let worker: WorkerLike | null = null
 let pending: Promise<unknown> = Promise.resolve()
@@ -73,6 +83,9 @@ let inFlightResolver: (() => void) | null = null
  * `null` when isolation is unavailable; Stop then falls back to terminate.
  */
 let interruptFlag: Int32Array | null = null
+
+/** Active Stop watchdog timer (SAB-interrupt fallback). See requestInterrupt. */
+let interruptWatchdog: ReturnType<typeof setTimeout> | null = null
 
 function isolated(): boolean {
   return (
@@ -104,9 +117,30 @@ function ensureWorker(): WorkerLike {
 export function requestInterrupt(): void {
   if (interruptFlag) {
     Atomics.store(interruptFlag, 0, 1)
+    // The SAB flag aborts a VM only while it executes bytecode. If user code
+    // is parked in a pending promise, the interrupt handler never runs — arm
+    // a watchdog that terminates the worker if the run hasn't resolved in
+    // time, so Stop still completes promptly (scope is lost in that case).
+    armInterruptWatchdog()
     return
   }
   restartWorker()
+}
+
+function armInterruptWatchdog(): void {
+  clearInterruptWatchdog()
+  interruptWatchdog = setTimeout(() => {
+    interruptWatchdog = null
+    // Still in flight => the cooperative interrupt didn't land; force it.
+    if (inFlightResolver) restartWorker()
+  }, INTERRUPT_WATCHDOG_MS)
+}
+
+function clearInterruptWatchdog(): void {
+  if (interruptWatchdog) {
+    clearTimeout(interruptWatchdog)
+    interruptWatchdog = null
+  }
 }
 
 /**
@@ -116,6 +150,7 @@ export function requestInterrupt(): void {
  * terminate fallback.
  */
 export function restartWorker(): void {
+  clearInterruptWatchdog()
   if (worker) {
     worker.terminate()
     worker = null
@@ -162,6 +197,7 @@ function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
       w.removeEventListener('message', onMessage)
       if (timer) clearTimeout(timer)
       timer = null
+      clearInterruptWatchdog()
       inFlightResolver = null
     }
 
@@ -218,29 +254,4 @@ function runOne(code: string, timeoutMs: number): Promise<RuntimeResult> {
     const runMsg: HostMsg = { kind: 'run', runId, code, timeoutMs }
     w.postMessage(runMsg)
   })
-}
-
-/**
- * Rough byte budget per output item. An order-of-magnitude estimate is
- * enough to stop a `for (let i=0; i<1e7; i++) console.log('xxx')` loop
- * before it OOMs the page.
- */
-function measureItemBytes(item: OutputItem): number {
-  switch (item.type) {
-    case 'stdout':
-    case 'stderr':
-      return item.text.length
-    case 'error':
-      return item.name.length + item.message.length + (item.stack?.length ?? 0)
-    case 'result':
-      try {
-        return JSON.stringify(item.value).length
-      } catch {
-        return 0
-      }
-    case 'html':
-      return item.html.length
-    case 'image':
-      return item.data.length + item.mime.length
-  }
 }

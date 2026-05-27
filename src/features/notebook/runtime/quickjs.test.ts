@@ -251,7 +251,9 @@ describe('kernel.run — timeout', () => {
     const elapsed = Date.now() - start
     expect(r.status).toBe('timeout')
     expect(elapsed).toBeLessThan(1000)
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+    // A deadline abort must NOT surface a synthetic InternalError item — the
+    // status carries the meaning, the friendly marker is added one layer up.
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
   })
 
   test('the VM survives a timeout — a later run on the same kernel works', async () => {
@@ -303,6 +305,34 @@ describe('kernel.run — cooperative interrupt', () => {
       kernel.dispose()
     }
   }, 5000)
+
+  test('a user interrupt does NOT add a synthetic error item (only the status)', async () => {
+    // Regression for the double-output bug: the abort surfaced a red
+    // "InternalError: interrupted" item on top of the friendly marker.
+    const kernel = await createKernel({ shouldInterrupt: () => true })
+    try {
+      const r = await kernel.run('while(true){}', { timeoutMs: 60_000 })
+      expect(r.status).toBe('interrupted')
+      expect(r.items.some((it) => it.type === 'error')).toBe(false)
+    } finally {
+      kernel.dispose()
+    }
+  }, 5000)
+})
+
+describe('kernel.run — output budget (in-VM enforcement)', () => {
+  test('a runaway output loop is stopped inside the VM with a truncation marker', async () => {
+    // The budget is enforced by the kernel itself (not just the host), so the
+    // loop is aborted while still producing output — the worker cannot grow
+    // its memory without bound. A generous timeout proves the budget, not the
+    // deadline, is what stopped it.
+    const r = await runFresh(
+      "const chunk = 'x'.repeat(1024); for (let i = 0; i < 1e7; i++) console.log(chunk)",
+      60_000,
+    )
+    expect(r.status).toBe('error')
+    expect(r.items.some((it) => it.type === 'stderr' && /truncated/i.test(it.text))).toBe(true)
+  }, 10_000)
 })
 
 describe('kernel.run — display() API', () => {

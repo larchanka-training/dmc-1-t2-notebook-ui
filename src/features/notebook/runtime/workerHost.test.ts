@@ -38,10 +38,10 @@ describe('runInWorker — timeout and respawn', () => {
     const start = Date.now()
     const r = await runInWorker('while(true){}', { timeoutMs: 200 })
     const elapsed = Date.now() - start
+    // Status carries the outcome; the deadline abort no longer injects a
+    // synthetic error item (the friendly marker is added by the runtime
+    // model). Proving the loop stopped quickly is enough here.
     expect(r.status).toBe('timeout')
-    // Either an in-VM interrupt (error item) or a host-side terminate
-    // (stderr item) is acceptable — both prove the loop was stopped.
-    expect(r.items.some((it) => it.type === 'stderr' || it.type === 'error')).toBe(true)
     expect(elapsed).toBeLessThan(700)
   }, 3000)
 
