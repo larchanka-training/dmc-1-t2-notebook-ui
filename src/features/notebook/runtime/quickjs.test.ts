@@ -94,6 +94,22 @@ describe('kernel.run — happy path', () => {
       expect(stdout.text).toContain('1')
     }
   })
+
+  test('console.log of a cyclic object does not crash', async () => {
+    // The arg-stringifier must never throw on a self-reference. (QuickJS's
+    // dump may already collapse the cycle, but the JS-side path that handles
+    // JSON.stringify failures must stay crash-free regardless.)
+    const r = await runFresh('const a = { x: 1 }; a.self = a; console.log(a)')
+    expect(r.status).toBe('done')
+    expect(r.items.some((it) => it.type === 'stdout')).toBe(true)
+  })
+
+  test('console.log of a BigInt does not crash', async () => {
+    const r = await runFresh('console.log(10n)')
+    expect(r.status).toBe('done')
+    const stdout = r.items.find((it) => it.type === 'stdout')
+    expect(stdout?.type === 'stdout' && stdout.text).toContain('10')
+  })
 })
 
 describe('kernel.run — errors', () => {

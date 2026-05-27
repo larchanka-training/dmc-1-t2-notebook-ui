@@ -26,7 +26,7 @@ import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
 import { transformCellCode } from './transform'
-import type { OutputItem, RuntimeResult, RuntimeStatus } from './types'
+import type { OutputItem, RuntimeResult, RuntimeStatus, SerializedValue } from './types'
 
 /**
  * Output accumulator shared by console / display capture and the result
@@ -350,10 +350,38 @@ function stringifyArg(vm: QuickJSContext, handle: QuickJSHandle): string {
   if (dumped === null) return 'null'
   if (typeof dumped === 'string') return dumped
   if (typeof dumped === 'number' || typeof dumped === 'boolean') return String(dumped)
+  // Objects/arrays: prefer compact JSON. JSON.stringify throws on cycles and
+  // BigInt, so fall back to the safe serializer's own formatter — NOT another
+  // JSON.stringify pass (that would just throw again on the same value).
   try {
-    return JSON.stringify(dumped) ?? safeToString(serialize(dumped))
+    const json = JSON.stringify(dumped)
+    if (json !== undefined) return json
   } catch {
-    return safeToString(serialize(dumped))
+    // fall through to the serializer-based path
+  }
+  return formatSerialized(serialize(dumped))
+}
+
+/**
+ * Render a SerializedValue to a compact one-line string. Used as the
+ * cycle/BigInt-safe fallback when JSON.stringify can't handle a console.log
+ * argument. Mirrors the UI's formatter but lives here so the worker has no UI
+ * dependency.
+ */
+function formatSerialized(value: SerializedValue): string {
+  switch (value.kind) {
+    case 'primitive':
+      return typeof value.value === 'string' ? JSON.stringify(value.value) : String(value.value)
+    case 'undefined':
+      return 'undefined'
+    case 'function':
+      return `[Function: ${value.name}]`
+    case 'truncated':
+      return value.placeholder
+    case 'array':
+      return `[${value.items.map(formatSerialized).join(', ')}]`
+    case 'object':
+      return `{ ${value.entries.map(([k, v]) => `${k}: ${formatSerialized(v)}`).join(', ')} }`
   }
 }
 
