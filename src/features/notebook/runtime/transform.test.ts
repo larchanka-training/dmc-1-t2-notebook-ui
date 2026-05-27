@@ -119,4 +119,12 @@ describe('transformCellCode — unsupported syntax surfaces clear errors', () =>
       /import is not supported/,
     )
   })
+
+  test('does NOT reject new.target (shares the MetaProperty node with import.meta)', () => {
+    // Regression: new.target is a valid MetaProperty; only import.meta must
+    // be rejected. Previously any MetaProperty threw "import is not supported".
+    const src = 'function Factory(){ if (!new.target) throw new Error("use new"); }'
+    expect(() => transformCellCode(src)).not.toThrow()
+    expect(transformCellCode(src).code).toContain('new.target')
+  })
 })

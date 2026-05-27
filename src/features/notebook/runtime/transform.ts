@@ -78,8 +78,12 @@ export function transformCellCode(source: string): TransformResult {
 
 /**
  * Walk the AST and throw on `ImportExpression` (dynamic `import(...)`) or
- * `import.meta` (`MetaProperty`). A tiny hand-rolled walk avoids pulling in
- * `acorn-walk` for two node types.
+ * `import.meta`. A tiny hand-rolled walk avoids pulling in `acorn-walk` for
+ * two node types.
+ *
+ * Note: `import.meta` and `new.target` share the `MetaProperty` node type;
+ * acorn distinguishes them by `meta.name` (`'import'` vs `'new'`). We must
+ * reject ONLY `import.meta` — `new.target` is valid JS the kernel supports.
  */
 function rejectDynamicImport(root: Node): void {
   const stack: unknown[] = [root]
@@ -91,7 +95,7 @@ function rejectDynamicImport(root: Node): void {
       continue
     }
     const type = (node as { type?: unknown }).type
-    if (type === 'ImportExpression' || type === 'MetaProperty') {
+    if (type === 'ImportExpression' || isImportMeta(node)) {
       throw new UnsupportedSyntaxError('import is not supported in notebook cells yet')
     }
     for (const key in node) {
@@ -99,6 +103,16 @@ function rejectDynamicImport(root: Node): void {
       stack.push((node as Record<string, unknown>)[key])
     }
   }
+}
+
+/**
+ * True only for the `import.meta` meta-property. `new.target` is also a
+ * `MetaProperty` but carries `meta.name === 'new'`, so it passes through.
+ */
+function isImportMeta(node: object): boolean {
+  if ((node as { type?: unknown }).type !== 'MetaProperty') return false
+  const meta = (node as { meta?: { name?: unknown } }).meta
+  return meta?.name === 'import'
 }
 
 function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string): string {

@@ -107,6 +107,12 @@ describe('kernel.run — errors', () => {
     const err = r.items.find((it) => it.type === 'error')
     expect(err?.type === 'error' && err.message).toMatch(/import is not supported/)
   })
+
+  test('new.target runs (not mistaken for import.meta)', async () => {
+    const r = await runFresh('function F(){ return String(Boolean(new.target)) }; console.log(F())')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'false' })
+  })
 })
 
 describe('kernel.run — sandbox isolation', () => {
