@@ -42,6 +42,12 @@ const stopRequested = new Set<string>()
 let stopAllRequested = false
 /** Id of the cell currently being executed (if any). */
 let currentCellId: string | null = null
+/**
+ * Monotonic kernel "generation". Bumped by `restartKernel`, so an
+ * `executeCell` that was in flight when the user restarted can detect that
+ * its kernel is gone and refuse to write stale state over the fresh reset.
+ */
+let kernelGeneration = 0
 
 // ─── Run a single cell ───────────────────────────────────────────────────────
 
@@ -74,10 +80,17 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   execCounterAtom.set(counter)
   cell.executionCount.set(counter)
 
+  const generation = kernelGeneration
   const timeoutMs = timeoutMsAtom()
   // Shared scope lives inside the persistent worker VM — no snapshot is
   // passed here or carried back.
   const result = await wrap(runInWorker(cell.code(), { timeoutMs }))
+
+  // A Restart Kernel during the run bumped the generation and already reset
+  // this cell to idle. Writing the result now would resurrect stale output on
+  // top of the fresh kernel, so bail out without touching cell state.
+  if (generation !== kernelGeneration) return result.status
+
   currentCellId = null
   cell.output.set(result.items)
   const finalStatus = mapStatus(cell.id, result.status, result.items)
@@ -231,6 +244,9 @@ export const stopAll = action(() => {
 // ─── Restart Kernel ──────────────────────────────────────────────────────────
 
 export const restartKernel = action(() => {
+  // Invalidate any in-flight executeCell: its continuation will see the bumped
+  // generation after `await` and skip writing stale state over this reset.
+  kernelGeneration++
   // Terminating the worker drops the persistent VM; the next run spins up a
   // fresh kernel with an empty scope.
   restartWorker()

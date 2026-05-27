@@ -1,29 +1,32 @@
 // AST-level rewriting that wires shared scope between cells.
 //
 // The kernel runs each cell inside a fresh async IIFE, but the QuickJS VM
-// itself is persistent. Declarations made with `const`/`let`/`var`/
-// `function`/`class` are block-local to the IIFE, so to make them visible in
-// later cells we additionally publish each top-level binding onto
-// `globalThis`. A later cell reads a bare identifier (e.g. `x`), which the VM
-// resolves to `globalThis.x`.
+// itself is persistent. To make `const`/`let`/`var`/`function`/`class`
+// declared in cell N visible in cell N+1, every top-level binding lives on
+// `globalThis` and NOWHERE else — there is a single storage slot per name.
 //
 // Two rewrites happen:
 //
-//   1. TOP-LEVEL DECLARATIONS — the original declaration is kept verbatim
-//      (so references later in the *same* cell resolve to the local binding),
-//      followed by `globalThis.<name> = <name>` for every bound identifier.
-//      This covers plain ids, multi-declarators, destructuring patterns,
-//      functions and classes uniformly.
+//   1. TOP-LEVEL DECLARATIONS — rewritten so the name becomes purely a
+//      `globalThis` property, with no local lexical binding:
+//        * `const x = e` / `let x = e` / `var x = e` → `;(globalThis.x = (e));`
+//        * destructuring → the binding pattern is converted to an assignment
+//          pattern whose targets are `globalThis.<name>` members;
+//        * `function f(){}` / `class C {}` → `globalThis.f = function f(){}`
+//          / `globalThis.C = class C {}` (named expression keeps recursion).
+//      Because no local binding is created, a top-level function that closes
+//      over `x` and a later cell that reads `x` resolve to the SAME slot
+//      (`globalThis.x`) — mutations are observed everywhere (Jupyter-like).
 //
 //   2. TRAILING EXPRESSION — if the last top-level node is an
 //      ExpressionStatement, it becomes `return <expression>` so the value
 //      populates the `result` OutputItem (REPL-like behaviour).
 //
-// Because there is no prelude and no `__ctx`, re-running a cell with
-// `const x = 1` is safe: each run is a fresh IIFE with a single `const x`.
+// Re-running a cell with `const x = 1` is safe: it is just a re-assignment of
+// `globalThis.x`, never a redeclaration.
 //
 // Nested declarations (inside `if`, `for`, function bodies, etc.) are
-// deliberately NOT published: their scope is private to the block.
+// deliberately left untouched: their scope is private to the block.
 //
 // ESM `import`/`export` are rejected with a clear error — QuickJS has no
 // module loader here, and a bare SyntaxError from the VM is cryptic.
@@ -94,56 +97,69 @@ function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string)
 }
 
 function rewriteVariableDeclaration(node: VariableDeclaration, source: string): string {
-  // Keep the original declaration (so locals resolve within the cell), then
-  // publish every bound identifier onto globalThis for later cells.
-  const names = new Set<string>()
-  for (const decl of node.declarations) {
-    collectPatternNames(decl.id, names)
-  }
-  return withGlobalPublish(sliceNode(source, node), names)
+  // Drop the declaration keyword entirely: each declarator becomes an
+  // assignment to a globalThis slot, so there is no local binding to shadow
+  // the global or to be captured by a closure.
+  return node.declarations.map((decl) => declaratorToGlobal(decl, source)).join('\n')
+}
+
+function declaratorToGlobal(
+  decl: VariableDeclaration['declarations'][number],
+  source: string,
+): string {
+  const target = patternToGlobalTarget(decl.id, source)
+  const init = decl.init ? sliceNode(source, decl.init) : 'undefined'
+  // Wrap the whole assignment in parens so an object-pattern target on the
+  // left is parsed as a destructuring assignment, not a block statement.
+  return `;(${target} = (${init}));`
 }
 
 function rewriteNamedDeclaration(node: Node, source: string, name: string | undefined): string {
   const original = sliceNode(source, node)
   if (!name) return original
-  return withGlobalPublish(original, new Set([name]))
-}
-
-function withGlobalPublish(original: string, names: Set<string>): string {
-  if (names.size === 0) return original
-  const publish = [...names].map((name) => `globalThis.${name} = ${name}`).join('\n')
-  return `${original}\n${publish}`
+  // `function f(){}` / `class C {}` → named expression assigned to globalThis.
+  // The internal name binding still works for self-recursion; sibling cells
+  // and closures resolve `f` to the single `globalThis.f` slot.
+  return `globalThis.${name} = ${original};`
 }
 
 /**
- * Recursively collect every bound identifier name from a binding pattern:
- * plain ids, object/array destructuring, rest elements, defaults.
+ * Convert a binding pattern into an assignment target whose leaves are
+ * `globalThis.<name>` member expressions. Handles plain ids, object/array
+ * destructuring, rest elements and defaults — the mirror of a declaration
+ * binding, but writing through to the single global slot per name.
  */
-function collectPatternNames(pattern: Pattern, out: Set<string>): void {
+function patternToGlobalTarget(pattern: Pattern, source: string): string {
   switch (pattern.type) {
     case 'Identifier':
-      out.add(pattern.name)
-      return
-    case 'ObjectPattern':
-      for (const prop of pattern.properties) {
-        if (prop.type === 'RestElement') collectPatternNames(prop.argument, out)
-        else collectPatternNames(prop.value, out)
-      }
-      return
-    case 'ArrayPattern':
-      for (const el of pattern.elements) {
-        if (el) collectPatternNames(el, out)
-      }
-      return
-    case 'RestElement':
-      collectPatternNames(pattern.argument, out)
-      return
+      return `globalThis.${pattern.name}`
+    case 'ObjectPattern': {
+      const props = pattern.properties.map((prop) => {
+        if (prop.type === 'RestElement') {
+          return `...${patternToGlobalTarget(prop.argument, source)}`
+        }
+        const value = patternToGlobalTarget(prop.value as Pattern, source)
+        if (prop.computed) return `[${sliceNode(source, prop.key)}]: ${value}`
+        const key = prop.key.type === 'Identifier' ? prop.key.name : sliceNode(source, prop.key)
+        return `${key}: ${value}`
+      })
+      return `{ ${props.join(', ')} }`
+    }
+    case 'ArrayPattern': {
+      const els = pattern.elements.map((el) => {
+        if (!el) return ''
+        if (el.type === 'RestElement') return `...${patternToGlobalTarget(el.argument, source)}`
+        return patternToGlobalTarget(el as Pattern, source)
+      })
+      return `[${els.join(', ')}]`
+    }
     case 'AssignmentPattern':
-      collectPatternNames(pattern.left, out)
-      return
+      return `${patternToGlobalTarget(pattern.left, source)} = ${sliceNode(source, pattern.right)}`
+    case 'RestElement':
+      return `...${patternToGlobalTarget(pattern.argument, source)}`
     default:
       // MemberExpression etc. cannot appear in a declaration binding.
-      return
+      return sliceNode(source, pattern)
   }
 }
 

@@ -1,58 +1,63 @@
 import { describe, expect, test } from 'vitest'
 import { transformCellCode } from './transform'
 
-describe('transformCellCode — top-level declarations publish to globalThis', () => {
-  test('const declaration is kept and published', () => {
+describe('transformCellCode — top-level declarations become globalThis slots', () => {
+  test('const declaration writes through to globalThis with no local binding', () => {
     const out = transformCellCode('const x = 1').code
-    expect(out).toMatch(/const x = 1/)
-    expect(out).toContain('globalThis.x = x')
+    expect(out).toContain('globalThis.x = (1)')
+    // No lexical binding survives — there must be no `const x` keyword left.
+    expect(out).not.toMatch(/\bconst x\b/)
   })
 
   test('let declaration', () => {
     const out = transformCellCode('let y = 2').code
-    expect(out).toMatch(/\blet y = 2\b/)
-    expect(out).toContain('globalThis.y = y')
+    expect(out).toContain('globalThis.y = (2)')
+    expect(out).not.toMatch(/\blet y\b/)
   })
 
   test('var declaration', () => {
     const out = transformCellCode('var z = 3').code
-    expect(out).toMatch(/\bvar z = 3\b/)
-    expect(out).toContain('globalThis.z = z')
+    expect(out).toContain('globalThis.z = (3)')
+    expect(out).not.toMatch(/\bvar z\b/)
   })
 
-  test('multiple declarations in one statement publish each binding', () => {
+  test('declaration with no initializer defaults to undefined', () => {
+    const out = transformCellCode('let pending').code
+    expect(out).toContain('globalThis.pending = (undefined)')
+  })
+
+  test('multiple declarations in one statement assign each binding', () => {
     const out = transformCellCode('const a = 1, b = 2').code
-    expect(out).toContain('globalThis.a = a')
-    expect(out).toContain('globalThis.b = b')
+    expect(out).toContain('globalThis.a = (1)')
+    expect(out).toContain('globalThis.b = (2)')
   })
 
-  test('function declaration is published', () => {
+  test('function declaration becomes a named expression on globalThis', () => {
     const out = transformCellCode('function greet() { return 1 }').code
-    expect(out).toMatch(/function greet/)
-    expect(out).toContain('globalThis.greet = greet')
+    expect(out).toContain('globalThis.greet = function greet')
   })
 
-  test('class declaration is published', () => {
+  test('class declaration becomes a named expression on globalThis', () => {
     const out = transformCellCode('class Box {}').code
-    expect(out).toMatch(/class Box/)
-    expect(out).toContain('globalThis.Box = Box')
+    expect(out).toContain('globalThis.Box = class Box')
   })
 
-  test('object destructuring publishes every bound name', () => {
+  test('object destructuring targets globalThis slots', () => {
     const out = transformCellCode('const { a, b: c } = obj').code
-    expect(out).toContain('globalThis.a = a')
-    expect(out).toContain('globalThis.c = c')
+    expect(out).toContain('a: globalThis.a')
+    expect(out).toContain('b: globalThis.c')
   })
 
-  test('array destructuring with rest publishes every bound name', () => {
+  test('array destructuring with rest targets globalThis slots', () => {
     const out = transformCellCode('const [first, ...rest] = arr').code
-    expect(out).toContain('globalThis.first = first')
-    expect(out).toContain('globalThis.rest = rest')
+    expect(out).toContain('globalThis.first')
+    expect(out).toContain('...globalThis.rest')
   })
 
-  test('nested declarations inside a block are NOT published', () => {
+  test('nested declarations inside a block are NOT touched', () => {
     const out = transformCellCode('if (true) { const inner = 1 }').code
     expect(out).not.toContain('globalThis.inner')
+    expect(out).toContain('const inner = 1')
   })
 })
 
@@ -63,12 +68,12 @@ describe('transformCellCode — no prelude / re-run safety', () => {
     expect(out).toContain('console.log(prev)')
   })
 
-  test('re-running a const cell does not duplicate the declaration', () => {
-    // The same source transformed twice yields a single `const x` each time;
-    // there is no injected `const x` from a prelude that would clash.
+  test('re-running a const cell is a re-assignment, never a redeclaration', () => {
+    // No `const`/`let`/`var` keyword is emitted for a top-level declaration,
+    // so running the same cell twice can never throw a redeclaration error.
     const out = transformCellCode('const x = 1').code
-    const matches = out.match(/const x =/g) ?? []
-    expect(matches.length).toBe(1)
+    expect(out).not.toMatch(/\b(const|let|var)\b/)
+    expect(out).toContain('globalThis.x = (1)')
   })
 })
 

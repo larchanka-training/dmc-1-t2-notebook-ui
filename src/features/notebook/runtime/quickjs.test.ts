@@ -186,6 +186,26 @@ describe('kernel.run — persistent shared scope', () => {
     }
   })
 
+  test('a top-level function mutating a top-level let is seen by later runs', async () => {
+    // Regression: previously declarations stayed local to the IIFE and were
+    // only *copied* to globalThis, so a closure mutated the local copy while
+    // later cells read the stale global. With a single globalThis slot per
+    // name, the closure and the later read share one binding.
+    kernel = await createKernel()
+    try {
+      await kernel.run('let shared = 1; function bump(){ shared += 1; return shared }')
+      const bumped = await kernel.run('bump()')
+      expect(bumped.items).toContainEqual({
+        type: 'result',
+        value: { kind: 'primitive', value: 2 },
+      })
+      const read = await kernel.run('console.log(shared)')
+      expect(read.items).toContainEqual({ type: 'stdout', text: '2' })
+    } finally {
+      kernel.dispose()
+    }
+  })
+
   test('class instance survives across runs (closures + state)', async () => {
     kernel = await createKernel()
     try {
