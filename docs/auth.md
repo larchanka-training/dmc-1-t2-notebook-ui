@@ -69,8 +69,8 @@
 - На step 1 кнопка `Send code` блокируется при `invalid email`.
 - На step 2 поле — 6 раздельных input (или один с маской `------`).
 - `Resend in 45s` — UI-таймер (5 мин TTL OTP, после 45 сек разрешён повтор; запрос ограничен серверным rate limit, см. [API repo: docs/auth.md §10][api-auth]).
-- На `400 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится, состояние `attempts++` не показываем (это серверная инфа).
-- На `400 otp_expired` — сообщение `Code expired, request a new one`, возврат на step 1.
+- На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится, состояние `attempts++` не показываем (это серверная инфа).
+- На `401 otp_expired` — сообщение `Code expired, request a new one`, возврат на step 1.
 - При успехе — токены кладутся в `localStorage`, `user` — в `userAtom`, navigate → `/notebooks` (или `from`-route, см. §6).
 
 ---
@@ -285,23 +285,23 @@ export interface LocalNotebook {
   formatVersion: number
   cells: LocalCell[]
   pendingDeletes: Tombstone[] // request-only tombstones, очищаются после успешного PATCH
-  createdAt: string
-  updatedAt: string
-  deletedAt?: string // soft-delete всего ноутбука (не ячейки)
+  createdAt: number
+  updatedAt: number
+  deletedAt?: number // soft-delete всего ноутбука (не ячейки)
   dirty: boolean // не синхронизирован с сервером
-  lastSyncedAt?: string
+  lastSyncedAt?: number
 }
 
 export interface Tombstone {
   id: string // id удалённой ячейки
-  deletedAt: string // ISO timestamp удаления
+  deletedAt: number // Unix timestamp milliseconds удаления
 }
 
 export interface LocalCell {
   id: string
   kind: 'code' | 'markdown'
   content: string
-  updatedAt: string
+  updatedAt: number
 }
 
 class NotebookDB extends Dexie {
