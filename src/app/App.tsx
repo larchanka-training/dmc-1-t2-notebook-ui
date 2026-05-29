@@ -6,6 +6,14 @@ import '@/pages/about'
 import '@/pages/shadcn-components'
 import '@/pages/custom-components'
 
-const App = reatomComponent(() => rootRoute.render(), 'App')
+const App = reatomComponent(
+  () => (
+    <>
+      <h1>This is demo pr preview</h1>
+      {rootRoute.render()}
+    </>
+  ),
+  'App',
+)
 
 export default App
