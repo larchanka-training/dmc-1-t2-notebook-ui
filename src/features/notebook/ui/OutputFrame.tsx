@@ -31,11 +31,22 @@ const MIN_HEIGHT = 80
 const MAX_HEIGHT = 600
 
 /**
- * How long to wait for the iframe's first ping before declaring it stuck.
- * Generous: this is a liveness check ("did the script respond at all"), not
- * a performance budget. A non-JS / well-behaved snippet pings immediately.
+ * Heartbeat budget. The iframe shell pings on an interval (see buildSrcDoc);
+ * the parent kills the frame only after NO ping has arrived for this long.
+ *
+ * Why a sliding budget and not a one-shot "did it ping once" check: user code
+ * can send a single fake `iframe-resize` and then block the thread
+ * (`postMessage(...); while(true){}`), which would permanently satisfy a
+ * one-shot liveness flag. With a heartbeat, a blocked thread stops pinging and
+ * the budget elapses; a legitimately interactive frame (rAF animation,
+ * ResizeObserver) keeps pinging and stays alive. The window is generous: this
+ * is a "thread is wedged" check, not a performance budget, so a few seconds of
+ * heavy synchronous work between heartbeats is tolerated.
  */
-const WATCHDOG_MS = 2_000
+const HEARTBEAT_INTERVAL_MS = 1_000
+const HEARTBEAT_TIMEOUT_MS = 2_500
+/** How often the parent checks whether the last heartbeat is overdue. */
+const HEARTBEAT_POLL_MS = 500
 
 interface OutputFrameProps {
   html: string
@@ -46,27 +57,34 @@ export function OutputFrame({ html }: OutputFrameProps) {
   const [height, setHeight] = useState(MIN_HEIGHT)
   const [stalled, setStalled] = useState(false)
 
-  // The iframe sends its scrollHeight after load and on every mutation.
-  // The first message also clears the watchdog (proves the script is alive).
+  // The iframe shell pings its scrollHeight on a heartbeat interval. The
+  // parent tracks the time of the LAST ping and declares the frame stuck once
+  // no ping has arrived within HEARTBEAT_TIMEOUT_MS — a sliding window, so a
+  // single spoofed ping followed by an infinite loop can't keep it alive
+  // forever (the loop stops the heartbeat and the window elapses).
   useEffect(() => {
-    let alive = false
+    // Start the clock at mount: a frame that never pings at all (e.g. it
+    // blocks before the shell script runs) must still trip the timeout.
+    let lastPing = Date.now()
     const handler = (event: MessageEvent) => {
       if (event.source !== ref.current?.contentWindow) return
       const data = event.data as { kind?: string; height?: number } | null
       if (data?.kind === 'iframe-resize' && typeof data.height === 'number') {
-        alive = true
+        lastPing = Date.now()
         setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height) + 4)))
       }
     }
     window.addEventListener('message', handler)
-    const watchdog = setTimeout(() => {
-      // No ping => the iframe script never yielded (likely an infinite loop).
-      // Unmounting it below kills its execution context.
-      if (!alive) setStalled(true)
-    }, WATCHDOG_MS)
+    const poll = setInterval(() => {
+      if (Date.now() - lastPing > HEARTBEAT_TIMEOUT_MS) {
+        // Heartbeat overdue => the iframe thread is wedged (likely an infinite
+        // loop). Unmounting it below tears down its execution context.
+        setStalled(true)
+      }
+    }, HEARTBEAT_POLL_MS)
     return () => {
       window.removeEventListener('message', handler)
-      clearTimeout(watchdog)
+      clearInterval(poll)
     }
   }, [html])
 
@@ -104,6 +122,12 @@ const IFRAME_CSP =
  * Wrap user HTML in a tiny shell that reports its size back to the
  * parent. Keeping the shell minimal: no fonts, no resets — the user's
  * HTML decides how it looks.
+ *
+ * The shell pings on three triggers: once on load, on every size mutation
+ * (ResizeObserver), and on a steady heartbeat interval. The heartbeat is what
+ * the parent's liveness watchdog relies on — as long as the iframe's event
+ * loop is turning it keeps pinging; a wedged thread (infinite loop) stops, and
+ * the parent tears the frame down.
  */
 function buildSrcDoc(userHtml: string): string {
   return `<!doctype html>
@@ -118,6 +142,7 @@ ${userHtml}
   }, '*');
   post();
   new ResizeObserver(post).observe(document.documentElement);
+  setInterval(post, ${HEARTBEAT_INTERVAL_MS});
 </script>
 </body>
 </html>`

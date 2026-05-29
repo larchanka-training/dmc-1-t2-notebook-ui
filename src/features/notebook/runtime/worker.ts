@@ -33,12 +33,17 @@ self.onmessage = async (event: MessageEvent<HostMsg>) => {
   const { runId, code, timeoutMs } = msg
   try {
     const kernel = await getKernel()
-    const result = await kernel.run(code, { timeoutMs })
-    // Stream each output item before the final 'done'.
-    for (const item of result.items) {
-      const out: WorkerMsg = { kind: 'output', runId, item }
-      self.postMessage(out)
-    }
+    // Stream each item to the host the moment the kernel produces it (true
+    // incremental output) instead of replaying the whole batch after the run
+    // settles. The final result still carries the same items, but they have
+    // already been posted, so we only send the terminal 'done' here.
+    const result = await kernel.run(code, {
+      timeoutMs,
+      onItem: (item) => {
+        const out: WorkerMsg = { kind: 'output', runId, item }
+        self.postMessage(out)
+      },
+    })
     const done: WorkerMsg = { kind: 'done', runId, status: result.status }
     self.postMessage(done)
   } catch (err) {

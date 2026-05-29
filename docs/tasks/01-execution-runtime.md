@@ -73,75 +73,116 @@
 
 ## Tech notes
 
+> **Статус Tech notes.** Раздел приведён к фактической реализации
+> TARDIS-70. Где исходный план разошёлся с кодом — указано явно.
+
 ### Файлы
 
 ```
 src/features/notebook/
-  runtime/                            ← новая папка
-    worker.ts                         ← entrypoint Web Worker
-    workerHost.ts                     ← клиентский фасад, postMessage-протокол
-    types.ts                          ← message types, OutputItem, RuntimeStatus
-    serialize.ts                      ← безопасная сериализация значений
-    runtime.test.ts                   ← unit-тесты протокола и сериализации
+  runtime/
+    worker.ts          ← entrypoint Web Worker, владеет persistent QuickJS-ядром
+    workerHost.ts      ← клиентский фасад: singleton worker, timeout, SAB-interrupt, respawn
+    quickjs.ts         ← createKernel(): sandbox-ядро на quickjs-emscripten-core
+    transform.ts       ← acorn AST-rewrite top-level деклараций в globalThis-слоты
+    serialize.ts       ← безопасная сериализация значений (глубина 5)
+    interrupt.ts       ← worker-side SharedArrayBuffer-флаг прерывания
+    limits.ts          ← DEFAULT/MIN/MAX timeout + clamp
+    outputBudget.ts    ← лимит 5 МБ, measureItemBytes (общий для kernel и host)
+    types.ts           ← HostMsg/WorkerMsg, OutputItem, SerializedValue, статусы
   model/
-    notebook.ts                       ← runCell идёт через workerHost
-    runtime.ts                        ← Reatom-модель: статус runtime, очередь, executionCount
+    notebook.ts        ← CRUD ячеек (cellsAtom)
+    runtime.ts         ← Reatom-модель: статус, очередь, executionCount, run/stop/restart
+    notebookSettings.ts← timeoutMsAtom
   ui/
-    NotebookCell.tsx                  ← Stop button, [n] badge, рендер OutputItem[]
-    OutputView.tsx                    ← новая, рендерит массив OutputItem
-    OutputFrame.tsx                   ← iframe для DOM-вывода
+    NotebookCell.tsx   ← Stop button, [n] badge, рендер OutputItem[]
+    OutputView.tsx     ← рендерит массив OutputItem в порядке исполнения
+    OutputFrame.tsx    ← sandboxed iframe для display(html) + heartbeat-watchdog
+    NotebookToolbar.tsx← Run All / Stop All / Restart kernel
 ```
 
-`executeJS.ts` удаляется после миграции (модели меняют импорт на `workerHost.run`).
+`executeJS.ts` удалён — модели исполняют код через `workerHost.runInWorker`.
 
-### Worker-протокол (минимум)
+### Worker-протокол (фактический)
 
 ```ts
 // host → worker
 type HostMsg =
-  | { kind: 'run'; cellId: string; code: string; execCount: number; timeoutMs: number }
-  | { kind: 'interrupt'; cellId: string }
-  | { kind: 'reset' }
+  // Однократно после создания worker'а (только в cross-origin isolated):
+  // передаёт SAB, первый int32 которого — флаг прерывания.
+  | { kind: 'init'; interruptBuffer: SharedArrayBuffer }
+  | { kind: 'run'; runId: string; code: string; timeoutMs: number }
 
 // worker → host
 type WorkerMsg =
-  | { kind: 'output'; cellId: string; item: OutputItem }
-  | { kind: 'done'; cellId: string; status: 'done' | 'error' | 'timeout' | 'interrupted' }
+  | { kind: 'output'; runId: string; item: OutputItem } // стримятся по мере появления
+  | { kind: 'done'; runId: string; status: RuntimeStatus }
+
+type RuntimeStatus = 'done' | 'error' | 'timeout' | 'interrupted'
 
 type OutputItem =
   | { type: 'stdout'; text: string }
   | { type: 'stderr'; text: string }
   | { type: 'result'; value: SerializedValue }
   | { type: 'error'; name: string; message: string; stack?: string }
-  | { type: 'html'; html: string } // рендерится в iframe
+  | { type: 'html'; html: string } // рендерится в sandboxed iframe
   | { type: 'image'; mime: string; data: string } // base64
 ```
 
-Interrupt реализуется через **`worker.terminate()` + создание нового worker'а**, в который перезапускается тот же shared-scope state (хранится в host-снапшоте). Это просто, дёшево и переживёт `while(true)`.
+Ключевое отличие от исходного плана: состояние не идёт через postMessage. VM
+**persistent**: один `QuickJSContext` живёт всю жизнь worker'а, scope хранится
+внутри VM — нет ni `cellId`, ni `execCount`, ni host-снапшота scope в протоколе.
+
+**Interrupt (Stop):** кооперативный через `SharedArrayBuffer`-флаг +
+`vm.runtime.setInterruptHandler` — заблокированный VM прерывается **без**
+уничтожения worker'а, scope выживает. Fallback вне cross-origin isolation
+(нет SAB) и по timeout — `worker.terminate()` + respawn (scope теряется).
+For parked promise (`await new Promise(() => {})`) есть host-side watchdog
+(≈250 мс), чтобы Stop укладывался в ≤500 мс.
 
 ### Shared scope
 
-В Worker заводим единый async-IIFE контекст, исполняем код ячейки через `new Function('__ctx', ...)` где `__ctx` хранит назначения. Объявления (`const x = ...`) перехватываем минимальной трансформацией: префиксом `with (__ctx)` или AST-обёрткой через `acorn` (предпочтительно, надёжнее). Решение об AST vs `with` — отдельный спайк ≤ 4 ч.
+Код ячейки исполняется в async-IIFE внутри persistent QuickJS VM. Top-level
+декларации (`const/let/var/function/class`) переписываются через **acorn AST**
+в присваивания `globalThis.<name>` (см. `transform.ts`), без локального
+binding — один слот на имя. Поэтому ячейка N+1 видит переменные ячейки N
+нативно, а повторный запуск `const x = 1` — это ре-присваивание, не
+redeclaration. `with (__ctx)` НЕ используется (не пишет `var/let/const` в \_\_ctx).
+`import`/`export`/`import(...)`/`import.meta` отклоняются с читаемой ошибкой
+(`new.target` — разрешён).
 
 ### Reatom-модель
 
 ```ts
 runtimeStatusAtom: Atom<'idle' | 'busy'>
-execCounterAtom: Atom<number> // монотонный счётчик
-queueAtom: Atom<string[]> // cellId[]
-runCell: Action(id)
-runAll: Action()
-stopCell: Action(id)
-stopAll: Action()
-restartKernel: Action()
+execCounterAtom: Atom<number>   // монотонный счётчик
+queueAtom: Atom<string[]>       // cellId[]
+skippedCellsAtom: Atom<string[]> // для Continue после skip-on-error
+runCell / runAll / resumeQueue / stopCell / stopAll / restartKernel: Action
 ```
 
-Все `Action` async — используют `wrap` для `postMessage`-RTT. Реакция UI — `reatomComponent` + `cell.status()`, `cell.output()`.
+Все async actions обязаны оборачивать внутренние await-границы в `wrap(...)` —
+иначе под production `clearStack()` (`src/setup.ts`) continuation после
+`await` падает с `missing async stack`, и `runtimeStatusAtom` залипает в `busy`.
+React-хендлеры тоже всегда обёрнуты `wrap`. Реакция UI — `reatomComponent` +
+`cell.status()`, `cell.output()`.
 
 ### Тесты
 
-- `runtime.test.ts` — happy path, stderr, error, timeout, interrupt (с искусственным `while(true)`), reset.
-- `notebook.test.ts` (расширить) — executionCount монотонно растёт, restart его обнуляет, runAll выстраивает очередь.
+- `quickjs.test.ts` — capture console, errors, timeout/interrupt/budget,
+  изоляция, shared scope, display(), инкрементальный `onItem`-стриминг.
+- `transform.test.ts` — AST-rewrite деклараций, trailing expression,
+  отклонение import/export, `new.target`.
+- `workerHost.test.ts` / `workerHost.di.test.ts` — round-trip, timeout+respawn,
+  output budget, shared scope, DI-фабрика worker'а.
+- `serialize.test.ts`, `limits.test.ts`, `outputBudget.test.ts`,
+  `interrupt.test.ts` — юниты нейтральных модулей.
+- `runtime.test.ts` / `runtime.restart.test.ts` / `runtime.repro.test.ts` —
+  executionCount, очередь, skip-on-error, stop/restart, и регресс на
+  async-stack (`wrap` под `clearStack()`).
+- `runtime.acceptance*.test.ts` — трассировка AC через публичный API.
+- `OutputView.test.tsx` / `OutputFrame.test.tsx` / `NotebookView.test.tsx` —
+  порядок вывода, heartbeat-watchdog iframe, RTL-интеграция.
 
 ## Mock strategy
 

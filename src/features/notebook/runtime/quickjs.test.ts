@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 import { createKernel, type Kernel } from './quickjs'
+import type { OutputItem } from './types'
 
 // These tests pin the public contract of the persistent kernel. Worker
 // integration lives in workerHost.test.ts; here we focus on the VM itself.
@@ -406,4 +407,60 @@ describe('kernel.run — display() API', () => {
     )
     expect(r.items.filter((it) => it.type === 'html')).toHaveLength(2)
   })
+})
+
+describe('kernel.run — incremental output streaming (onItem)', () => {
+  test('onItem fires per item, in order, and matches the final result', async () => {
+    const kernel = await createKernel()
+    try {
+      const streamed: OutputItem[] = []
+      const r = await kernel.run('console.log("a"); console.warn("b"); console.log("c"); 1 + 2', {
+        onItem: (item) => streamed.push(item),
+      })
+      // Streamed set === final set (same objects, same order), proving items
+      // were emitted as produced rather than replayed at the end.
+      expect(streamed).toEqual(r.items)
+      expect(streamed).toEqual([
+        { type: 'stdout', text: 'a' },
+        { type: 'stderr', text: '[warn] b' },
+        { type: 'stdout', text: 'c' },
+        { type: 'result', value: { kind: 'primitive', value: 3 } },
+      ])
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('a syntax error is streamed through onItem too', async () => {
+    const kernel = await createKernel()
+    try {
+      const streamed: OutputItem[] = []
+      const r = await kernel.run('import x from "y"', { onItem: (item) => streamed.push(item) })
+      expect(r.status).toBe('error')
+      expect(streamed).toEqual(r.items)
+      expect(streamed.some((it) => it.type === 'error')).toBe(true)
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('the truncation marker is streamed when the budget is exhausted', async () => {
+    const kernel = await createKernel()
+    try {
+      let sawTruncation = false
+      const r = await kernel.run(
+        "const chunk = 'x'.repeat(1024); for (let i = 0; i < 1e7; i++) console.log(chunk)",
+        {
+          timeoutMs: 60_000,
+          onItem: (item) => {
+            if (item.type === 'stderr' && /truncated/i.test(item.text)) sawTruncation = true
+          },
+        },
+      )
+      expect(r.status).toBe('error')
+      expect(sawTruncation).toBe(true)
+    } finally {
+      kernel.dispose()
+    }
+  }, 10_000)
 })

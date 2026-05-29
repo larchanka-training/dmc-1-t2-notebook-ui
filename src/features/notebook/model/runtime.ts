@@ -60,7 +60,11 @@ export const runCell = action(async (id: string) => {
   if (!cell) return
   runtimeStatusAtom.set('busy')
   try {
-    await executeCell(cell)
+    // `wrap` re-binds the Reatom context across the await boundary. Without
+    // it the continuation (`runtimeStatusAtom.set('idle')` in finally) runs
+    // with no active stack and throws `missing async stack` under the
+    // production `clearStack()` — leaving the toolbar stuck at 'busy'.
+    await wrap(executeCell(cell))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -105,21 +109,28 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   if (generation !== kernelGeneration) return result.status
 
   currentCellId = null
-  cell.output.set(result.items)
-  const finalStatus = mapStatus(cell.id, result.status, result.items)
-  cell.status.set(finalStatus)
+  // Build the final (status, items) in one shot and write atomically — no
+  // post-set mutation of an array already handed to the output atom.
+  const mapped = mapStatus(cell.id, result.status, result.items)
+  cell.output.set(mapped.items)
+  cell.status.set(mapped.status)
   return result.status
 }
 
 /**
- * Translate the runtime status into a cell status, honoring user-driven
- * stops. If the user pressed Stop for this cell, surface as 'interrupted'
- * regardless of what the worker reported.
+ * Build the final (cell status, output items) for a finished run, honoring
+ * user-driven stops. Pure: returns a NEW items array with any terminal
+ * marker appended, so the caller writes the output atom exactly once instead
+ * of mutating the worker result after it's already been handed to an atom.
  */
-function mapStatus(id: string, status: RuntimeStatus, items: OutputItem[]): CellStatus {
+function mapStatus(
+  id: string,
+  status: RuntimeStatus,
+  items: OutputItem[],
+): { status: CellStatus; items: OutputItem[] } {
+  const withMarker = (text: string): OutputItem[] => [...items, { type: 'stderr', text }]
   if (consumeStopRequest(id)) {
-    items.push({ type: 'stderr', text: 'Execution interrupted by user' })
-    return 'interrupted'
+    return { status: 'interrupted', items: withMarker('Execution interrupted by user') }
   }
   // Runtime statuses map 1:1 onto cell statuses so the UI and the queue can
   // tell a timeout from a plain error. Add an explicit output marker for the
@@ -127,15 +138,13 @@ function mapStatus(id: string, status: RuntimeStatus, items: OutputItem[]): Cell
   // there is no host-side message otherwise).
   switch (status) {
     case 'done':
-      return 'done'
+      return { status: 'done', items }
     case 'timeout':
-      items.push({ type: 'stderr', text: 'Execution timed out' })
-      return 'timeout'
+      return { status: 'timeout', items: withMarker('Execution timed out') }
     case 'interrupted':
-      items.push({ type: 'stderr', text: 'Execution interrupted by user' })
-      return 'interrupted'
+      return { status: 'interrupted', items: withMarker('Execution interrupted by user') }
     case 'error':
-      return 'error'
+      return { status: 'error', items }
   }
 }
 
@@ -150,7 +159,7 @@ export const runAll = action(async () => {
     .map((c) => c.id)
   runtimeStatusAtom.set('busy')
   try {
-    await processQueue(ids)
+    await wrap(processQueue(ids))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -172,7 +181,7 @@ export const resumeQueue = action(async () => {
   if (stillSkipped.length === 0) return
   runtimeStatusAtom.set('busy')
   try {
-    await processQueue(stillSkipped)
+    await wrap(processQueue(stillSkipped))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -191,7 +200,7 @@ async function processQueue(ids: string[]): Promise<void> {
     queueAtom.set(tail)
     const cell = cellsAtom().find((c) => c.id === head)
     if (!cell) continue
-    const status = await executeCell(cell)
+    const status = await wrap(executeCell(cell))
 
     if (stopAllRequested) {
       // Stop All is a user action, not an error: drain the rest back to

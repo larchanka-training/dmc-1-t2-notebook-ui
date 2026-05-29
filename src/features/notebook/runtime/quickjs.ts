@@ -48,28 +48,48 @@ interface Sink {
   items: OutputItem[]
   bytes: number
   budgetHit: boolean
+  /**
+   * Optional per-run streaming hook. Invoked synchronously the moment an item
+   * is accepted into `items`, so the worker can post it to the host BEFORE the
+   * run finishes (true incremental output) instead of replaying the whole
+   * batch at the end. Rebound per run; `undefined` means "buffer only".
+   */
+  emit?: (item: OutputItem) => void
 }
 
 /**
  * Append an item unless the per-run output budget is already exhausted. On
  * the first overflow it records a single truncation marker and flips
- * `budgetHit`, which the interrupt handler reads to abort the run.
+ * `budgetHit`, which the interrupt handler reads to abort the run. Every
+ * accepted item (including the truncation marker) is also streamed through
+ * `sink.emit` so the host sees output as it is produced.
  */
 function pushItem(sink: Sink, item: OutputItem): void {
   if (sink.budgetHit) return
   const size = measureItemBytes(item)
   if (sink.bytes + size > OUTPUT_BUDGET_BYTES) {
     sink.budgetHit = true
-    sink.items.push({ type: 'stderr', text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes` })
+    const marker: OutputItem = {
+      type: 'stderr',
+      text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`,
+    }
+    sink.items.push(marker)
+    sink.emit?.(marker)
     return
   }
   sink.bytes += size
   sink.items.push(item)
+  sink.emit?.(item)
 }
 
 export interface RuntimeOptions {
   /** Hard upper bound for execution time, in ms. Default 30_000. */
   timeoutMs?: number
+  /**
+   * Streaming hook: called once per output item as it is produced, before the
+   * run resolves. The same items are still returned in the final result.
+   */
+  onItem?: (item: OutputItem) => void
 }
 
 export interface Kernel {
@@ -116,6 +136,7 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
         code,
         runOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         options.shouldInterrupt,
+        runOptions.onItem,
       )
     },
     dispose() {
@@ -130,20 +151,27 @@ async function runOne(
   code: string,
   timeoutMs: number,
   shouldInterrupt?: () => boolean,
+  onItem?: (item: OutputItem) => void,
 ): Promise<RuntimeResult> {
   const items: OutputItem[] = []
   sink.items = items
   sink.bytes = 0
   sink.budgetHit = false
+  // Bind the streaming hook for this run so every pushItem also forwards the
+  // item to the host immediately. Rebound on each run (undefined clears it),
+  // and pushItem only fires while VM code executes — between runs nothing
+  // touches the sink, so no stale emit can leak across runs.
+  sink.emit = onItem
 
   // 1) AST transform: publish top-level declarations to globalThis + return
   //    the trailing expression (if any). Reject import/export early with a
-  //    readable SyntaxError.
+  //    readable SyntaxError. Route it through pushItem so it streams like any
+  //    other item (the worker no longer replays a final batch).
   let transformed: string
   try {
     transformed = transformCellCode(code).code
   } catch (err) {
-    items.push({
+    pushItem(sink, {
       type: 'error',
       name: 'SyntaxError',
       message: err instanceof Error ? err.message : String(err),
