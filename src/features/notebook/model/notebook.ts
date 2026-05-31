@@ -34,6 +34,22 @@ export const moveCell = action((id: string, dir: -1 | 1) => {
   })
 }, 'notebook.cells.move')
 
+// Index-based reorder used by drag-and-drop, where the drop target is an
+// absolute position rather than a single step. `toIndex` is clamped to the
+// valid range, so callers can pass an over-/under-shoot without guarding.
+export const moveCellTo = action((id: string, toIndex: number) => {
+  cellsAtom.set((cells) => {
+    const from = cells.findIndex((c) => c.id === id)
+    if (from === -1) return cells
+    const to = Math.max(0, Math.min(toIndex, cells.length - 1))
+    if (to === from) return cells
+    const next = [...cells]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    return next
+  })
+}, 'notebook.cells.moveTo')
+
 export const updateCellCode = action((id: string, code: string) => {
   const cell = cellsAtom().find((c) => c.id === id)
   cell?.code.set(code)

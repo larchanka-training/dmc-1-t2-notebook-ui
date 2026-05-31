@@ -5,6 +5,7 @@ export {
   addCell,
   deleteCell,
   moveCell,
+  moveCellTo,
   changeCellKind,
   updateCellCode,
   SEED_CODE,

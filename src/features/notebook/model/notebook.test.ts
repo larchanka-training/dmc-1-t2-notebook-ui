@@ -5,6 +5,7 @@ import {
   changeCellKind,
   deleteCell,
   moveCell,
+  moveCellTo,
   SEED_CODE,
   updateCellCode,
 } from './notebook'
@@ -66,6 +67,22 @@ describe('notebook store', () => {
     const before = cellsAtom().map((c) => c.id)
     moveCell(first.id, -1)
     expect(cellsAtom().map((c) => c.id)).toEqual(before)
+  })
+
+  test('moveCellTo relocates a cell to an absolute index', () => {
+    const a = cellsAtom()[0]
+    const b = addCell()
+    const c = addCell()
+    // order: [a, b, c] -> move c to the front
+    moveCellTo(c.id, 0)
+    expect(cellsAtom().map((cell) => cell.id)).toEqual([c.id, a.id, b.id])
+  })
+
+  test('moveCellTo clamps an out-of-range index', () => {
+    const a = cellsAtom()[0]
+    const b = addCell()
+    moveCellTo(a.id, 99)
+    expect(cellsAtom().map((cell) => cell.id)).toEqual([b.id, a.id])
   })
 
   test('updateCellCode mutates only the targeted cell', () => {
