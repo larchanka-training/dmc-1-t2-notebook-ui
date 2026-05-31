@@ -14,6 +14,7 @@ import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
 import { NotebookToolbar } from './NotebookToolbar'
 import { useCommandModeHotkeys } from './commandHotkeys'
+import { ShortcutsHelp } from './ShortcutsHelp'
 import type { Cell, CellViewMode } from '../domain/cell'
 import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
 import {
@@ -187,6 +188,7 @@ export const NotebookView = reatomComponent(() => {
       </main>
 
       <NotebookOutline />
+      <ShortcutsHelp />
     </div>
   )
 }, 'NotebookView')
