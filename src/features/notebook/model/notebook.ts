@@ -38,3 +38,21 @@ export const updateCellCode = action((id: string, code: string) => {
   const cell = cellsAtom().find((c) => c.id === id)
   cell?.code.set(code)
 }, 'notebook.cells.updateCode')
+
+// Switching kind has to re-create the cell: `kind` is a plain field, not an
+// atom, and code<->markdown have different run semantics. We carry over the
+// id and the source text, and intentionally drop run state (output, status,
+// executionCount) — a markdown cell has no run, and a fresh code cell starts
+// unrun. No-op when the kind already matches, so identity is preserved.
+export const changeCellKind = action((id: string, kind: CellKind) => {
+  const current = cellsAtom().find((c) => c.id === id)
+  if (!current || current.kind === kind) return
+  const source = current.code()
+  cellsAtom.set((cells) => {
+    const idx = cells.findIndex((c) => c.id === id)
+    if (idx === -1) return cells
+    const next = [...cells]
+    next[idx] = reatomCell(source, kind, id)
+    return next
+  })
+}, 'notebook.cells.changeKind')

@@ -5,6 +5,7 @@ export {
   addCell,
   deleteCell,
   moveCell,
+  changeCellKind,
   updateCellCode,
   SEED_CODE,
 } from './model/notebook'

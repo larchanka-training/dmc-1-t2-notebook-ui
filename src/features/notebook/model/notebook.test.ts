@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { addCell, cellsAtom, deleteCell, moveCell, SEED_CODE, updateCellCode } from './notebook'
+import {
+  addCell,
+  cellsAtom,
+  changeCellKind,
+  deleteCell,
+  moveCell,
+  SEED_CODE,
+  updateCellCode,
+} from './notebook'
 
 describe('notebook store', () => {
   test('starts with exactly one seed cell', () => {
@@ -71,6 +79,26 @@ describe('notebook store', () => {
     // identity stays the same — atomization invariant
     expect(a.code).toBe(aCodeAtom)
     expect(b.code).toBe(bCodeAtom)
+  })
+
+  test('changeCellKind switches kind, keeps id and source, resets run state', () => {
+    const [cell] = cellsAtom()
+    expect(cell.kind).toBe('code')
+    changeCellKind(cell.id, 'markdown')
+    const after = cellsAtom()[0]
+    expect(after.id).toBe(cell.id)
+    expect(after.kind).toBe('markdown')
+    expect(after.code()).toBe(SEED_CODE)
+    expect(after.executionCount()).toBeNull()
+    expect(after.status()).toBe('idle')
+    expect(after.output()).toEqual([])
+  })
+
+  test('changeCellKind is a no-op when the kind is unchanged', () => {
+    const [cell] = cellsAtom()
+    changeCellKind(cell.id, 'code')
+    // identity preserved — no needless re-creation
+    expect(cellsAtom()[0]).toBe(cell)
   })
 
   // runCell-related tests live in runtime.test.ts (this file covers only
