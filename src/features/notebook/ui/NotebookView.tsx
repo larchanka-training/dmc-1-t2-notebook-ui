@@ -13,6 +13,7 @@ import {
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
 import { NotebookToolbar } from './NotebookToolbar'
+import { useCommandModeHotkeys } from './commandHotkeys'
 import type { Cell, CellViewMode } from '../domain/cell'
 import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
 import {
@@ -146,6 +147,9 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
+
+  // Jupyter-style command-mode shortcuts (A/B/D D/M/Y/arrows/Enter).
+  useCommandModeHotkeys()
 
   // Spin up the sandbox worker (chunk fetch + QuickJS init) as soon as the
   // notebook is on screen, so the user's first Run feels instant instead of
