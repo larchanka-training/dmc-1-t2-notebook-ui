@@ -22,8 +22,10 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import type { Theme } from '@/entities/theme'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
 import type { OutputItem } from '../runtime/types'
+import { CodeEditor } from './CodeEditor'
 import { MarkdownView } from './MarkdownView'
 import { OutputView } from './OutputView'
 
@@ -35,6 +37,9 @@ export interface NotebookCellProps {
   output?: OutputItem[]
   status?: CellStatus
   viewMode?: CellViewMode
+  /** Drives the CodeMirror syntax palette; follows the global app theme. */
+  theme?: Theme
+  showLineNumbers?: boolean
   isFirst?: boolean
   isLast?: boolean
   readOnly?: boolean
@@ -54,6 +59,8 @@ export function NotebookCell({
   output = [],
   status = 'idle',
   viewMode = 'edit',
+  theme = 'light',
+  showLineNumbers = false,
   isFirst = false,
   isLast = false,
   readOnly = false,
@@ -229,33 +236,35 @@ export function NotebookCell({
           >
             <MarkdownView source={code} />
           </button>
+        ) : isCode ? (
+          <CodeEditor
+            value={code}
+            theme={theme}
+            showLineNumbers={showLineNumbers}
+            readOnly={readOnly}
+            onChange={(next) => onCodeChange?.(next)}
+            onRun={onRun}
+          />
         ) : (
           <textarea
             ref={textareaRef}
             value={code}
             readOnly={readOnly}
-            spellCheck={!isCode}
+            spellCheck
             rows={1}
-            placeholder={isCode ? '' : 'Markdown — supports `# headings` for the outline'}
+            placeholder="Markdown — supports `# headings` for the outline"
             onChange={(e) => {
               onCodeChange?.(e.target.value)
               autoResize(e.target)
             }}
             onKeyDown={(e) => {
-              if (isCode && (e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault()
-                onRun?.()
-              }
-              if (isMarkdown && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
                 e.preventDefault()
                 onViewModeChange?.('preview')
               }
             }}
             onInput={(e) => autoResize(e.currentTarget)}
-            className={cn(
-              'w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors rounded-b-xl focus:bg-muted/30',
-              isCode ? 'font-mono text-sm leading-relaxed' : 'font-sans text-base leading-relaxed',
-            )}
+            className="w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors rounded-b-xl focus:bg-muted/30 font-sans text-base leading-relaxed"
           />
         )}
       </Card>

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Code2, Plus, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
+import { themeAtom } from '@/entities/theme'
 import { Button } from '@/shared/ui/button'
 import {
   DropdownMenu,
@@ -33,6 +34,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         output={cell.output()}
         status={cell.status()}
         viewMode={cell.viewMode()}
+        theme={themeAtom()}
         isFirst={isFirst}
         isLast={isLast}
         onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
