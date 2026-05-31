@@ -11,7 +11,6 @@ import {
   Eye,
   Pencil,
 } from 'lucide-react'
-import ReactMarkdown, { type Components } from 'react-markdown'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import {
@@ -25,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
 import type { OutputItem } from '../runtime/types'
+import { MarkdownView } from './MarkdownView'
 import { OutputView } from './OutputView'
 
 export interface NotebookCellProps {
@@ -45,44 +45,6 @@ export interface NotebookCellProps {
   onDelete?: () => void
   onMoveUp?: () => void
   onMoveDown?: () => void
-}
-
-const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="text-2xl font-semibold mt-2 mb-3">{children}</h1>,
-  h2: ({ children }) => <h2 className="text-xl font-semibold mt-2 mb-2">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-lg font-semibold mt-2 mb-2">{children}</h3>,
-  h4: ({ children }) => <h4 className="text-base font-semibold mt-2 mb-1">{children}</h4>,
-  p: ({ children }) => <p className="my-2 leading-relaxed">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      className="text-primary underline underline-offset-2 hover:text-primary/80"
-      target="_blank"
-      rel="noreferrer noopener"
-    >
-      {children}
-    </a>
-  ),
-  code: ({ className, children }) => {
-    const isBlock = className?.includes('language-')
-    if (isBlock) {
-      return (
-        <pre className="my-3 overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">
-          <code>{children}</code>
-        </pre>
-      )
-    }
-    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.875em]">{children}</code>
-  },
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-border pl-4 italic text-muted-foreground">
-      {children}
-    </blockquote>
-  ),
-  hr: () => <hr className="my-4 border-border" />,
 }
 
 export function NotebookCell({
@@ -265,7 +227,7 @@ export function NotebookCell({
             className="text-left w-full p-4 cursor-text rounded-b-xl text-foreground font-sans text-base leading-relaxed focus:bg-muted/30 outline-none"
             title="Click to edit"
           >
-            <ReactMarkdown components={markdownComponents}>{code}</ReactMarkdown>
+            <MarkdownView source={code} />
           </button>
         ) : (
           <textarea
