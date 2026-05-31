@@ -1,6 +1,10 @@
+import { useEffect } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
+import { ensureKatexStyles, hasMathDelimiter } from './katexStyles'
 import './markdown.css'
 
 // Renders a markdown cell's source as formatted HTML. Raw HTML embedded in the
@@ -61,11 +65,18 @@ export interface MarkdownViewProps {
 }
 
 export function MarkdownView({ source }: MarkdownViewProps) {
+  const hasMath = hasMathDelimiter(source)
+
+  // Pull in KaTeX styles only once a cell actually uses math.
+  useEffect(() => {
+    if (hasMath) ensureKatexStyles()
+  }, [hasMath])
+
   return (
     <ReactMarkdown
       components={markdownComponents}
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeHighlight, rehypeKatex]}
     >
       {source}
     </ReactMarkdown>
