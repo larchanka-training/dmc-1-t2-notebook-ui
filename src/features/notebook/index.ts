@@ -22,6 +22,14 @@ export {
   queueAtom,
   skippedCellsAtom,
 } from './model/runtime'
+export {
+  activeCellIdAtom,
+  cellModeAtom,
+  focusCell,
+  enterEdit,
+  enterCommand,
+} from './model/cellMode'
+export type { CellMode } from './model/cellMode'
 export { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, timeoutMsAtom } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { reatomCell } from './domain/cell'
