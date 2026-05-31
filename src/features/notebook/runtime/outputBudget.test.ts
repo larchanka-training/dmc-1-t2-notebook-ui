@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { measureItemBytes, OUTPUT_BUDGET_BYTES } from './outputBudget'
+import { measureItemBytes, OUTPUT_BUDGET_BYTES, OUTPUT_ITEM_LIMIT } from './outputBudget'
 import type { OutputItem } from './types'
 
 describe('measureItemBytes', () => {
@@ -40,5 +40,17 @@ describe('measureItemBytes', () => {
 
   test('the budget is the documented 5 MiB', () => {
     expect(OUTPUT_BUDGET_BYTES).toBe(5 * 1024 * 1024)
+  })
+
+  test('an empty stdout item is 0 bytes — why the byte budget alone is not enough', () => {
+    // This is the gap the item-count limit closes: empty logs never grow the
+    // byte budget, so without OUTPUT_ITEM_LIMIT a `for(;;) console.log('')`
+    // loop would only ever be stopped by the timeout.
+    expect(measureItemBytes({ type: 'stdout', text: '' })).toBe(0)
+  })
+
+  test('the item-count limit is a positive integer', () => {
+    expect(Number.isInteger(OUTPUT_ITEM_LIMIT)).toBe(true)
+    expect(OUTPUT_ITEM_LIMIT).toBeGreaterThan(0)
   })
 })

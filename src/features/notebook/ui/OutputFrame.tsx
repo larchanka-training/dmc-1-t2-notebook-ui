@@ -26,6 +26,7 @@
 // postMessage. Anything bigger than MAX_HEIGHT scrolls inside the frame.
 
 import { useEffect, useRef, useState } from 'react'
+import { TriangleAlert } from 'lucide-react'
 
 const MIN_HEIGHT = 80
 const MAX_HEIGHT = 600
@@ -66,12 +67,25 @@ export function OutputFrame({ html }: OutputFrameProps) {
     // Start the clock at mount: a frame that never pings at all (e.g. it
     // blocks before the shell script runs) must still trip the timeout.
     let lastPing = Date.now()
+    // Coalesce height updates: a frame can post `iframe-resize` in a tight
+    // loop, and calling setHeight on every message would re-render per message.
+    // We keep only the latest height and apply it once per animation frame.
+    let pendingHeight: number | null = null
+    let frameId: number | null = null
     const handler = (event: MessageEvent) => {
       if (event.source !== ref.current?.contentWindow) return
       const data = event.data as { kind?: string; height?: number } | null
       if (data?.kind === 'iframe-resize' && typeof data.height === 'number') {
+        // Heartbeat is updated on EVERY ping (cheap) so the liveness window
+        // stays accurate; only the visual setHeight is throttled.
         lastPing = Date.now()
-        setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height) + 4)))
+        pendingHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height) + 4))
+        if (frameId === null) {
+          frameId = requestAnimationFrame(() => {
+            frameId = null
+            if (pendingHeight !== null) setHeight(pendingHeight)
+          })
+        }
       }
     }
     window.addEventListener('message', handler)
@@ -85,6 +99,7 @@ export function OutputFrame({ html }: OutputFrameProps) {
     return () => {
       window.removeEventListener('message', handler)
       clearInterval(poll)
+      if (frameId !== null) cancelAnimationFrame(frameId)
     }
   }, [html])
 
@@ -97,14 +112,33 @@ export function OutputFrame({ html }: OutputFrameProps) {
   }
 
   return (
-    <iframe
-      ref={ref}
-      title="cell-html-output"
-      sandbox="allow-scripts"
-      srcDoc={buildSrcDoc(html)}
-      className="block w-full rounded border border-border bg-background"
-      style={{ height }}
-    />
+    <div className="flex flex-col gap-2">
+      {/*
+        Honest danger notice. The iframe runs real browser JS, which lives in
+        the browser's iframe lifecycle — NOT the QuickJS runtime. Cell Stop,
+        the execution timeout and the output budget do not reach it. Always
+        visible (never behind hover/collapse) so the user is never misled into
+        thinking this output is governed like cell code.
+      */}
+      <div
+        role="alert"
+        className="flex gap-2 rounded-md border border-destructive/60 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+      >
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>
+          Dangerous HTML output. Scripts in this iframe run outside the QuickJS runtime; notebook
+          Stop and timeout may not stop them.
+        </span>
+      </div>
+      <iframe
+        ref={ref}
+        title="cell-html-output"
+        sandbox="allow-scripts"
+        srcDoc={buildSrcDoc(html)}
+        className="block w-full rounded border border-border bg-background"
+        style={{ height }}
+      />
+    </div>
   )
 }
 

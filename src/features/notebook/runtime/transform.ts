@@ -28,6 +28,14 @@
 // Nested declarations (inside `if`, `for`, function bodies, etc.) are
 // deliberately left untouched: their scope is private to the block.
 //
+//   3. HOISTING — top-level `function` declarations are emitted BEFORE the
+//      rest of the body (but after any `"use strict";` directive prologue), so
+//      a cell that calls a function above its textual declaration still works,
+//      matching real JS function hoisting. `class` declarations are NOT
+//      hoisted (they sit in a TDZ in real JS), so they keep source order.
+//      `var` hoisting is intentionally not emulated (a forward read sees a
+//      ReferenceError instead of `undefined`) — a documented dialect quirk.
+//
 // ESM `import`/`export` are rejected with a clear error — QuickJS has no
 // module loader here, and a bare SyntaxError from the VM is cryptic.
 
@@ -116,7 +124,17 @@ function isImportMeta(node: object): boolean {
 }
 
 function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string): string {
-  const parts: string[] = []
+  // Three buckets, concatenated as [prologue, hoisted, rest]:
+  //   - prologue: a leading run of bare string-literal statements (the
+  //     directive prologue, e.g. `"use strict";`). Kept verbatim and FIRST so
+  //     hoisting functions above it can't strip its directive meaning.
+  //   - hoisted: top-level function declarations, lifted so a forward call
+  //     (`f(); function f(){}`) resolves — matching real JS hoisting.
+  //   - rest: everything else, in source order (incl. the trailing return).
+  const prologue: string[] = []
+  const hoisted: string[] = []
+  const rest: string[] = []
+  let inPrologue = true
   for (let i = 0; i < body.length; i++) {
     const node = body[i]
     const isLast = i === body.length - 1
@@ -126,19 +144,41 @@ function rewriteBody(body: Array<Statement | ModuleDeclaration>, source: string)
     if (node.type.startsWith('Export')) {
       throw new UnsupportedSyntaxError('export is not supported in notebook cells yet')
     }
+    // The trailing expression becomes the REPL `result`. It wins over the
+    // directive-prologue check, so a cell that is a lone string literal
+    // (`"hello"`) still yields that string as its value.
+    if (isLast && node.type === 'ExpressionStatement') {
+      inPrologue = false
+      rest.push(rewriteTrailingExpression(node, source))
+      continue
+    }
+    if (inPrologue && isDirective(node)) {
+      prologue.push(sliceNode(source, node))
+      continue
+    }
+    inPrologue = false
     if (node.type === 'VariableDeclaration') {
-      parts.push(rewriteVariableDeclaration(node, source))
+      rest.push(rewriteVariableDeclaration(node, source))
     } else if (node.type === 'FunctionDeclaration') {
-      parts.push(rewriteNamedDeclaration(node, source, (node as FunctionDeclaration).id?.name))
+      hoisted.push(rewriteNamedDeclaration(node, source, (node as FunctionDeclaration).id?.name))
     } else if (node.type === 'ClassDeclaration') {
-      parts.push(rewriteNamedDeclaration(node, source, (node as ClassDeclaration).id?.name))
-    } else if (isLast && node.type === 'ExpressionStatement') {
-      parts.push(rewriteTrailingExpression(node, source))
+      // Classes are NOT hoisted in real JS (TDZ): keep them in source order.
+      rest.push(rewriteNamedDeclaration(node, source, (node as ClassDeclaration).id?.name))
     } else {
-      parts.push(sliceNode(source, node))
+      rest.push(sliceNode(source, node))
     }
   }
-  return parts.join('\n')
+  return [...prologue, ...hoisted, ...rest].join('\n')
+}
+
+/**
+ * True for a bare string-literal statement (`"use strict";`). A leading run of
+ * these forms the directive prologue, which must stay at the very top.
+ */
+function isDirective(node: Statement | ModuleDeclaration): boolean {
+  if (node.type !== 'ExpressionStatement') return false
+  const expr = (node as ExpressionStatement).expression
+  return expr.type === 'Literal' && typeof (expr as { value?: unknown }).value === 'string'
 }
 
 function rewriteVariableDeclaration(node: VariableDeclaration, source: string): string {

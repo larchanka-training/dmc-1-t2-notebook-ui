@@ -19,7 +19,10 @@ describe('OutputView — order preservation', () => {
     const root = container.firstElementChild!
     const segments = Array.from(root.children)
     expect(segments).toHaveLength(3)
-    expect(segments[0].tagName).toBe('IFRAME')
+    // The html segment renders an OutputFrame (a wrapper div holding the
+    // danger alert + the sandboxed iframe), so assert it CONTAINS an iframe
+    // rather than being one itself.
+    expect(segments[0].querySelector('iframe')).not.toBeNull()
     expect(segments[1].textContent).toContain('second')
     expect(segments[2].textContent).toContain('⟹')
   })

@@ -307,8 +307,10 @@ describe('Epic 01 AC — Limits', () => {
 
   test('AC: output larger than the host budget is truncated with a stderr marker', async () => {
     const { OUTPUT_BUDGET_BYTES, runInWorker } = await import('./workerHost')
+    // 1 KiB per item reaches the 5 MiB byte budget in ~5120 items, under the
+    // 10k item-count cap — so this exercises the byte-budget path specifically.
     const code = `
-      const chunk = 'x'.repeat(80);
+      const chunk = 'x'.repeat(1024);
       for (let i = 0; i < 200000; i++) console.log(chunk);
     `
     const r = await runInWorker(code, { timeoutMs: 60_000 })

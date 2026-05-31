@@ -66,11 +66,12 @@ describe('runInWorker — serialisation', () => {
 
 describe('runInWorker — output budget', () => {
   test('output above 5 MB triggers status=error with a truncation marker', async () => {
-    // Each iteration logs ~80 chars; ~70k iterations exceeds 5 MB. We use
-    // a small inner block so the QuickJS interrupt deadline doesn't fire
-    // first (the host budget check is what we're testing here).
+    // Each iteration logs 1 KiB, so the 5 MiB BYTE budget is reached in ~5120
+    // items — below the 10k item-count cap, so the byte budget is what trips
+    // here (that's the path this test pins). A generous timeout keeps the
+    // QuickJS deadline from firing first.
     const code = `
-      const chunk = 'x'.repeat(80);
+      const chunk = 'x'.repeat(1024);
       for (let i = 0; i < 200000; i++) console.log(chunk);
     `
     const r = await runInWorker(code, { timeoutMs: 60_000 })

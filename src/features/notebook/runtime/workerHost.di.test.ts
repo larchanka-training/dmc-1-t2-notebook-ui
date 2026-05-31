@@ -5,6 +5,7 @@
 // inline-host" suggestion.
 
 import { describe, expect, test } from 'vitest'
+import { OUTPUT_ITEM_LIMIT } from './outputBudget'
 import type { HostMsg, WorkerMsg } from './types'
 import { requestInterrupt, runInWorker, setWorkerFactory, type WorkerLike } from './workerHost'
 
@@ -119,6 +120,62 @@ describe('workerHost — DI via setWorkerFactory', () => {
       const r = await runInWorker('whatever', { timeoutMs: 60_000 })
       expect(r.status).toBe('error')
       expect(terminated).toBe(true)
+    } finally {
+      restore()
+    }
+  }, 5000)
+
+  test('host item-count limit truncates a flood of tiny output and stops onItem', async () => {
+    // Mirror of the in-VM item cap, host-side: a worker that streams more than
+    // OUTPUT_ITEM_LIMIT zero-byte items (bypassing the byte budget) must still
+    // be cut off with status 'error', the worker terminated, and no further
+    // onItem calls after the truncation marker.
+    let terminated = false
+    const listeners: Array<(event: MessageEvent<WorkerMsg>) => void> = []
+    const restore = setWorkerFactory(() => ({
+      postMessage: (msg: HostMsg) => {
+        if (msg.kind !== 'run') return
+        queueMicrotask(() => {
+          // Snapshot listeners: cleanup() removes the host listener mid-loop
+          // once the limit trips, and we must stop delivering after that.
+          const snapshot = [...listeners]
+          for (let i = 0; i < OUTPUT_ITEM_LIMIT + 100; i++) {
+            for (const l of snapshot) {
+              l({
+                data: { kind: 'output', runId: msg.runId, item: { type: 'stdout', text: '' } },
+              } as MessageEvent<WorkerMsg>)
+            }
+          }
+        })
+      },
+      addEventListener: (_t, l) => {
+        listeners.push(l)
+      },
+      removeEventListener: (_t, l) => {
+        const i = listeners.indexOf(l)
+        if (i >= 0) listeners.splice(i, 1)
+      },
+      terminate: () => {
+        terminated = true
+      },
+    }))
+    let streamed = 0
+    try {
+      const r = await runInWorker('whatever', {
+        timeoutMs: 60_000,
+        onItem: () => {
+          streamed += 1
+        },
+      })
+      expect(r.status).toBe('error')
+      expect(terminated).toBe(true)
+      // onItem is only called for accepted items, never for the synthetic
+      // truncation marker, so it stays at or below the cap.
+      expect(streamed).toBeLessThanOrEqual(OUTPUT_ITEM_LIMIT)
+      expect(r.items[r.items.length - 1]).toEqual({
+        type: 'stderr',
+        text: `Output truncated at ${OUTPUT_ITEM_LIMIT} items`,
+      })
     } finally {
       restore()
     }

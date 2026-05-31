@@ -23,6 +23,15 @@ describe('OutputFrame — sandbox hardening', () => {
     expect(sandbox).not.toContain('allow-same-origin')
   })
 
+  test('always shows a danger alert that scripts run outside the QuickJS runtime', () => {
+    const { getByRole } = render(<OutputFrame html="<b>hi</b>" />)
+    const alert = getByRole('alert')
+    // The copy must be blunt about the boundary: cell Stop/timeout do not
+    // reach iframe scripts. No softening like "sandboxed, so safe".
+    expect(alert.textContent).toMatch(/outside the QuickJS runtime/i)
+    expect(alert.textContent).toMatch(/Stop and timeout may not stop them/i)
+  })
+
   describe('watchdog (heartbeat)', () => {
     beforeEach(() => vi.useFakeTimers())
     afterEach(() => vi.useRealTimers())

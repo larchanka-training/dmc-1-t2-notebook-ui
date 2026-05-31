@@ -11,7 +11,7 @@
 // `restartWorker()` unsticks an in-flight run (used by Stop).
 
 import { DEFAULT_TIMEOUT_MS } from './limits'
-import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
+import { OUTPUT_BUDGET_BYTES, OUTPUT_ITEM_LIMIT, measureItemBytes } from './outputBudget'
 import type { HostMsg, OutputItem, RuntimeResult, WorkerMsg } from './types'
 
 // Re-export so existing importers (tests, runtime model) keep their path.
@@ -223,6 +223,7 @@ function runOne(
     }
 
     let bytesSoFar = 0
+    let itemsSoFar = 0
     let truncated = false
     const onMessage = (event: MessageEvent<WorkerMsg>) => {
       const m = event.data
@@ -230,20 +231,24 @@ function runOne(
       if (m.kind === 'output') {
         if (truncated) return
         const itemBytes = measureItemBytes(m.item)
-        if (bytesSoFar + itemBytes > OUTPUT_BUDGET_BYTES) {
-          // Enforce the budget BEFORE accepting the item, so a single huge
-          // item can't blow past the limit.
+        // Mirror the kernel's two caps host-side (defense-in-depth: a fake or
+        // compromised worker could bypass the in-VM check). Enforce BEFORE
+        // accepting the item, so neither a single huge item nor a flood of
+        // tiny ones can blow past the limits.
+        if (bytesSoFar + itemBytes > OUTPUT_BUDGET_BYTES || itemsSoFar + 1 > OUTPUT_ITEM_LIMIT) {
           truncated = true
-          items.push({
-            type: 'stderr',
-            text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`,
-          })
+          const reason =
+            itemsSoFar + 1 > OUTPUT_ITEM_LIMIT
+              ? `Output truncated at ${OUTPUT_ITEM_LIMIT} items`
+              : `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`
+          items.push({ type: 'stderr', text: reason })
           cleanup()
           restartWorker()
           resolve({ status: 'error', items })
           return
         }
         bytesSoFar += itemBytes
+        itemsSoFar += 1
         items.push(m.item)
         onItem?.(m.item)
         return

@@ -128,3 +128,34 @@ describe('transformCellCode — unsupported syntax surfaces clear errors', () =>
     expect(transformCellCode(src).code).toContain('new.target')
   })
 })
+
+describe('transformCellCode — function hoisting', () => {
+  test('a top-level function used before its declaration is hoisted above the call', () => {
+    const out = transformCellCode(
+      'const r = compute(5);\nfunction compute(n){ return n * 2 }\nr',
+    ).code
+    const fnIdx = out.indexOf('globalThis.compute =')
+    const callIdx = out.indexOf('compute(5)')
+    expect(fnIdx).toBeGreaterThanOrEqual(0)
+    expect(callIdx).toBeGreaterThanOrEqual(0)
+    // The function assignment must come first, mirroring JS hoisting.
+    expect(fnIdx).toBeLessThan(callIdx)
+  })
+
+  test('classes are NOT hoisted — they keep source order (TDZ semantics)', () => {
+    const out = transformCellCode('const x = 1;\nclass Box {}').code
+    expect(out.indexOf('globalThis.x = (1)')).toBeLessThan(out.indexOf('globalThis.Box ='))
+  })
+
+  test('"use strict" directive stays the first statement, before hoisted functions', () => {
+    const out = transformCellCode('"use strict";\nfunction f(){ return 1 }\nf()').code
+    expect(out.trimStart().startsWith('"use strict"')).toBe(true)
+    // The directive must precede the hoisted function assignment.
+    expect(out.indexOf('"use strict"')).toBeLessThan(out.indexOf('globalThis.f ='))
+  })
+
+  test('a lone string literal is still treated as the trailing result, not a directive', () => {
+    const out = transformCellCode('"hello"').code
+    expect(out).toMatch(/return\s+"hello"/)
+  })
+})

@@ -33,10 +33,24 @@ import {
 import RELEASE_SYNC from '@jitl/quickjs-wasmfile-release-sync'
 
 import { DEFAULT_TIMEOUT_MS } from './limits'
-import { OUTPUT_BUDGET_BYTES, measureItemBytes } from './outputBudget'
+import { OUTPUT_BUDGET_BYTES, OUTPUT_ITEM_LIMIT, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
 import { transformCellCode } from './transform'
 import type { OutputItem, RuntimeResult, RuntimeStatus, SerializedValue } from './types'
+
+/**
+ * Hard memory cap for the persistent VM (bytes). Generous enough for an
+ * ordinary multi-cell notebook's shared scope, low enough that a runaway
+ * allocation (`for(;;) a.push(...)`) surfaces as a clean QuickJS error
+ * instead of growing the worker until the browser kills the tab.
+ */
+const VM_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
+/**
+ * Max VM stack (bytes). Bounds unbounded recursion into a catchable error
+ * rather than a worker crash. Kept above QuickJS's tiny default so ordinary
+ * recursive notebook code (and our async-IIFE wrapper) has room.
+ */
+const VM_MAX_STACK_BYTES = 1024 * 1024
 
 /**
  * Output accumulator shared by console / display capture and the result
@@ -47,6 +61,8 @@ import type { OutputItem, RuntimeResult, RuntimeStatus, SerializedValue } from '
 interface Sink {
   items: OutputItem[]
   bytes: number
+  /** Number of items accepted so far this run (capped by OUTPUT_ITEM_LIMIT). */
+  count: number
   budgetHit: boolean
   /**
    * Optional per-run streaming hook. Invoked synchronously the moment an item
@@ -67,17 +83,23 @@ interface Sink {
 function pushItem(sink: Sink, item: OutputItem): void {
   if (sink.budgetHit) return
   const size = measureItemBytes(item)
-  if (sink.bytes + size > OUTPUT_BUDGET_BYTES) {
+  // Two independent caps: cumulative bytes AND item count. The byte cap stops
+  // a few huge strings; the count cap stops a runaway loop of tiny/empty logs
+  // (each 0–1 bytes) that would never trip the byte budget but still floods
+  // the message channel and the UI. Either overflow truncates once.
+  if (sink.bytes + size > OUTPUT_BUDGET_BYTES || sink.count + 1 > OUTPUT_ITEM_LIMIT) {
     sink.budgetHit = true
-    const marker: OutputItem = {
-      type: 'stderr',
-      text: `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`,
-    }
+    const reason =
+      sink.count + 1 > OUTPUT_ITEM_LIMIT
+        ? `Output truncated at ${OUTPUT_ITEM_LIMIT} items`
+        : `Output truncated at ${OUTPUT_BUDGET_BYTES} bytes`
+    const marker: OutputItem = { type: 'stderr', text: reason }
     sink.items.push(marker)
     sink.emit?.(marker)
     return
   }
   sink.bytes += size
+  sink.count += 1
   sink.items.push(item)
   sink.emit?.(item)
 }
@@ -122,9 +144,17 @@ function getModule(): Promise<QuickJSWASMModule> {
 export async function createKernel(options: KernelOptions = {}): Promise<Kernel> {
   const QuickJS = await getModule()
   const vm = QuickJS.newContext()
+  // Cap the runtime's resources, set once before any eval. These are blunt
+  // backstops against an OOM / deep-recursion run taking the worker (and the
+  // tab) down before the timeout fires; CPU/infinite-loop protection is the
+  // interrupt handler's job, not these. The limit lives on the persistent
+  // runtime, so it bounds the SHARED scope's lifetime growth too — kept
+  // generous so an ordinary multi-cell notebook never hits it.
+  vm.runtime.setMemoryLimit(VM_MEMORY_LIMIT_BYTES)
+  vm.runtime.setMaxStackSize(VM_MAX_STACK_BYTES)
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
-  const sink: Sink = { items: [], bytes: 0, budgetHit: false }
+  const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false }
   installConsole(vm, sink)
   installDisplay(vm, sink)
 
@@ -156,6 +186,7 @@ async function runOne(
   const items: OutputItem[] = []
   sink.items = items
   sink.bytes = 0
+  sink.count = 0
   sink.budgetHit = false
   // Bind the streaming hook for this run so every pushItem also forwards the
   // item to the host immediately. Rebound on each run (undefined clears it),

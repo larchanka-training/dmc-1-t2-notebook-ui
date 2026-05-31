@@ -228,6 +228,15 @@ describe('kernel.run — persistent shared scope', () => {
     }
   })
 
+  test('a function called before its declaration in the SAME run works (hoisting)', async () => {
+    // Real JS hoists function declarations, so a forward call is valid. The
+    // transform must preserve this — otherwise `compute(5)` would run before
+    // `globalThis.compute` is assigned and throw a ReferenceError.
+    const r = await runFresh('const r = compute(5);\nfunction compute(n){ return n * 2 }\nr')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 10 } })
+  })
+
   test('a top-level function mutating a top-level let is seen by later runs', async () => {
     // Regression: previously declarations stayed local to the IIFE and were
     // only *copied* to globalThis, so a closure mutated the local copy while
@@ -375,6 +384,40 @@ describe('kernel.run — output budget (in-VM enforcement)', () => {
     expect(r.status).toBe('error')
     expect(r.items.some((it) => it.type === 'stderr' && /truncated/i.test(it.text))).toBe(true)
   }, 10_000)
+
+  test('a runaway loop of EMPTY logs is stopped by the item-count limit, not the timeout', async () => {
+    // Each `console.log('')` is 0 bytes, so the byte budget never trips. The
+    // item-count limit is what stops it. A generous timeout proves the limit
+    // (not the deadline) is what fired, and the marker names the item cap.
+    const r = await runFresh("for (let i = 0; i < 1e7; i++) console.log('')", 60_000)
+    expect(r.status).toBe('error')
+    expect(
+      r.items.some((it) => it.type === 'stderr' && /truncated at \d+ items/i.test(it.text)),
+    ).toBe(true)
+    // The output is bounded by the item cap, not left to grow to millions.
+    expect(r.items.length).toBeLessThan(20_000)
+  }, 10_000)
+})
+
+describe('kernel.run — memory limit', () => {
+  test('an unbounded allocation surfaces as an error, and the kernel survives', async () => {
+    // The VM memory limit turns a runaway allocation into a catchable QuickJS
+    // error instead of letting the worker grow until the tab dies. A generous
+    // timeout proves the memory cap (not the deadline) is what stopped it.
+    const kernel = await createKernel()
+    try {
+      const r = await kernel.run('const a = []; for (;;) a.push(new Array(10000).fill(1))', {
+        timeoutMs: 60_000,
+      })
+      expect(r.status).toBe('error')
+      // The persistent VM must stay usable after an out-of-memory abort.
+      const after = await kernel.run('1 + 1')
+      expect(after.status).toBe('done')
+      expect(after.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
+    } finally {
+      kernel.dispose()
+    }
+  }, 15_000)
 })
 
 describe('kernel.run — display() API', () => {

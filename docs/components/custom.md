@@ -20,45 +20,59 @@ The presentational building block of the notebook. Renders a dark code editor wi
 
 ### Props
 
-| Prop           | Type                                       | Required | Description                                         |
-| -------------- | ------------------------------------------ | -------- | --------------------------------------------------- |
-| `index`        | `number`                                   | yes      | Cell number shown in the `[n]` badge in the header  |
-| `code`         | `string`                                   | yes      | Source code displayed in the textarea               |
-| `output`       | `string`                                   | no       | Text output shown below the editor after running    |
-| `status`       | `'idle' \| 'running' \| 'done' \| 'error'` | no       | Controls border colour and run button icon          |
-| `isFirst`      | `boolean`                                  | no       | Disables the move-up button                         |
-| `isLast`       | `boolean`                                  | no       | Disables the move-down button                       |
-| `readOnly`     | `boolean`                                  | no       | Prevents editing the textarea                       |
-| `onCodeChange` | `(code: string) => void`                   | no       | Called on every keystroke                           |
-| `onRun`        | `() => void`                               | no       | Called when the play button or Cmd+Enter is pressed |
-| `onDelete`     | `() => void`                               | no       | Called when the trash icon is clicked               |
-| `onMoveUp`     | `() => void`                               | no       | Called when the ↑ button is clicked                 |
-| `onMoveDown`   | `() => void`                               | no       | Called when the ↓ button is clicked                 |
+| Prop               | Type                                                                                  | Required | Description                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `executionCount`   | `number \| null`                                                                      | no       | Run counter shown as `[n]`; `null` (the default) renders `[ ]`                                      |
+| `kind`             | `'code' \| 'markdown'`                                                                | no       | Cell type; `markdown` swaps the run button for a text label                                         |
+| `code`             | `string`                                                                              | yes      | Source code / markdown displayed in the textarea                                                    |
+| `output`           | `OutputItem[]`                                                                        | no       | Structured output items (stdout / stderr / result / error / html / image) rendered below the editor |
+| `status`           | `'idle' \| 'running' \| 'done' \| 'error' \| 'interrupted' \| 'timeout' \| 'skipped'` | no       | Controls border colour and run/stop button                                                          |
+| `viewMode`         | `'edit' \| 'preview'`                                                                 | no       | Markdown cells only: edit vs rendered preview                                                       |
+| `isFirst`          | `boolean`                                                                             | no       | Disables the move-up button                                                                         |
+| `isLast`           | `boolean`                                                                             | no       | Disables the move-down button                                                                       |
+| `readOnly`         | `boolean`                                                                             | no       | Prevents editing the textarea                                                                       |
+| `onCodeChange`     | `(code: string) => void`                                                              | no       | Called on every keystroke                                                                           |
+| `onViewModeChange` | `(mode: CellViewMode) => void`                                                        | no       | Markdown cells only: toggles edit/preview                                                           |
+| `onRun`            | `() => void`                                                                          | no       | Called when the play button or Cmd+Enter is pressed                                                 |
+| `onStop`           | `() => void`                                                                          | no       | Called when the stop button is pressed while the cell is `running`                                  |
+| `onDelete`         | `() => void`                                                                          | no       | Called when the trash icon is clicked                                                               |
+| `onMoveUp`         | `() => void`                                                                          | no       | Called when the ↑ button is clicked                                                                 |
+| `onMoveDown`       | `() => void`                                                                          | no       | Called when the ↓ button is clicked                                                                 |
 
 ### Usage — static display (e.g. component gallery)
 
 ```tsx
 import { NotebookCell } from '@/features/notebook'
-;<NotebookCell index={1} code={`console.log("hello")`} output="hello" status="done" readOnly />
+;<NotebookCell
+  executionCount={1}
+  code={`console.log("hello")`}
+  output={[{ type: 'stdout', text: 'hello' }]}
+  status="done"
+  readOnly
+/>
 ```
 
 ### Usage — wired to Reatom state
 
-In the live notebook, the cell's fields are **atomized** (`code`, `output`, `status` are atoms). The parent component (`NotebookView`) reads each atom and passes the plain value down. Reatom-touching callbacks are wrapped with `wrap` so they preserve async context (see [reatom.md](../architecture/reatom.md)):
+In the live notebook, the cell's fields are **atomized** (`code`, `output`, `status`, `executionCount`, `viewMode` are atoms). The parent component (`NotebookView`) reads each atom and passes the plain value down. Reatom-touching callbacks are wrapped with `wrap` so they preserve async context (see [reatom.md](../architecture/reatom.md)):
 
 ```tsx
 import { wrap } from '@reatom/core'
 import { NotebookCell } from '@/features/notebook'
-import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebook'
+import { updateCellCode, runCell, stopCell, deleteCell, moveCell } from '@/features/notebook'
 ;<NotebookCell
-  index={idx + 1}
+  executionCount={cell.executionCount()}
+  kind={cell.kind}
   code={cell.code()}
   output={cell.output()}
   status={cell.status()}
+  viewMode={cell.viewMode()}
   isFirst={idx === 0}
   isLast={idx === cells.length - 1}
   onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
+  onViewModeChange={wrap((mode) => cell.viewMode.set(mode))}
   onRun={wrap(() => runCell(cell.id))}
+  onStop={wrap(() => stopCell(cell.id))}
   onDelete={wrap(() => deleteCell(cell.id))}
   onMoveUp={wrap(() => moveCell(cell.id, -1))}
   onMoveDown={wrap(() => moveCell(cell.id, 1))}
@@ -67,12 +81,15 @@ import { updateCellCode, runCell, deleteCell, moveCell } from '@/features/notebo
 
 ### Status visual reference
 
-| Status    | Border                     | Run button | Output text colour |
-| --------- | -------------------------- | ---------- | ------------------ |
-| `idle`    | default                    | ▶ green    | —                  |
-| `running` | default                    | ⟳ spinner  | —                  |
-| `done`    | default                    | ▶ green    | foreground         |
-| `error`   | red (`border-destructive`) | ▶ green    | destructive (red)  |
+| Status        | Border                                | Run button   | Notes                                            |
+| ------------- | ------------------------------------- | ------------ | ------------------------------------------------ |
+| `idle`        | default                               | ▶ green      | —                                                |
+| `running`     | left primary bar                      | ■ stop (red) | Run is swapped for a Stop button                 |
+| `done`        | default                               | ▶ green      | —                                                |
+| `error`       | red (`border-destructive`)            | ▶ green      | Output carries an `error` item                   |
+| `interrupted` | amber (`border-amber-500/60`)         | ▶ green      | User pressed Stop; output notes the interruption |
+| `timeout`     | amber (`border-amber-500/60`)         | ▶ green      | Run exceeded the timeout                         |
+| `skipped`     | dashed (`border-muted-foreground/40`) | ▶ green      | Run All halted on an earlier cell's failure      |
 
 ### Design notes
 

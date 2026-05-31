@@ -90,18 +90,39 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   // can't make every cell time out instantly or run effectively forever.
   const timeoutMs = clampTimeoutMs(timeoutMsAtom())
   // Stream items into the cell as the worker produces them, so a long run
-  // shows output incrementally instead of all at once at the end. `wrap`
-  // captures the current Reatom context so the callback (fired later from the
-  // worker message listener) can touch atoms. A stale generation (Restart
-  // during the run) makes it a no-op. The final `cell.output.set` below still
-  // overwrites with the authoritative list (incl. status markers).
+  // shows output incrementally instead of all at once at the end. The worker
+  // can emit thousands of items in a burst, so we BATCH them: each item lands
+  // in a buffer and a single flush (scheduled on the next animation frame)
+  // appends the whole chunk. This turns a per-item `set([...prev, item])`
+  // (O(n²) copies + a re-render each) into one append per frame.
+  let buffer: OutputItem[] = []
+  let flushScheduled = false
+  // `wrap` captures the current Reatom context so the flush (fired later from
+  // a timer/rAF — a fresh async boundary) can touch atoms under clearStack().
+  // A stale generation (Restart during the run) makes it a no-op.
+  const flush = wrap(() => {
+    flushScheduled = false
+    if (generation !== kernelGeneration || buffer.length === 0) return
+    const chunk = buffer
+    buffer = []
+    cell.output.set((prev) => prev.concat(chunk))
+  })
   const onItem = wrap((item: OutputItem) => {
     if (generation !== kernelGeneration) return
-    cell.output.set((prev) => [...prev, item])
+    buffer.push(item)
+    if (flushScheduled) return
+    flushScheduled = true
+    scheduleFlush(flush)
   })
   // Shared scope lives inside the persistent worker VM — no snapshot is
   // passed here or carried back.
   const result = await wrap(runInWorker(cell.code(), { timeoutMs, onItem }))
+
+  // Drop any buffered-but-unflushed items and cancel the pending flush: the
+  // authoritative list is written below, so a late flush must not append a
+  // stale chunk on top of it (or resurrect output after Restart).
+  buffer = []
+  flushScheduled = false
 
   // A Restart Kernel during the run bumped the generation and already reset
   // this cell to idle. Writing the result now would resurrect stale output on
@@ -115,6 +136,20 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   cell.output.set(mapped.items)
   cell.status.set(mapped.status)
   return result.status
+}
+
+/**
+ * Schedule an output flush on the next animation frame, falling back to a
+ * macrotask in non-DOM contexts (jsdom tests, the off chance rAF is absent).
+ * Coalescing on a frame keeps a bursty run to one atom write + render per
+ * frame instead of one per item.
+ */
+function scheduleFlush(fn: () => void): void {
+  if (typeof requestAnimationFrame !== 'undefined') {
+    requestAnimationFrame(() => fn())
+  } else {
+    setTimeout(fn, 0)
+  }
 }
 
 /**

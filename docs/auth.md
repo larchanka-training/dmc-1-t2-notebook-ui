@@ -140,7 +140,7 @@ style-src 'self' 'unsafe-inline';
 font-src 'self' data:;
 img-src 'self' data:;
 connect-src 'self' https://api.notebook.com;
-frame-src 'self' blob:;
+frame-src 'self';
 worker-src 'self' blob:;
 object-src 'none';
 base-uri 'self';
@@ -149,7 +149,7 @@ report-to csp-endpoint;
 
 Пояснения к директивам:
 
-- `frame-src 'self' blob:` — `blob:` нужен для sandboxed iframe, в которых выполняется пользовательский JS (собираем HTML бандл как Blob и подключаем через `URL.createObjectURL`).
+- `frame-src 'self'` — sandboxed iframe для `display({ type: 'html' })` рендерится через `srcDoc` (см. `OutputFrame.tsx`), а не через `blob:`/`URL.createObjectURL`. `srcDoc`-документ наследует CSP родителя и несёт собственный inline-`<meta>` CSP (`default-src 'none'`), поэтому `blob:` в `frame-src` не нужен.
 - `worker-src 'self' blob:` — sandbox исполняется в Web Worker (`runtime/worker.ts`), загружаемом Vite-бандлом; `blob:` нужен для worker-чанка. Без этой директивы runtime сломается молча.
 - `style-src 'self' 'unsafe-inline'` — `'unsafe-inline'` вынужденный из-за Tailwind 4 и shadcn (inline style-атрибуты в runtime). При возможности заменить на nonce-подход.
 - `img-src 'self' data:` — без `https:`. Широкое `https:` разрешает любые сторонние картинки (tracking-pixels, exfiltration). Если в проде появится легитимный источник (CDN аватаров, превью и т. п.) — добавляем конкретный host, не весь `https:`.
@@ -175,7 +175,12 @@ Cross-Origin-Embedder-Policy: require-corp
 
 ### 4.4. Слой 4 — output-санитизация выводов code-cell
 
-`console.log(...)` пользовательского кода рендерится как **текст**, не HTML. Никакой интерпретации HTML/Markdown в output-блоке.
+`console.log(...)`, `result` и `error` рендерятся как **текст** — никакой интерпретации HTML в этих item'ах.
+
+**Исключение — `display({ type: 'html', value })`.** Этот API намеренно рендерит произвольный пользовательский HTML в изолированном `<iframe sandbox="allow-scripts">` (`OutputFrame.tsx`). Модель безопасности:
+
+- **Гарантии.** `sandbox` без `allow-same-origin` даёт iframe уникальный origin: нет доступа к `localStorage`/cookies/DOM родителя и к токенам. Inline-`<meta>` CSP в `srcDoc` (`default-src 'none'`) блокирует сеть (fetch/XHR/WebSocket/beacon, удалённые скрипты), разрешая только inline script/style и data:/blob: картинки — самодостаточные визуализации работают, эксфильтрация — нет.
+- **Ограничения (важно).** Скрипты в iframe живут в браузерном lifecycle iframe, а НЕ в QuickJS-рунтайме: кнопка Stop, timeout ячейки и output-бюджет их не контролируют. Есть best-effort heartbeat-watchdog (сносит зависший iframe), но это не эквивалент Stop. UI показывает постоянное красное предупреждение рядом с таким выводом. Это accepted risk MVP.
 
 ### 4.5. Слой 5 — нет внешних скриптов
 
