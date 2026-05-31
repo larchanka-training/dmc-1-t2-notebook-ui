@@ -15,8 +15,33 @@ import { NotebookOutline } from './NotebookOutline'
 import { NotebookToolbar } from './NotebookToolbar'
 import type { Cell, CellViewMode } from '../domain/cell'
 import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
+import {
+  activeCellIdAtom,
+  cellModeAtom,
+  enterCommand,
+  enterEdit,
+  focusCell,
+} from '../model/cellMode'
 import { runCell, stopCell } from '../model/runtime'
 import { prewarmWorker } from '../runtime/workerHost'
+
+// Run a cell, then focus the next one in edit mode — creating a trailing code
+// cell if this was the last. Shift+Enter's "run and advance" behaviour.
+function runAndAdvance(cellId: string) {
+  runCell(cellId)
+  const cells = cellsAtom()
+  const idx = cells.findIndex((c) => c.id === cellId)
+  const next = cells[idx + 1] ?? addCell(cellId, 'code')
+  enterEdit(next.id)
+}
+
+// Run a cell, then always insert a fresh code cell below and edit it.
+// Alt+Enter's behaviour.
+function runAndInsertBelow(cellId: string) {
+  runCell(cellId)
+  const inserted = addCell(cellId, 'code')
+  enterEdit(inserted.id)
+}
 
 interface NotebookRowProps {
   cell: Cell
@@ -35,11 +60,19 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         status={cell.status()}
         viewMode={cell.viewMode()}
         theme={themeAtom()}
+        autoFocus={activeCellIdAtom() === cell.id && cellModeAtom() === 'edit'}
         isFirst={isFirst}
         isLast={isLast}
         onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
         onViewModeChange={wrap((mode: CellViewMode) => cell.viewMode.set(mode))}
+        onFocus={wrap(() => enterEdit(cell.id))}
         onRun={wrap(() => runCell(cell.id))}
+        onRunAndAdvance={wrap(() => runAndAdvance(cell.id))}
+        onRunAndInsertBelow={wrap(() => runAndInsertBelow(cell.id))}
+        onExitToCommand={wrap(() => {
+          enterCommand()
+          focusCell(cell.id)
+        })}
         onStop={wrap(() => stopCell(cell.id))}
         onDelete={wrap(() => deleteCell(cell.id))}
         onMoveUp={wrap(() => moveCell(cell.id, -1))}

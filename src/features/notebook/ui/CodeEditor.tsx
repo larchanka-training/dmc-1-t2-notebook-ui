@@ -35,7 +35,10 @@ export interface CodeEditorProps {
   theme: Theme
   showLineNumbers?: boolean
   readOnly?: boolean
+  /** When true, focus the editor (used when this cell becomes active in edit mode). */
+  autoFocus?: boolean
   onChange: (value: string) => void
+  onFocus?: () => void
   onRun?: () => void
   onRunAndAdvance?: () => void
   onRunAndInsertBelow?: () => void
@@ -54,7 +57,9 @@ export function CodeEditor({
   theme,
   showLineNumbers = false,
   readOnly = false,
+  autoFocus = false,
   onChange,
+  onFocus,
   onRun,
   onRunAndAdvance,
   onRunAndInsertBelow,
@@ -65,6 +70,7 @@ export function CodeEditor({
 
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
+  const onFocusRef = useRef(onFocus)
   const handlersRef = useRef<RunHandlers>({
     run: () => {},
     runAndAdvance: () => {},
@@ -82,6 +88,7 @@ export function CodeEditor({
   useEffect(() => {
     valueRef.current = value
     onChangeRef.current = onChange
+    onFocusRef.current = onFocus
     handlersRef.current = {
       run: () => onRun?.(),
       runAndAdvance: () => onRunAndAdvance?.(),
@@ -143,6 +150,7 @@ export function CodeEditor({
           readOnlyComp.of(EditorState.readOnly.of(readOnly)),
           EditorView.lineWrapping,
           EditorView.updateListener.of((update) => {
+            if (update.focusChanged && update.view.hasFocus) onFocusRef.current?.()
             if (!update.docChanged) return
             const isExternal = update.transactions.some((tr) => tr.annotation(External))
             if (isExternal) return
@@ -187,6 +195,14 @@ export function CodeEditor({
       effects: readOnlyComp.reconfigure(EditorState.readOnly.of(readOnly)),
     })
   }, [readOnly, readOnlyComp])
+
+  // Pull focus into the editor when the cell becomes active in edit mode
+  // (e.g. Enter in command mode, or Shift+Enter advancing into this cell).
+  useEffect(() => {
+    if (!autoFocus) return
+    const view = viewRef.current
+    if (view && !view.hasFocus) view.focus()
+  }, [autoFocus])
 
   return <div ref={hostRef} className="cm-host overflow-hidden rounded-b-xl" />
 }

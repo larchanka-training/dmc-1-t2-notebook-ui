@@ -40,12 +40,21 @@ export interface NotebookCellProps {
   /** Drives the CodeMirror syntax palette; follows the global app theme. */
   theme?: Theme
   showLineNumbers?: boolean
+  /** Focus the code editor (cell is active in edit mode). */
+  autoFocus?: boolean
   isFirst?: boolean
   isLast?: boolean
   readOnly?: boolean
   onCodeChange?: (code: string) => void
   onViewModeChange?: (mode: CellViewMode) => void
+  onFocus?: () => void
   onRun?: () => void
+  /** Shift+Enter: run, then move to (or create) the next cell. */
+  onRunAndAdvance?: () => void
+  /** Alt+Enter: run, then insert a fresh code cell below. */
+  onRunAndInsertBelow?: () => void
+  /** Esc: leave the editor for command mode. */
+  onExitToCommand?: () => void
   onStop?: () => void
   onDelete?: () => void
   onMoveUp?: () => void
@@ -61,12 +70,17 @@ export function NotebookCell({
   viewMode = 'edit',
   theme = 'light',
   showLineNumbers = false,
+  autoFocus = false,
   isFirst = false,
   isLast = false,
   readOnly = false,
   onCodeChange,
   onViewModeChange,
+  onFocus,
   onRun,
+  onRunAndAdvance,
+  onRunAndInsertBelow,
+  onExitToCommand,
   onStop,
   onDelete,
   onMoveUp,
@@ -242,8 +256,13 @@ export function NotebookCell({
             theme={theme}
             showLineNumbers={showLineNumbers}
             readOnly={readOnly}
+            autoFocus={autoFocus}
             onChange={(next) => onCodeChange?.(next)}
+            onFocus={onFocus}
             onRun={onRun}
+            onRunAndAdvance={onRunAndAdvance}
+            onRunAndInsertBelow={onRunAndInsertBelow}
+            onExitToCommand={onExitToCommand}
           />
         ) : (
           <textarea
