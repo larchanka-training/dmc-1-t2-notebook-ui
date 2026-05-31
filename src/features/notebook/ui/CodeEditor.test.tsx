@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
+import { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'
 
 function getContent(container: HTMLElement) {
@@ -37,19 +38,34 @@ describe('CodeEditor', () => {
     await waitFor(() => expect(container.querySelector('.cm-lineNumbers')).not.toBeNull())
   })
 
-  test('calls onChange when the document is edited', async () => {
+  test('fires onChange with the new doc on a real document edit', async () => {
     const onChange = vi.fn()
-    const { container } = render(<CodeEditor value="" theme="light" onChange={onChange} />)
-    // Dispatch a programmatic insert through the view the same way external
-    // code would; the updateListener should fire onChange with the new doc.
-    const view = (
-      container.querySelector('.cm-editor') as unknown as { cmView?: { view: unknown } }
-    ).cmView
-    expect(view).toBeUndefined() // sanity: no public handle exposed
-    // Simulate typing via the contenteditable input event path.
+    const { container } = render(<CodeEditor value="a" theme="light" onChange={onChange} />)
+    const host = container.querySelector('.cm-content') as HTMLElement
+    await waitFor(() => expect(host.textContent).toContain('a'))
     onChange.mockClear()
-    // CM reads from its own state; emulate an external value change round-trip
-    // instead, which is the contract NotebookCell relies on.
+    // Drive an edit the way the user would, via the editor's own dispatch.
+    // The updateListener must translate docChanged into onChange(newDoc).
+    const view = EditorView.findFromDOM(host)!
+    view.dispatch({ changes: { from: 1, insert: 'b' } })
+    expect(onChange).toHaveBeenCalledWith('ab')
+  })
+
+  test('does not fire onChange when external value is pushed in', async () => {
+    const onChange = vi.fn()
+    const { container, rerender } = render(
+      <CodeEditor value="x" theme="light" onChange={onChange} />,
+    )
+    await waitFor(() =>
+      expect((container.querySelector('.cm-content') as HTMLElement).textContent).toContain('x'),
+    )
+    onChange.mockClear()
+    rerender(<CodeEditor value="y" theme="light" onChange={onChange} />)
+    await waitFor(() =>
+      expect((container.querySelector('.cm-content') as HTMLElement).textContent).toContain('y'),
+    )
+    // External pushes are annotated and must NOT echo back through onChange,
+    // otherwise undo/redo (S5) pushing an old value would re-record it.
     expect(onChange).not.toHaveBeenCalled()
   })
 })
