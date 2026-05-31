@@ -1,4 +1,7 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
+import './markdown.css'
 
 // Renders a markdown cell's source as formatted HTML. Raw HTML embedded in the
 // markdown is NOT rendered: we never enable `rehype-raw`, so any `<script>` or
@@ -23,17 +26,28 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  // Fenced blocks are wrapped by the `pre` renderer below; here we only style
+  // inline code. Block `<code>` keeps the `hljs language-*` classes that
+  // rehype-highlight adds, so the token colours from markdown.css apply.
   code: ({ className, children }) => {
-    const isBlock = className?.includes('language-')
-    if (isBlock) {
-      return (
-        <pre className="my-3 overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">
-          <code>{children}</code>
-        </pre>
-      )
+    if (className?.includes('language-')) {
+      return <code className={`${className} font-mono text-sm`}>{children}</code>
     }
     return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.875em]">{children}</code>
   },
+  pre: ({ children }) => (
+    <pre className="my-3 overflow-x-auto rounded-md bg-muted p-3">{children}</pre>
+  ),
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto">
+      <table className="w-full border-collapse text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="border-b border-border">{children}</thead>,
+  th: ({ children }) => (
+    <th className="border border-border px-3 py-1.5 text-left font-semibold">{children}</th>
+  ),
+  td: ({ children }) => <td className="border border-border px-3 py-1.5">{children}</td>,
   blockquote: ({ children }) => (
     <blockquote className="my-2 border-l-2 border-border pl-4 italic text-muted-foreground">
       {children}
@@ -47,5 +61,13 @@ export interface MarkdownViewProps {
 }
 
 export function MarkdownView({ source }: MarkdownViewProps) {
-  return <ReactMarkdown components={markdownComponents}>{source}</ReactMarkdown>
+  return (
+    <ReactMarkdown
+      components={markdownComponents}
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+    >
+      {source}
+    </ReactMarkdown>
+  )
 }

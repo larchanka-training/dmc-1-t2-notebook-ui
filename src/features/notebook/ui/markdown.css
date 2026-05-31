@@ -1,0 +1,104 @@
+/*
+ * Syntax highlighting for fenced code blocks inside markdown cells.
+ * rehype-highlight emits highlight.js token classes (`.hljs-*`); we map them
+ * to the design tokens / GitHub-style palette so the colours track the global
+ * light/dark theme (`.dark` on <html>, see entities/theme).
+ */
+.hljs {
+  color: var(--foreground);
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag,
+.hljs-name,
+.hljs-link {
+  color: #cf222e;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #0a3069;
+}
+
+.hljs-number,
+.hljs-built_in,
+.hljs-literal,
+.hljs-type,
+.hljs-params {
+  color: #953800;
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_ {
+  color: #8250df;
+}
+
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #0550ae;
+}
+
+.hljs-meta {
+  color: var(--muted-foreground);
+}
+
+.hljs-deletion {
+  color: #82071e;
+}
+
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-literal,
+.dark .hljs-section,
+.dark .hljs-doctag,
+.dark .hljs-name,
+.dark .hljs-link {
+  color: #ff7b72;
+}
+
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-addition,
+.dark .hljs-attribute,
+.dark .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+
+.dark .hljs-number,
+.dark .hljs-built_in,
+.dark .hljs-literal,
+.dark .hljs-type,
+.dark .hljs-params {
+  color: #ffa657;
+}
+
+.dark .hljs-title,
+.dark .hljs-title.class_,
+.dark .hljs-title.function_ {
+  color: #d2a8ff;
+}
+
+.dark .hljs-attr,
+.dark .hljs-variable,
+.dark .hljs-template-variable,
+.dark .hljs-selector-attr,
+.dark .hljs-selector-pseudo {
+  color: #79c0ff;
+}
