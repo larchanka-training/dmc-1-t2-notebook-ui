@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   Play,
+  Square,
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -11,7 +12,6 @@ import {
   Pencil,
 } from 'lucide-react'
 import ReactMarkdown, { type Components } from 'react-markdown'
-import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import {
@@ -24,12 +24,15 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
+import type { OutputItem } from '../runtime/types'
+import { OutputView } from './OutputView'
 
 export interface NotebookCellProps {
-  index: number
+  /** Execution counter shown as `[N]`; null means the cell has never run. */
+  executionCount?: number | null
   kind?: CellKind
   code: string
-  output?: string
+  output?: OutputItem[]
   status?: CellStatus
   viewMode?: CellViewMode
   isFirst?: boolean
@@ -38,6 +41,7 @@ export interface NotebookCellProps {
   onCodeChange?: (code: string) => void
   onViewModeChange?: (mode: CellViewMode) => void
   onRun?: () => void
+  onStop?: () => void
   onDelete?: () => void
   onMoveUp?: () => void
   onMoveDown?: () => void
@@ -82,10 +86,10 @@ const markdownComponents: Components = {
 }
 
 export function NotebookCell({
-  index,
+  executionCount = null,
   kind = 'code',
   code,
-  output = '',
+  output = [],
   status = 'idle',
   viewMode = 'edit',
   isFirst = false,
@@ -94,6 +98,7 @@ export function NotebookCell({
   onCodeChange,
   onViewModeChange,
   onRun,
+  onStop,
   onDelete,
   onMoveUp,
   onMoveDown,
@@ -109,6 +114,10 @@ export function NotebookCell({
   const isMarkdown = kind === 'markdown'
   const isRunning = status === 'running'
   const isError = status === 'error'
+  // A user Stop or a timeout is not a code error — flag it distinctly so the
+  // cell that the user halted is not mistaken for a clean run or a crash.
+  const isHalted = status === 'interrupted' || status === 'timeout'
+  const isSkipped = status === 'skipped'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -131,12 +140,31 @@ export function NotebookCell({
         className={cn(
           'relative gap-0 py-0 ring-0 border border-border overflow-visible transition-shadow',
           isError && 'border-destructive',
+          isHalted && 'border-amber-500/60',
+          isSkipped && 'border-dashed border-muted-foreground/40',
           isRunning &&
             'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary before:rounded-l-xl',
         )}
       >
         <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/40 rounded-t-xl">
-          {isCode && onRun ? (
+          {isCode && isRunning && onStop ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Stop cell"
+                    className="size-7 text-destructive hover:bg-destructive/10"
+                    onClick={onStop}
+                  >
+                    <Square className="size-4 fill-current" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Stop cell</TooltipContent>
+            </Tooltip>
+          ) : isCode && onRun ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -166,7 +194,9 @@ export function NotebookCell({
           )}
 
           {isCode ? (
-            <span className="text-xs text-muted-foreground font-mono select-none">[{index}]</span>
+            <span className="text-xs text-muted-foreground font-mono select-none">
+              [{executionCount ?? ' '}]
+            </span>
           ) : null}
 
           <div className="ml-auto flex items-center gap-1">
@@ -268,20 +298,7 @@ export function NotebookCell({
         )}
       </Card>
 
-      {isCode && output && !isError && (
-        <Card
-          size="sm"
-          className="gap-0 py-3 ring-0 border-0 bg-secondary text-foreground font-mono text-sm whitespace-pre-wrap"
-        >
-          <div className="px-4">{output}</div>
-        </Card>
-      )}
-
-      {isCode && output && isError && (
-        <Alert variant="destructive" className="font-mono">
-          <AlertDescription className="whitespace-pre-wrap">{output}</AlertDescription>
-        </Alert>
-      )}
+      {isCode && output.length > 0 && <OutputView items={output} />}
     </div>
   )
 }

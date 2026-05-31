@@ -1,6 +1,5 @@
-import { action, atom, wrap } from '@reatom/core'
+import { action, atom } from '@reatom/core'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
-import { executeJS } from './executeJS'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
@@ -39,14 +38,3 @@ export const updateCellCode = action((id: string, code: string) => {
   const cell = cellsAtom().find((c) => c.id === id)
   cell?.code.set(code)
 }, 'notebook.cells.updateCode')
-
-export const runCell = action(async (id: string) => {
-  const cell = cellsAtom().find((c) => c.id === id)
-  if (!cell) return
-  cell.status.set('running')
-  cell.output.set('')
-  const code = cell.code()
-  const result = await wrap(executeJS(code))
-  cell.output.set(result.output)
-  cell.status.set(result.error ? 'error' : 'done')
-}, 'notebook.cells.run')

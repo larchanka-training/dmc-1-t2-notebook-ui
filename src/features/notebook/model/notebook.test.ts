@@ -1,13 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import {
-  addCell,
-  cellsAtom,
-  deleteCell,
-  moveCell,
-  runCell,
-  SEED_CODE,
-  updateCellCode,
-} from './notebook'
+import { addCell, cellsAtom, deleteCell, moveCell, SEED_CODE, updateCellCode } from './notebook'
 
 describe('notebook store', () => {
   test('starts with exactly one seed cell', () => {
@@ -15,7 +7,7 @@ describe('notebook store', () => {
     expect(cells).toHaveLength(1)
     expect(cells[0].code()).toBe(SEED_CODE)
     expect(cells[0].status()).toBe('idle')
-    expect(cells[0].output()).toBe('')
+    expect(cells[0].output()).toEqual([])
   })
 
   test('addCell() appends an empty cell to the end', () => {
@@ -25,6 +17,7 @@ describe('notebook store', () => {
     expect(after).toHaveLength(before.length + 1)
     expect(after.at(-1)!.code()).toBe('')
     expect(after.at(-1)!.status()).toBe('idle')
+    expect(after.at(-1)!.output()).toEqual([])
   })
 
   test('addCell(afterId) inserts right after the given cell', () => {
@@ -80,26 +73,6 @@ describe('notebook store', () => {
     expect(b.code).toBe(bCodeAtom)
   })
 
-  test('runCell drives the status through running -> done with captured output', async () => {
-    const [cell] = cellsAtom()
-    updateCellCode(cell.id, 'console.log("answer", 42)')
-    const promise = runCell(cell.id)
-    expect(cell.status()).toBe('running')
-    expect(cell.output()).toBe('')
-    await promise
-    expect(cell.status()).toBe('done')
-    expect(cell.output()).toBe('answer 42')
-  })
-
-  test('runCell sets status=error when the code throws', async () => {
-    const [cell] = cellsAtom()
-    updateCellCode(cell.id, 'throw new Error("nope")')
-    await runCell(cell.id)
-    expect(cell.status()).toBe('error')
-    expect(cell.output()).toContain('nope')
-  })
-
-  test('runCell on an unknown id is a no-op', async () => {
-    await expect(runCell('does-not-exist')).resolves.toBeUndefined()
-  })
+  // runCell-related tests live in runtime.test.ts (this file covers only
+  // CRUD over cellsAtom now).
 })

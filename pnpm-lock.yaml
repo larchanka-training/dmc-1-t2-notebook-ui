@@ -17,12 +17,18 @@ importers:
       '@fontsource-variable/jetbrains-mono':
         specifier: ^5.2.8
         version: 5.2.8
+      '@jitl/quickjs-wasmfile-release-sync':
+        specifier: ^0.32.0
+        version: 0.32.0
       '@reatom/core':
         specifier: ^1001.0.0
         version: 1001.0.0
       '@reatom/react':
         specifier: ^1001.0.0
         version: 1001.0.0(@reatom/core@1001.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      acorn:
+        specifier: ^8.16.0
+        version: 8.16.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -35,6 +41,9 @@ importers:
       openapi-fetch:
         specifier: ^0.17.0
         version: 0.17.0
+      quickjs-emscripten-core:
+        specifier: ^0.32.0
+        version: 0.32.0
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -83,6 +92,9 @@ importers:
         version: 6.0.2(vite@8.0.14(@types/node@25.9.1)(jiti@2.7.0))
       '@vitest/coverage-v8':
         specifier: 4.1.7
+        version: 4.1.7(vitest@4.1.7)
+      '@vitest/web-worker':
+        specifier: ^4.1.7
         version: 4.1.7(vitest@4.1.7)
       eslint:
         specifier: ^10.4.0
@@ -499,6 +511,12 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  '@jitl/quickjs-ffi-types@0.32.0':
+    resolution: {integrity: sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg==}
+
+  '@jitl/quickjs-wasmfile-release-sync@0.32.0':
+    resolution: {integrity: sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -993,6 +1011,11 @@ packages:
 
   '@vitest/utils@4.1.7':
     resolution: {integrity: sha512-T532WBu791cBxJlCl6SO+J14l81DQx6uQHm1bQbmCDY7nqlEIgkza/UFnSBNaUtSf41unldDFjdOBYEQC4b5Hw==}
+
+  '@vitest/web-worker@4.1.7':
+    resolution: {integrity: sha512-TIs7a7a6ZPSgZgj1CnaM5yK98MFiRHDpNmRxOnxbw827q2+qRf6hzFrFBIU+9haZ2jmQp0/00CeSbkdSqHzSWQ==}
+    peerDependencies:
+      vitest: 4.1.7
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -2495,6 +2518,9 @@ packages:
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
 
+  quickjs-emscripten-core@0.32.0:
+    resolution: {integrity: sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg==}
+
   range-parser@1.2.1:
     resolution: {integrity: sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==}
     engines: {node: '>= 0.6'}
@@ -3513,6 +3539,12 @@ snapshots:
     optionalDependencies:
       '@types/node': 25.9.1
 
+  '@jitl/quickjs-ffi-types@0.32.0': {}
+
+  '@jitl/quickjs-wasmfile-release-sync@0.32.0':
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -4018,6 +4050,11 @@ snapshots:
       '@vitest/pretty-format': 4.1.7
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
+
+  '@vitest/web-worker@4.1.7(vitest@4.1.7)':
+    dependencies:
+      obug: 2.1.1
+      vitest: 4.1.7(@types/node@25.9.1)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@6.0.3))(vite@8.0.14(@types/node@25.9.1)(jiti@2.7.0))
 
   accepts@2.0.0:
     dependencies:
@@ -5554,6 +5591,10 @@ snapshots:
       side-channel: 1.1.0
 
   queue-microtask@1.2.3: {}
+
+  quickjs-emscripten-core@0.32.0:
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
 
   range-parser@1.2.1: {}
 
