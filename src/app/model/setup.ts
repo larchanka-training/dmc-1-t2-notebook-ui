@@ -1,9 +1,10 @@
-import { connectLogger, log } from '@reatom/core'
+import { connectLogger, log, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter } from '@/shared/api'
 import { tokenAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
+import { loadNotebook, startAutosave } from '@/features/notebook'
 
 if (import.meta.env.MODE === 'development') {
   connectLogger()
@@ -30,4 +31,16 @@ rootFrame.run(() => loadCurrentUserAction())
 // mounted), and fires synchronously on subscribe to cover the first paint.
 rootFrame.run(() => {
   startThemeSync()
+})
+
+// Restore the local notebook from IndexedDB, then begin autosaving. Order
+// matters: load first so autosave's initial (synchronous) subscribe observes
+// the restored content and its "skip first emit" guard avoids re-saving an
+// unchanged notebook. Both live at app lifetime (not NotebookView mount) so a
+// pending debounced save is never dropped by navigating to another route
+// mid-edit. `loadNotebook` is async and dispatched through rootFrame under
+// clearStack(), the same way the session restore above is.
+rootFrame.run(async () => {
+  await wrap(loadNotebook())
+  startAutosave()
 })

@@ -10,8 +10,11 @@ export {
   moveCellTo,
   changeCellKind,
   updateCellCode,
+  loadNotebook,
   SEED_CODE,
 } from './model/notebook'
+export { startAutosave, saveStatusAtom, lastSavedAtAtom } from './model/autosave'
+export type { SaveStatus } from './model/autosave'
 export {
   runCell,
   runAll,

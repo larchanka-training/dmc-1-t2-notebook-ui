@@ -43,8 +43,12 @@ const dirtyAtom = computed(() => {
   ).concat('\u0000', notebookTitleAtom())
 }, 'notebook.autosave.dirty')
 
-/** Persist the current notebook now, updating the status atoms. */
-async function save(): Promise<void> {
+/**
+ * Persist the current notebook now, updating the status atoms. Exposed so the
+ * "Save failed — retry" affordance can force a write without waiting for the
+ * next edit.
+ */
+export async function saveNow(): Promise<void> {
   saveStatusAtom.set('saving')
   try {
     await wrap(notebookStorage.put(notebookSnapshot()))
@@ -69,7 +73,7 @@ export function startAutosave(): () => void {
 
   const runSave = wrap(() => {
     timer = null
-    void save()
+    void saveNow()
   })
 
   const unsubscribe = dirtyAtom.subscribe(() => {
