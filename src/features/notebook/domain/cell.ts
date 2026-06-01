@@ -25,13 +25,20 @@ export interface Cell {
    * editing the code does NOT bump or clear this.
    */
   executionCount: Atom<number | null>
+  /**
+   * Last content-modification time (Unix ms). Bumped on code/kind edits,
+   * NOT on reorder (cell order is a notebook-level concern). Persisted and
+   * used as the basis for last-write-wins sync (see api/docs/auth.md §7.2).
+   */
+  updatedAt: Atom<number>
 }
 
-function uid() {
-  return Math.random().toString(36).slice(2)
-}
-
-export function reatomCell(initialCode = '', kind: CellKind = 'code', id = uid()): Cell {
+export function reatomCell(
+  initialCode = '',
+  kind: CellKind = 'code',
+  id: string = crypto.randomUUID(),
+  updatedAt: number = Date.now(),
+): Cell {
   return {
     id,
     kind,
@@ -40,5 +47,6 @@ export function reatomCell(initialCode = '', kind: CellKind = 'code', id = uid()
     status: atom<CellStatus>('idle', `notebook.cells#${id}.status`),
     viewMode: atom<CellViewMode>('edit', `notebook.cells#${id}.viewMode`),
     executionCount: atom<number | null>(null, `notebook.cells#${id}.executionCount`),
+    updatedAt: atom<number>(updatedAt, `notebook.cells#${id}.updatedAt`),
   }
 }

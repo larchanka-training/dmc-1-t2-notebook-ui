@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   addCell,
   addCellAt,
@@ -197,4 +197,69 @@ describe('notebook store', () => {
 
   // runCell-related tests live in runtime.test.ts (this file covers only
   // CRUD over cellsAtom now).
+})
+
+// Persistence/sync prep: every cell carries a content-modification timestamp
+// (basis for last-write-wins) and a real UUID id (the backend contract expects
+// `format: uuid`). These cover the domain guarantees the serializer relies on.
+describe('cell updatedAt + id (sync prep)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('reatomCell assigns a UUID id', () => {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    expect(cellsAtom()[0].id).toMatch(uuidRe)
+    expect(addCell().id).toMatch(uuidRe)
+  })
+
+  test('updateCellCode bumps updatedAt', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, 'changed')
+    expect(cell.updatedAt()).toBeGreaterThan(before)
+  })
+
+  test('updateCellCode does not bump updatedAt for a no-op edit', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, cell.code()) // same content
+    expect(cell.updatedAt()).toBe(before)
+  })
+
+  test('reorder does not bump updatedAt (order is notebook-level)', () => {
+    vi.useFakeTimers()
+    const a = cellsAtom()[0]
+    const b = addCell()
+    const aBefore = a.updatedAt()
+    const bBefore = b.updatedAt()
+    vi.advanceTimersByTime(1000)
+    moveCellTo(b.id, 0)
+    expect(a.updatedAt()).toBe(aBefore)
+    expect(b.updatedAt()).toBe(bBefore)
+  })
+
+  test('changeCellKind bumps updatedAt on the re-created cell', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    changeCellKind(cell.id, 'markdown')
+    expect(cellsAtom()[0].updatedAt()).toBeGreaterThan(before)
+  })
+
+  test('undo restores the previous updatedAt', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, 'changed')
+    expect(cell.updatedAt()).toBeGreaterThan(before)
+    undo()
+    expect(cell.updatedAt()).toBe(before)
+  })
 })

@@ -10,8 +10,8 @@ export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.c
 // by snapshotting the cell array. Undo/redo restore the snapshot directly via
 // `cellsAtom.set`, never through these actions, so they don't re-enter the
 // stack. Snapshots keep the same Cell instances, so a restored cell brings
-// back its code/output/executionCount intact. No-ops (before === after) are
-// not recorded.
+// back its code/output/executionCount/updatedAt intact. No-ops (before ===
+// after) are not recorded.
 function recordStructural(before: Cell[]): void {
   const after = cellsAtom()
   if (before === after) return
@@ -104,13 +104,24 @@ export const updateCellCode = action((id: string, code: string) => {
   if (!cell) return
   const previous = cell.code()
   if (previous === code) return
+  const previousUpdatedAt = cell.updatedAt()
+  const now = Date.now()
   cell.code.set(code)
+  cell.updatedAt.set(now)
   // Edits coalesce per cell within the history time window, so a burst of
-  // keystrokes collapses into one undo step. Restoring drives the code atom
-  // directly (not via this action), so undo/redo don't re-record.
+  // keystrokes collapses into one undo step. Restoring drives the atoms
+  // directly (not via this action), so undo/redo don't re-record. The
+  // content timestamp is snapshotted both ways so undo/redo stay
+  // deterministic (no Date.now() at restore time).
   recordOperation({
-    undo: () => cell.code.set(previous),
-    redo: () => cell.code.set(code),
+    undo: () => {
+      cell.code.set(previous)
+      cell.updatedAt.set(previousUpdatedAt)
+    },
+    redo: () => {
+      cell.code.set(code)
+      cell.updatedAt.set(now)
+    },
     coalesceKey: `edit:${id}`,
   })
 }, 'notebook.cells.updateCode')
