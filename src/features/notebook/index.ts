@@ -1,5 +1,6 @@
 export { NotebookView } from './ui/NotebookView'
 export { NotebookCell } from './ui/NotebookCell'
+export { ShortcutsHelp, shortcutsOpenAtom } from './ui/ShortcutsHelp'
 export {
   cellsAtom,
   addCell,

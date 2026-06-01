@@ -11,12 +11,13 @@ import {
   Moon,
   Sun,
   Monitor,
+  CircleHelp,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { userAtom } from '@/entities/session'
 import { themeModeAtom, type ThemeMode } from '@/entities/theme'
-import { createNotebookAction, notebookListResource } from '@/features/notebook'
+import { createNotebookAction, notebookListResource, shortcutsOpenAtom } from '@/features/notebook'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { ScrollArea } from '@/shared/ui/scroll-area'
@@ -46,6 +47,25 @@ const navComponents: NavItem[] = [
 const navAuth: NavItem[] = [{ title: 'Login', icon: LogIn, url: '/login' }]
 
 const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: '/about' }]
+
+// Help is an action (opens the shortcuts dialog), not a route, so it can't go
+// through NavGroup's <a>. It sits right under the Info group.
+const HelpButton = reatomComponent(() => {
+  return (
+    <SidebarGroup>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={wrap(() => shortcutsOpenAtom.set(true))}>
+              <CircleHelp />
+              <span>Help</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}, 'HelpButton')
 
 const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavItem[] }) => {
   const { pathname } = urlAtom()
@@ -166,6 +186,7 @@ export function AppSidebar() {
         <NavGroup label="Components" items={navComponents} />
         <NavGroup label="Auth" items={navAuth} />
         <NavGroup label="Info" items={navInfo} />
+        <HelpButton />
       </SidebarContent>
       <SidebarFooter className="border-t">
         <ThemeToggle />

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
@@ -100,12 +100,7 @@ describe('command-mode hotkeys', () => {
     await user.keyboard('{Enter}')
     expect(cellModeAtom()).toBe('edit')
   })
-
-  test('? opens the shortcuts help dialog', async () => {
-    const user = userEvent.setup()
-    renderView()
-    expect(screen.queryByText('Keyboard shortcuts')).toBeNull()
-    await user.keyboard('?')
-    expect(await screen.findByText('Keyboard shortcuts')).toBeInTheDocument()
-  })
 })
+
+// The `?` hotkey + dialog now live in ShortcutsHelp (mounted globally in
+// AppLayout, not inside NotebookView), and are covered in ShortcutsHelp.test.
