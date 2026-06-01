@@ -63,12 +63,12 @@ export const ShortcutsHelp = reatomComponent(() => {
 
   return (
     <Dialog open={open} onOpenChange={wrap((next: boolean) => shortcutsOpenAtom.set(next))}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>Speed up editing — press ? any time to reopen.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title} className="space-y-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -78,7 +78,7 @@ export const ShortcutsHelp = reatomComponent(() => {
                 {group.items.map((item) => (
                   <li key={item.keys} className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-muted-foreground">{item.desc}</span>
-                    <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">
+                    <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs whitespace-nowrap">
                       {item.keys}
                     </kbd>
                   </li>
