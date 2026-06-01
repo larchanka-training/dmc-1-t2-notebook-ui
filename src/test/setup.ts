@@ -1,4 +1,7 @@
 import '@testing-library/jest-dom/vitest'
+// Provides a real in-memory IndexedDB implementation on the jsdom global, so
+// the notebook persistence layer (idb) runs against a working store in tests.
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { context } from '@reatom/core'
