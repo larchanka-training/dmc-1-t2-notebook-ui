@@ -16,7 +16,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
-import { themeAtom } from '@/entities/theme'
+import { resolvedThemeAtom } from '@/entities/theme'
 import { Button } from '@/shared/ui/button'
 import {
   DropdownMenu,
@@ -41,17 +41,11 @@ import {
   moveCell,
   moveCellTo,
   updateCellCode,
-} from '../model/notebook'
-import {
-  activeCellIdAtom,
-  cellModeAtom,
-  enterCommand,
-  enterEdit,
-  focusCell,
-} from '../model/cellMode'
-import { lineNumbersAtom } from '../model/notebookSettings'
-import { runCell, stopCell } from '../model/runtime'
-import { prewarmWorker } from '../runtime/workerHost'
+} from '@model/notebook'
+import { activeCellIdAtom, cellModeAtom, enterCommand, enterEdit, focusCell } from '@model/cellMode'
+import { lineNumbersAtom } from '@/features/notebook'
+import { runCell, stopCell } from '@model/runtime'
+import { prewarmWorker } from '@runtime/workerHost'
 
 // Run a cell, then focus the next one in edit mode — creating a trailing code
 // cell if this was the last. Shift+Enter's "run and advance" behaviour.
@@ -78,8 +72,12 @@ interface NotebookRowProps {
 }
 
 const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }) => {
+  const isActive = activeCellIdAtom() === cell.id
+  const mode = cellModeAtom()
   return (
-    <div data-cell-id={cell.id}>
+    // Clicking the cell shell (outside the editor) puts it in command mode,
+    // so the focus indicator also responds to the mouse, not just the keyboard.
+    <div data-cell-id={cell.id} onClick={wrap(() => focusCell(cell.id))}>
       <NotebookCell
         executionCount={cell.executionCount()}
         kind={cell.kind}
@@ -87,9 +85,11 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         output={cell.output()}
         status={cell.status()}
         viewMode={cell.viewMode()}
-        theme={themeAtom()}
+        theme={resolvedThemeAtom()}
         showLineNumbers={lineNumbersAtom()}
-        autoFocus={activeCellIdAtom() === cell.id && cellModeAtom() === 'edit'}
+        autoFocus={isActive && mode === 'edit'}
+        active={isActive}
+        mode={mode}
         isFirst={isFirst}
         isLast={isLast}
         onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}

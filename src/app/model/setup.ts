@@ -2,7 +2,7 @@ import { connectLogger, log } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter } from '@/shared/api'
 import { tokenAtom } from '@/entities/session'
-import { themeAtom } from '@/entities/theme'
+import { applyResolvedTheme } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 
 if (import.meta.env.MODE === 'development') {
@@ -24,8 +24,9 @@ setAuthTokenGetter(() => tokenAtom())
 // so dispatch through rootFrame at module init.
 rootFrame.run(() => loadCurrentUserAction())
 
-// Apply persisted theme to <html> on first paint — withChangeHook only fires on changes,
-// so the initial value coming from localStorage must be applied imperatively here.
+// Apply the resolved theme to <html> on first paint — withChangeHook only
+// fires on changes, so the initial value (persisted mode resolved against the
+// OS preference) must be applied imperatively here.
 rootFrame.run(() => {
-  document.documentElement.classList.toggle('dark', themeAtom() === 'dark')
+  applyResolvedTheme()
 })

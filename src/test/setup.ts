@@ -3,6 +3,23 @@ import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { context } from '@reatom/core'
 
+// JSDOM has no matchMedia; the theme layer uses reatomMediaQuery
+// ('(prefers-color-scheme: dark)'), which calls it at import time. Stub a
+// non-matching, listener-less media query so the theme resolves to 'light'.
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList
+}
+
 // CodeMirror 6 measures layout through Range geometry APIs that JSDOM does not
 // implement. Without these stubs CM throws "getClientRects is not a function"
 // from its requestAnimationFrame measure loop, crashing any test that mounts a
