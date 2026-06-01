@@ -40,13 +40,31 @@ export const searchMatchesAtom = computed<SearchMatch[]>(() => {
     matcher.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = matcher.exec(source))) {
+      // Skip zero-length matches (e.g. regex `a*`, `^`, `$`) BEFORE recording:
+      // they have no visible span to highlight or scroll to, but would still
+      // inflate the counter and create phantom navigation stops. Bumping
+      // lastIndex also breaks the otherwise-infinite loop on an empty match.
+      if (m[0].length === 0) {
+        matcher.lastIndex++
+        continue
+      }
       matches.push({ cellId: cell.id, index: m.index, length: m[0].length })
-      // Guard against zero-length matches (e.g. regex `a*`) looping forever.
-      if (m.index === matcher.lastIndex) matcher.lastIndex++
     }
   }
   return matches
 }, 'notebook.search.matches')
+
+// The currently-navigated match, clamped to the live result set. The active
+// INDEX is not reset when a live edit shrinks the results (the cell editor and
+// the counter both read this), so selecting `matches[index]` raw can land on
+// `undefined`. Clamping here keeps the counter, the highlight and the scroll
+// target on one real match. Returns null only when there are no matches.
+export const activeMatchAtom = computed<SearchMatch | null>(() => {
+  const all = searchMatchesAtom()
+  if (all.length === 0) return null
+  const i = Math.min(activeMatchIndexAtom(), all.length - 1)
+  return all[i] ?? null
+}, 'notebook.search.activeMatch')
 
 /** 1-based position of the active match, or 0 when there are none. */
 export const matchCountLabelAtom = computed(() => {

@@ -316,6 +316,23 @@ export function NotebookCell({
                 onViewModeChange?.('preview')
                 return
               }
+              // Enter combos mirror the code editor's run keymap, but a
+              // markdown cell is RENDERED, not executed: we switch it to
+              // preview instead of calling the kernel (runAndAdvance /
+              // runAndInsertBelow skip the run for markdown). Blur first so
+              // the destination cell — or the document-level command-mode
+              // shortcuts — own the focus, not this textarea. A plain Enter
+              // (no modifier) falls through and inserts a newline as usual.
+              if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                e.currentTarget.blur()
+                onViewModeChange?.('preview')
+                if (e.shiftKey) onRunAndAdvance?.()
+                else if (e.altKey) onRunAndInsertBelow?.()
+                // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
+                else onExitToCommand?.()
+                return
+              }
               // Esc leaves edit mode for command mode. Blur FIRST (like the
               // CodeEditor keymap): otherwise focus stays in the textarea and
               // the document-level command-mode shortcuts get typed as text.

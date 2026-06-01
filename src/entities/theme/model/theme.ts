@@ -1,4 +1,4 @@
-import { atom, computed, reatomMediaQuery, withChangeHook, withLocalStorage } from '@reatom/core'
+import { atom, computed, reatomMediaQuery, withLocalStorage } from '@reatom/core'
 
 // The user picks a MODE; the resolved THEME is what actually gets applied.
 // Default mode is `system`, which follows the OS preference and reacts to it
@@ -22,16 +22,28 @@ export const themeModeAtom = atom<ThemeMode>('system', 'theme.mode').extend(
 
 /**
  * The theme actually in effect after resolving `system` against the OS.
- * `withChangeHook` keeps <html> in sync on every change (mode switch or OS
- * flip). The initial paint is applied imperatively in app/model/setup.ts,
- * since the hook only fires on changes.
+ * Pure derivation only — the DOM side effect lives in `startThemeSync`, which
+ * subscribes to this atom so it stays connected (and therefore recomputes)
+ * regardless of which page is mounted.
  */
 export const resolvedThemeAtom = computed<Theme>(() => {
   const mode = themeModeAtom()
   if (mode === 'system') return systemDarkAtom() ? 'dark' : 'light'
   return mode
-}, 'theme.resolved').extend(withChangeHook(applyTheme))
+}, 'theme.resolved')
 
-export function applyResolvedTheme(): void {
-  applyTheme(resolvedThemeAtom())
+/**
+ * Keep <html> in sync with the resolved theme for the lifetime of the app.
+ *
+ * Why a subscription rather than `withChangeHook`: `resolvedThemeAtom` is a
+ * lazy `computed`. A change hook only fires when the atom RECOMPUTES, and a
+ * computed only recomputes while it has a live subscriber. Previously the only
+ * subscriber was NotebookView, so on routes without it (e.g. /about) toggling
+ * the theme updated `themeModeAtom` but never re-ran the hook — the document
+ * stayed on the old theme. An always-on subscription started at app init makes
+ * the atom hot everywhere, and the callback fires synchronously on subscribe
+ * (so it also covers the initial paint). Returns the unsubscribe handle.
+ */
+export function startThemeSync(): () => void {
+  return resolvedThemeAtom.subscribe(applyTheme)
 }

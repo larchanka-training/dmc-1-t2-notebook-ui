@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { addCell, cellsAtom, updateCellCode } from './notebook'
 import {
+  activeMatchAtom,
   activeMatchIndexAtom,
   closeSearch,
   matchCountLabelAtom,
@@ -67,6 +68,43 @@ describe('notebook search', () => {
     useRegexAtom.set(true)
     setSearchQuery('(') // unbalanced
     expect(searchMatchesAtom()).toEqual([])
+  })
+
+  test('zero-length regex matches are skipped (no phantom counted hits)', () => {
+    const [seed] = cellsAtom()
+    updateCellCode(seed.id, 'aaa')
+    useRegexAtom.set(true)
+    // `a*` matches greedily then yields zero-length matches at each boundary;
+    // only the one non-empty hit must be recorded, not the empty ones.
+    setSearchQuery('a*')
+    const matches = searchMatchesAtom()
+    expect(matches.every((m) => m.length > 0)).toBe(true)
+    expect(matches).toHaveLength(1)
+  })
+
+  test('activeMatch stays clamped when a live edit shrinks the results', () => {
+    const [seed] = cellsAtom()
+    updateCellCode(seed.id, 'foo foo foo')
+    setSearchQuery('foo')
+    nextMatch()
+    nextMatch() // active index = 2 (the 3rd match)
+    expect(matchCountLabelAtom()).toBe('3/3')
+    // Edit the cell down to a single match WITHOUT resetting the active index
+    // (setSearchQuery resets it, plain updateCellCode does not — the live-edit
+    // case). The clamped active match must still resolve to the surviving one.
+    updateCellCode(seed.id, 'foo')
+    expect(searchMatchesAtom()).toHaveLength(1)
+    const active = activeMatchAtom()
+    expect(active).not.toBeNull()
+    expect(active).toBe(searchMatchesAtom()[0])
+    expect(matchCountLabelAtom()).toBe('1/1')
+  })
+
+  test('activeMatch is null when there are no matches', () => {
+    const [seed] = cellsAtom()
+    updateCellCode(seed.id, 'abc')
+    setSearchQuery('zzz')
+    expect(activeMatchAtom()).toBeNull()
   })
 
   test('closeSearch resets query and active index', () => {

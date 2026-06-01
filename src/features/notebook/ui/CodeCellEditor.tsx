@@ -1,6 +1,6 @@
 import { reatomComponent } from '@reatom/react'
 import { CodeEditor, type CodeEditorProps, type SearchHighlight } from './CodeEditor'
-import { activeMatchIndexAtom, searchMatchesAtom, searchOpenAtom } from '../model/search'
+import { activeMatchAtom, searchMatchesAtom, searchOpenAtom } from '../model/search'
 
 // Thin reactive wrapper that owns the notebook-search subscription for a single
 // code cell and feeds the matches into the (presentational) CodeEditor.
@@ -19,7 +19,10 @@ export const CodeCellEditor = reatomComponent<CodeCellEditorProps>(({ cellId, ..
   const matches: SearchHighlight[] = []
   if (searchOpenAtom()) {
     const all = searchMatchesAtom()
-    const activeMatch = all[activeMatchIndexAtom()]
+    // Clamped active match (shared with the search bar): never undefined while
+    // matches exist, so the active highlight stays in sync with the counter
+    // even after a live edit shrinks the result set.
+    const activeMatch = activeMatchAtom()
     for (const m of all) {
       if (m.cellId !== cellId) continue
       matches.push({ from: m.index, to: m.index + m.length, active: m === activeMatch })

@@ -54,18 +54,21 @@ import { prewarmWorker } from '../runtime/workerHost'
 
 // Run a cell, then focus the next one in edit mode — creating a trailing code
 // cell if this was the last. Shift+Enter's "run and advance" behaviour.
+// Markdown cells are never executed: the cell switches itself to preview, and
+// here we only advance. So "run" applies to code cells only; markdown just
+// renders + moves on.
 function runAndAdvance(cellId: string) {
-  runCell(cellId)
   const cells = cellsAtom()
+  if (cells.find((c) => c.id === cellId)?.kind === 'code') runCell(cellId)
   const idx = cells.findIndex((c) => c.id === cellId)
   const next = cells[idx + 1] ?? addCell(cellId, 'code')
   enterEdit(next.id)
 }
 
 // Run a cell, then always insert a fresh code cell below and edit it.
-// Alt+Enter's behaviour.
+// Alt+Enter's behaviour. Markdown is rendered (by the cell), not executed.
 function runAndInsertBelow(cellId: string) {
-  runCell(cellId)
+  if (cellsAtom().find((c) => c.id === cellId)?.kind === 'code') runCell(cellId)
   const inserted = addCell(cellId, 'code')
   enterEdit(inserted.id)
 }

@@ -47,6 +47,7 @@ export {
   searchMatchesAtom,
   matchCountLabelAtom,
   activeMatchIndexAtom,
+  activeMatchAtom,
   openSearch,
   closeSearch,
   setSearchQuery,

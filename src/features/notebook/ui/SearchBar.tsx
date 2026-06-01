@@ -7,12 +7,11 @@ import { Input } from '@/shared/ui/input'
 import { cn } from '@/shared/lib/cn'
 import { useHotkeys } from '@/shared/lib/hotkeys'
 import {
-  activeMatchIndexAtom,
+  activeMatchAtom,
   closeSearch,
   matchCountLabelAtom,
   nextMatch,
   prevMatch,
-  searchMatchesAtom,
   searchOpenAtom,
   searchQueryAtom,
   setSearchQuery,
@@ -42,9 +41,9 @@ export const SearchBar = reatomComponent(() => {
 
   // Resolve the active match's cell id HERE, in the reactive component body
   // where the Reatom stack is active. The effect below only touches the DOM.
-  const matches = searchMatchesAtom()
-  const activeIndex = activeMatchIndexAtom()
-  const activeCellId = open ? matches[activeIndex]?.cellId : undefined
+  // `activeMatchAtom` is clamped to the live results, so a live edit that
+  // shrinks the match set can't leave us pointing at a stale/undefined match.
+  const activeCellId = open ? activeMatchAtom()?.cellId : undefined
   useEffect(() => {
     if (activeCellId) scrollCellIntoView(activeCellId)
   }, [activeCellId])
