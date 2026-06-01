@@ -50,6 +50,18 @@ let currentCellId: string | null = null
  */
 let kernelGeneration = 0
 
+/**
+ * True while a cell is part of the current run — either executing right now
+ * (`currentCellId`) or still waiting in the Run All queue. Callers use this to
+ * refuse structural edits (change-kind) on a cell that the kernel is about to
+ * run: changing kind mid-queue would otherwise let a now-markdown cell reach
+ * `executeCell` as if it were code. The UI layer reads it (no `notebook.ts ->
+ * runtime.ts` import, so the model stays acyclic).
+ */
+export function isCellQueuedOrRunning(id: string): boolean {
+  return currentCellId === id || queueAtom().includes(id)
+}
+
 // ─── Run a single cell ───────────────────────────────────────────────────────
 
 export const runCell = action(async (id: string) => {
@@ -187,6 +199,14 @@ function mapStatus(
 
 export const runAll = action(async () => {
   if (runtimeStatusAtom() === 'busy') return
+  // "Run All" evaluates the whole notebook end to end. For a code cell that is
+  // execution; for a text cell it is rendering — so flip every markdown cell to
+  // its preview (a non-empty one renders, an empty one stays a blank box, which
+  // NotebookCell already handles). Done here, not in processQueue, because the
+  // queue only holds code ids.
+  for (const cell of cellsAtom()) {
+    if (cell.kind === 'markdown') cell.viewMode.set('preview')
+  }
   // Fresh queue invalidates any previous skipped trail.
   skippedCellsAtom.set([])
   const ids = cellsAtom()
@@ -235,6 +255,10 @@ async function processQueue(ids: string[]): Promise<void> {
     queueAtom.set(tail)
     const cell = cellsAtom().find((c) => c.id === head)
     if (!cell) continue
+    // The queue holds ids, captured when Run All started; a cell's kind can
+    // change before its turn (e.g. `M` converts it to markdown). Re-check here
+    // so a now-markdown cell is never executed as JS — markdown has no run.
+    if (cell.kind !== 'code') continue
     const status = await wrap(executeCell(cell))
 
     if (stopAllRequested) {

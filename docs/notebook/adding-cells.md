@@ -6,46 +6,51 @@ Cells are stored in a Reatom atom (`cellsAtom`) in `src/features/notebook/model/
 
 ## Adding a cell
 
-**From the toolbar** — click **+ Add Cell** in the top bar. The new cell is added at the bottom.
+**Between cells** — hover the gap between two cells to reveal a **+ Add cell** button; it opens a small menu to pick **Code** or **Text** (markdown). The new cell is inserted at that position.
 
-**From the bottom of the list** — click the ghost **+ Add cell** button below the last cell.
+**At the bottom of the list** — click the persistent **+ Add cell** button below the last cell; the same Code / Text menu inserts a new cell at the end.
 
-Programmatically, cells are added via the `addCell(afterId?)` Reatom action:
+**In command mode** — press `A` / `B` to insert a code cell above / below the focused cell (see [keyboard shortcuts](#keyboard-shortcuts)).
+
+Programmatically, cells are added via the `addCell(afterId?, kind?)` Reatom action (or `addCellAt(index, kind?)` for an absolute position):
 
 ```ts
 import { addCell } from '@/features/notebook'
 
-addCell() // adds at the end
-addCell(cell.id) // inserts immediately after the cell with this id
+addCell() // adds a code cell at the end
+addCell(cell.id) // inserts a code cell immediately after the cell with this id
+addCell(cell.id, 'markdown') // inserts a markdown (text) cell after it
 ```
 
-Both buttons call `addCell()` wrapped in `wrap(...)` so they preserve Reatom's async context (see [reatom.md](../architecture/reatom.md)).
+The inserter menus call `addCell(afterId, kind)` wrapped in `wrap(...)` so they preserve Reatom's async context (see [reatom.md](../architecture/reatom.md)). Command-mode `A` / `B` use `addCellAt` / `addCell` the same way.
 
 ---
 
 ## Running a cell
 
-| Method   | Action                                               |
-| -------- | ---------------------------------------------------- |
-| Keyboard | `Cmd+Enter` (Mac) or `Ctrl+Enter` (Windows/Linux)    |
-| Mouse    | Click the green **▶** play button in the cell header |
+| Method   | Action                                                      |
+| -------- | ----------------------------------------------------------- |
+| Keyboard | `Cmd/Ctrl+Enter` — run, stay on the cell                    |
+| Keyboard | `Shift+Enter` — run, then move to (or create) the next cell |
+| Keyboard | `Alt+Enter` — run, then insert a fresh code cell below      |
+| Mouse    | Click the green **▶** play button in the cell header        |
 
-Both call the `runCell(id)` action, which runs the code in the sandboxed Web Worker + QuickJS kernel via `runInWorker`. See [How It Works](./how-it-works.md) for the full execution flow.
+All call the `runCell(id)` action, which runs the code in the sandboxed Web Worker + QuickJS kernel via `runInWorker`. The `Shift/Alt+Enter` variants additionally drive cell focus/creation. See [How It Works](./how-it-works.md) for the full execution flow and the [keyboard shortcuts](#keyboard-shortcuts) section for the complete list.
 
 ---
 
 ## Moving cells
 
-The **↑ ↓** buttons in each cell header swap the cell with its neighbour via the `moveCell(id, dir)` action.
+Three ways to reorder:
 
-- The **↑** button is disabled on the first cell
-- The **↓** button is disabled on the last cell
+- **↑ ↓** buttons in the cell menu swap with the neighbour via `moveCell(id, dir)`. **↑** is disabled on the first cell, **↓** on the last.
+- **Drag-and-drop** — grab the `⋮⋮` handle on the left gutter and drop the cell at an absolute position via `moveCellTo(id, index)`. Drop zones highlight between cells; `Esc` mid-drag cancels; the page auto-scrolls near the viewport edge. Keyboard drag is supported for accessibility (focus the handle, `Space` to lift, arrows to move, `Space` to drop).
 
 ---
 
 ## Deleting a cell
 
-Click the **🗑** (trash) icon to call `deleteCell(id)`. The minimum cell count is **1** — deleting the last remaining cell is a no-op.
+Click the **🗑** (trash) icon, or press `D D` (two quick presses) in command mode — both call `deleteCell(id)`. The minimum cell count is **1** — deleting the last remaining cell is a no-op. A delete is undoable with `Cmd/Ctrl+Z` (see [Undo / redo](#undo--redo)).
 
 ---
 
@@ -108,10 +113,19 @@ import { updateCellCode, runCell, stopCell, deleteCell, moveCell } from '@/featu
   code={cell.code()}
   output={cell.output()}
   status={cell.status()}
+  viewMode={cell.viewMode()}
+  theme={resolvedThemeAtom()}
+  showLineNumbers={lineNumbersAtom()}
+  active={isActive}
+  mode={mode}
+  autoFocus={isActive && mode === 'edit'}
   isFirst={idx === 0}
   isLast={idx === cells.length - 1}
   onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}
   onRun={wrap(() => runCell(cell.id))}
+  onRunAndAdvance={wrap(() => runAndAdvance(cell.id))}
+  onRunAndInsertBelow={wrap(() => runAndInsertBelow(cell.id))}
+  onExitToCommand={wrap(() => enterCommand())}
   onStop={wrap(() => stopCell(cell.id))}
   onDelete={wrap(() => deleteCell(cell.id))}
   onMoveUp={wrap(() => moveCell(cell.id, -1))}
@@ -119,7 +133,64 @@ import { updateCellCode, runCell, stopCell, deleteCell, moveCell } from '@/featu
 />
 ```
 
+Code cells render a **CodeMirror 6** editor (`CodeEditor`); markdown cells render
+a textarea with a preview toggle. Both honour the modal `mode` (`command` /
+`edit`) and the `active` focus indicator.
+
 See [Custom Components — NotebookCell](../components/custom.md#notebookcell) for the full props reference.
+
+---
+
+## Keyboard shortcuts
+
+The notebook is modal (Jupyter-style): a focused cell is either in **edit** mode
+(caret in the editor, green left bar) or **command** mode (cell shell focused,
+blue left bar). Press `?` any time to open the in-app cheat-sheet.
+
+**Edit mode (in the editor)**
+
+| Keys             | Action                            |
+| ---------------- | --------------------------------- |
+| `Shift+Enter`    | Run, go to / create the next cell |
+| `Cmd/Ctrl+Enter` | Run, stay                         |
+| `Alt+Enter`      | Run, insert a code cell below     |
+| `Cmd/Ctrl+E`     | Markdown: toggle edit / preview   |
+| `Esc`            | Leave the editor for command mode |
+
+**Command mode (cell focused)**
+
+| Keys      | Action                         |
+| --------- | ------------------------------ |
+| `A` / `B` | Insert a cell above / below    |
+| `D D`     | Delete the cell (undoable)     |
+| `M` / `Y` | Change kind to markdown / code |
+| `↑` / `↓` | Move focus between cells       |
+| `Enter`   | Enter edit mode                |
+
+**Global**
+
+| Keys                              | Action                          |
+| --------------------------------- | ------------------------------- |
+| `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo notebook operations |
+| `Cmd/Ctrl+F`                      | Search the notebook             |
+| `?`                               | Show this shortcut list         |
+
+Shortcut handling lives in `shared/lib/hotkeys.ts` (a document-level scope
+stack); the editor's own `Enter`/`Esc`/run keys are bound inside CodeMirror at
+`Prec.highest`.
+
+---
+
+## Undo / redo
+
+Notebook operations — add, delete, move, change-kind, and source edits — are
+recorded in an in-memory history stack (`model/history.ts`, last 50 entries).
+`Cmd/Ctrl+Z` undoes, `Cmd/Ctrl+Shift+Z` redoes; source edits coalesce per cell
+within a 1s window so a burst of typing is one undo step. Running a cell
+(`output` / `executionCount`) is **not** recorded. The stack is in-memory and
+clears on reload (no persistence yet). CodeMirror does **not** keep its own undo
+history — the notebook stack is the single owner of `Cmd/Ctrl+Z`, so one press
+is always one notebook-level step even while typing in a code cell.
 
 ---
 

@@ -2,7 +2,7 @@ import { connectLogger, log } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter } from '@/shared/api'
 import { tokenAtom } from '@/entities/session'
-import { themeAtom } from '@/entities/theme'
+import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 
 if (import.meta.env.MODE === 'development') {
@@ -24,8 +24,10 @@ setAuthTokenGetter(() => tokenAtom())
 // so dispatch through rootFrame at module init.
 rootFrame.run(() => loadCurrentUserAction())
 
-// Apply persisted theme to <html> on first paint — withChangeHook only fires on changes,
-// so the initial value coming from localStorage must be applied imperatively here.
+// Keep <html> in sync with the resolved theme for the whole app lifetime.
+// The subscription makes `resolvedThemeAtom` hot (so it recomputes on every
+// mode switch or OS flip on ANY route, not only where NotebookView is
+// mounted), and fires synchronously on subscribe to cover the first paint.
 rootFrame.run(() => {
-  document.documentElement.classList.toggle('dark', themeAtom() === 'dark')
+  startThemeSync()
 })

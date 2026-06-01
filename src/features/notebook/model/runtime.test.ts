@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { addCell, cellsAtom, deleteCell, updateCellCode } from './notebook'
+import { addCell, cellsAtom, changeCellKind, deleteCell, updateCellCode } from './notebook'
 import {
   queueAtom,
   restartKernel,
@@ -132,6 +132,46 @@ describe('runAll', () => {
     expect(c.status()).toBe('skipped')
     expect(c.executionCount()).toBe(null) // never ran
   })
+
+  test('renders markdown cells (switches them to preview)', async () => {
+    const [a] = cellsAtom()
+    const md = addCell(a.id, 'markdown')
+    md.code.set('# Heading')
+    md.viewMode.set('edit')
+    updateCellCode(a.id, 'console.log("a")')
+
+    await runAll()
+
+    // Code ran; the text cell was rendered (Run All evaluates the whole book).
+    expect(a.status()).toBe('done')
+    expect(md.viewMode()).toBe('preview')
+  }, 10_000)
+
+  test('a cell converted to markdown mid-queue is skipped, not run as JS', async () => {
+    const [a] = cellsAtom()
+    const b = addCell()
+    const c = addCell()
+    updateCellCode(a.id, 'console.log("a")')
+    // If b is ever executed as JS this throws; as markdown it must be skipped.
+    updateCellCode(b.id, 'throw new Error("b must not run as code")')
+    updateCellCode(c.id, 'console.log("c")')
+
+    // Start the run but don't await: the sync part of executeCell(a) has run
+    // (a is 'running'), b is still queued. Convert b straight through the model
+    // — the UI blocks this, and the model guard only covers the *running* cell,
+    // so the conversion goes through and exercises processQueue's kind re-check.
+    const promise = runAll()
+    changeCellKind(b.id, 'markdown')
+    await promise
+
+    const bAfter = cellsAtom().find((x) => x.id === b.id)!
+    expect(bAfter.kind).toBe('markdown')
+    // Skipped, not executed: no error status, no execution count, a and c ran.
+    expect(bAfter.executionCount()).toBe(null)
+    expect(bAfter.status()).not.toBe('error')
+    expect(a.status()).toBe('done')
+    expect(c.status()).toBe('done')
+  }, 10_000)
 })
 
 describe('notebookSettings.timeoutMs', () => {

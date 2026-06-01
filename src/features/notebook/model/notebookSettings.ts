@@ -18,3 +18,9 @@ export { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS }
  * (clamped to `[MIN, MAX]` at read time); set by the (future) Settings UI.
  */
 export const timeoutMsAtom = atom<number>(DEFAULT_TIMEOUT_MS, 'notebook.settings.timeoutMs')
+
+/**
+ * Whether code cells show line numbers in the CodeMirror gutter. Off by
+ * default to keep short scratch cells compact; toggled from the toolbar.
+ */
+export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbers')

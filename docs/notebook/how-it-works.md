@@ -252,8 +252,9 @@ idle ──(runCell)──▶ running ──(success)─▶ done
                       └──(stopCell)─────▶ interrupted
 ```
 
-`runAll` puts every code cell in the queue. The first non-`done` status
-short-circuits the rest as `skipped`.
+`runAll` evaluates the whole notebook: it switches every markdown cell to
+preview (rendering is a text cell's "run") and puts every code cell in the
+queue. The first non-`done` status short-circuits the rest as `skipped`.
 
 | Status        | Border / Lead-bar          | Run button | Output      |
 | ------------- | -------------------------- | ---------- | ----------- |

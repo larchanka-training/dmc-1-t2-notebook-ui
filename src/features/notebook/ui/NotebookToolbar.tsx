@@ -1,8 +1,9 @@
-import { PlayCircle, RotateCcw, SkipForward, StopCircle } from 'lucide-react'
+import { Hash, PlayCircle, RotateCcw, SkipForward, StopCircle } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { cn } from '@/shared/lib/cn'
 import {
   restartKernel,
   resumeQueue,
@@ -11,6 +12,7 @@ import {
   skippedCellsAtom,
   stopAll,
 } from '../model/runtime'
+import { lineNumbersAtom } from '../model/notebookSettings'
 
 /**
  * Notebook-wide control bar: Run All, Stop All, Restart Kernel.
@@ -19,9 +21,27 @@ import {
 export const NotebookToolbar = reatomComponent(() => {
   const isBusy = runtimeStatusAtom() === 'busy'
   const canResume = !isBusy && skippedCellsAtom().length > 0
+  const lineNumbers = lineNumbersAtom()
 
   return (
     <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Toggle line numbers"
+              aria-pressed={lineNumbers}
+              className={cn('size-8', lineNumbers && 'bg-accent text-accent-foreground')}
+              onClick={wrap(() => lineNumbersAtom.set((v) => !v))}
+            >
+              <Hash className="size-4" />
+            </Button>
+          }
+        />
+        <TooltipContent>Toggle line numbers</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -37,7 +57,7 @@ export const NotebookToolbar = reatomComponent(() => {
             </Button>
           }
         />
-        <TooltipContent>Run every code cell in order</TooltipContent>
+        <TooltipContent>Run every code cell in order; render all text cells</TooltipContent>
       </Tooltip>
 
       {canResume && (
