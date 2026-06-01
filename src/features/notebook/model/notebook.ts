@@ -36,6 +36,25 @@ export const addCell = action((afterId?: string, kind: CellKind = 'code') => {
   return cell
 }, 'notebook.cells.add')
 
+// Insert a new cell at an absolute index in one shot. Unlike `addCell` (which
+// appends or inserts *after* an id), this targets a position directly — needed
+// for "insert above" (index 0 included) without a follow-up move. Doing it as a
+// single mutation records ONE history entry, so one undo removes the inserted
+// cell (a compound add+move would otherwise need two). `index` is clamped to
+// `[0, length]`.
+export const addCellAt = action((index: number, kind: CellKind = 'code') => {
+  const before = cellsAtom()
+  const cell = reatomCell('', kind)
+  cellsAtom.set((cells) => {
+    const at = Math.max(0, Math.min(index, cells.length))
+    const next = [...cells]
+    next.splice(at, 0, cell)
+    return next
+  })
+  recordStructural(before)
+  return cell
+}, 'notebook.cells.addAt')
+
 export const deleteCell = action((id: string) => {
   const before = cellsAtom()
   cellsAtom.set((cells) => (cells.length === 1 ? cells : cells.filter((c) => c.id !== id)))

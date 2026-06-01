@@ -160,6 +160,22 @@ Deferred to a later phase (not part of the first layout milestone):
 - **Renderer** — `react-markdown` with a `components` prop mapping `h1`-`h4`, `p`, `ul`/`ol`/`li`, `a`, `code` (inline vs `language-*` block), `blockquote`, `hr` to Tailwind-styled tags. CommonMark only — no GFM tables / strikethrough / task lists yet.
 - **Outline is unaffected** — heading extraction reads `cell.code()` (raw text), so toggling preview has no impact on the right-pane outline.
 
+## Round 4 additions — Epic 03 cell-editing UX (TARDIS-71)
+
+This round supersedes several Round 2/3 notes above (kept as history): code
+cells are no longer a `<textarea>`, markdown is no longer CommonMark-only, and
+`Cmd+Enter` is no longer the only run key.
+
+- **Code editor is CodeMirror 6** — `CodeEditor` replaces the code `<textarea>`: JS/TS highlight, basic autocomplete, bracket matching, indent-on-enter, optional line numbers (toolbar `Hash` toggle → `lineNumbersAtom`). The view is created once and driven through refs/compartments so it survives StrictMode and re-renders. Markdown cells keep the sans-serif textarea + preview.
+- **Editor theme follows the app** — `codemirror/theme.ts` maps `resolvedThemeAtom` to a CM extension (one-dark palette in dark, default highlight in light) via a `Compartment`, using design tokens (no hard-coded colours).
+- **Markdown++** — `MarkdownView` now runs `remark-gfm` (tables, strikethrough, task lists), `remark-math` + `rehype-katex` (LaTeX, KaTeX CSS lazy-loaded on first `$`), and `rehype-highlight` (fenced-code syntax highlight). `rehype-raw` stays **off** by design — raw HTML is escaped to text, locked by an XSS test.
+- **Modal editing (Jupyter-style)** — a focused cell is in **command** mode (blue left bar) or **edit** mode (green left bar), tracked by `cellMode.ts` (`activeCellIdAtom` + `cellModeAtom`). The bar colour is driven by `active` + `mode` props on `NotebookCell`. Clicking the cell shell enters command mode; clicking inside the editor stays in edit (the row click handler ignores clicks on an editable target).
+- **Hotkeys** — `shared/lib/hotkeys.ts` provides a document-level scope stack (`useHotkeys`). Edit mode: `Shift+Enter` (run + next), `Cmd/Ctrl+Enter` (run + stay), `Alt+Enter` (run + insert below), `Esc` (→ command, blurs the editor). Command mode (`commandHotkeys.ts`): `A`/`B` insert, `D D` delete, `M`/`Y` change kind, `↑`/`↓` move focus, `Enter` edit. Global: `Cmd/Ctrl+Z` / `Shift+Z`, `Cmd/Ctrl+F`, `?` (cheat-sheet dialog, `ShortcutsHelp`, mounted once in `AppLayout`).
+- **Drag-and-drop reorder** — `@dnd-kit` `DndContext`/`SortableContext` in `NotebookView`; `CellDragHandle` renders the `⋮⋮` grip on the left gutter. Drop zones show a pill indicator, `Esc` cancels, the page auto-scrolls near the edge, and a keyboard sensor makes it accessible. `onDragEnd` → `moveCellTo`.
+- **Undo/redo** — in-memory stack in `model/history.ts` (last 50 ops: add/delete/move/change-kind/edit-source, source edits coalesced per cell within 1s). Output/`executionCount` are excluded. CodeMirror keeps **no** own history — the notebook stack is the single owner of `Cmd/Ctrl+Z`, so one press is one notebook-level step even while typing.
+- **Notebook search** — `model/search.ts` + `SearchBar` in the header (`Cmd/Ctrl+F`): case-insensitive or regex search over every cell `source`, an `n/m` counter, `Enter`/`Shift+Enter` navigation, scroll-to-match. Matches inside code cells are highlighted via a CodeMirror decoration field; the subscription is isolated in `CodeCellEditor` so typing in the search box doesn't re-render whole cells.
+- **Theme toggle is now 3-way** — `themeModeAtom` (`light`/`dark`/`system`, default `system`, persisted) resolves to `resolvedThemeAtom`; the sidebar footer renders a `radiogroup` of Light/System/Dark instead of the old `Switch`.
+
 ## Open layout decisions
 
 - **Markdown cell support timing.** Outline pane and "+ Add cell text" require it. Current `NotebookCell` is code-only. Either add markdown cells together with phase 4, or postpone phase 6.

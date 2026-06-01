@@ -26,7 +26,7 @@ import { modKeyLabel } from '@/shared/lib/platform'
 import type { Theme } from '@/entities/theme'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
 import type { OutputItem } from '../runtime/types'
-import { CodeEditor } from './CodeEditor'
+import { CodeCellEditor } from './CodeCellEditor'
 import { MarkdownView } from './MarkdownView'
 import { OutputView } from './OutputView'
 
@@ -50,6 +50,8 @@ export interface NotebookCellProps {
   isFirst?: boolean
   isLast?: boolean
   readOnly?: boolean
+  /** Cell id, used by the code editor to pull its notebook-search matches. */
+  cellId?: string
   onCodeChange?: (code: string) => void
   onViewModeChange?: (mode: CellViewMode) => void
   onFocus?: () => void
@@ -81,6 +83,7 @@ export function NotebookCell({
   isFirst = false,
   isLast = false,
   readOnly = false,
+  cellId,
   onCodeChange,
   onViewModeChange,
   onFocus,
@@ -117,6 +120,22 @@ export function NotebookCell({
     const el = textareaRef.current
     if (el) autoResize(el)
   }, [code, showPreview])
+
+  // Markdown cells mirror CodeEditor's modal focus: when the cell becomes
+  // active in edit mode (Enter in command mode, Shift+Enter advancing in),
+  // pull focus into the textarea. If it is showing the preview, drop to edit
+  // first so there is an input to focus. onViewModeChange is a freshly-wrapped
+  // fn each render, so it is intentionally left out of the deps.
+  useEffect(() => {
+    if (!autoFocus || !isMarkdown) return
+    if (showPreview) {
+      onViewModeChange?.('edit')
+      return
+    }
+    const el = textareaRef.current
+    if (el && document.activeElement !== el) el.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus, isMarkdown, showPreview])
 
   const enterEditMode = () => {
     onViewModeChange?.('edit')
@@ -265,7 +284,8 @@ export function NotebookCell({
             <MarkdownView source={code} />
           </button>
         ) : isCode ? (
-          <CodeEditor
+          <CodeCellEditor
+            cellId={cellId ?? ''}
             value={code}
             theme={theme}
             showLineNumbers={showLineNumbers}
@@ -294,6 +314,15 @@ export function NotebookCell({
               if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
                 e.preventDefault()
                 onViewModeChange?.('preview')
+                return
+              }
+              // Esc leaves edit mode for command mode. Blur FIRST (like the
+              // CodeEditor keymap): otherwise focus stays in the textarea and
+              // the document-level command-mode shortcuts get typed as text.
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.currentTarget.blur()
+                onExitToCommand?.()
               }
             }}
             onInput={(e) => autoResize(e.currentTarget)}

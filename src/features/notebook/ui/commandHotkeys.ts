@@ -1,6 +1,6 @@
 import { wrap } from '@reatom/core'
 import { useHotkeys } from '@/shared/lib/hotkeys'
-import { addCell, cellsAtom, changeCellKind, deleteCell, moveCellTo } from '../model/notebook'
+import { addCell, addCellAt, cellsAtom, changeCellKind, deleteCell } from '../model/notebook'
 import { activeCellIdAtom, cellModeAtom, enterEdit, focusCell } from '../model/cellMode'
 
 // Time window for the Jupyter "D D" delete gesture: two quick D presses.
@@ -55,10 +55,9 @@ export function useCommandModeHotkeys(): void {
         if (!id) return
         const idx = cellsAtom().findIndex((c) => c.id === id)
         if (idx === -1) return
-        // Insert, then slot it into the active cell's position so it lands
-        // directly above — `addCell` alone can't target "before the first".
-        const inserted = addCell(id, 'code')
-        moveCellTo(inserted.id, idx)
+        // Insert directly at the active cell's index so it lands above it.
+        // One model action = one undo step (a compound add+move would be two).
+        const inserted = addCellAt(idx, 'code')
         focusCell(inserted.id)
       }),
       b: wrap(() => {

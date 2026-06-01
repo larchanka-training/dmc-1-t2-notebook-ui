@@ -87,4 +87,56 @@ describe('CodeEditor', () => {
     // by the contenteditable as text.
     expect(view.hasFocus).toBe(false)
   })
+
+  test('renders search-match decorations and marks the active one', async () => {
+    const { container } = render(
+      <CodeEditor
+        value="foo bar foo"
+        theme="light"
+        onChange={() => {}}
+        searchMatches={[
+          { from: 0, to: 3, active: false },
+          { from: 8, to: 11, active: true },
+        ]}
+      />,
+    )
+    await waitFor(() =>
+      expect(container.querySelectorAll('.cm-searchMatch').length).toBeGreaterThanOrEqual(2),
+    )
+    expect(container.querySelector('.cm-searchMatch-active')).not.toBeNull()
+  })
+
+  test('clears search-match decorations when matches go away', async () => {
+    const { container, rerender } = render(
+      <CodeEditor
+        value="foo bar"
+        theme="light"
+        onChange={() => {}}
+        searchMatches={[{ from: 0, to: 3, active: true }]}
+      />,
+    )
+    await waitFor(() => expect(container.querySelector('.cm-searchMatch')).not.toBeNull())
+    rerender(<CodeEditor value="foo bar" theme="light" onChange={() => {}} searchMatches={[]} />)
+    await waitFor(() => expect(container.querySelector('.cm-searchMatch')).toBeNull())
+  })
+
+  test('Mod-Z is NOT handled by CodeMirror (notebook history owns undo)', async () => {
+    // Regression guard: CM must not keep its own history(), otherwise Mod-Z
+    // while the editor is focused undoes at both the CM and notebook layers,
+    // and the CM undo re-enters onChange and wipes the notebook redo branch.
+    const onChange = vi.fn()
+    const { container } = render(<CodeEditor value="a" theme="light" onChange={onChange} />)
+    const host = container.querySelector('.cm-content') as HTMLElement
+    await waitFor(() => expect(host.textContent).toContain('a'))
+    const view = EditorView.findFromDOM(host)!
+    view.dispatch({ changes: { from: 1, insert: 'b' } })
+    expect(view.state.doc.toString()).toBe('ab')
+    // Mod-Z reaches CM first; with no CM history it is a no-op there and the
+    // doc is unchanged, leaving the key to bubble to the document-level
+    // notebook undo handler.
+    host.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }),
+    )
+    expect(view.state.doc.toString()).toBe('ab')
+  })
 })

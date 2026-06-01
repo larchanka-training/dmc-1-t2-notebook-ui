@@ -4,6 +4,7 @@ export { ShortcutsHelp, shortcutsOpenAtom } from './ui/ShortcutsHelp'
 export {
   cellsAtom,
   addCell,
+  addCellAt,
   deleteCell,
   moveCell,
   moveCellTo,

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
 import { cellsAtom } from '../model/notebook'
+import { undo } from '../model/history'
 import { activeCellIdAtom, cellModeAtom, focusCell } from '../model/cellMode'
 
 function renderView() {
@@ -42,6 +43,19 @@ describe('command-mode hotkeys', () => {
     const cells = cellsAtom()
     expect(cells).toHaveLength(2)
     expect(cells[1].id).toBe(seed.id)
+  })
+
+  test('A is a single undoable action (one undo removes the inserted cell)', async () => {
+    const user = userEvent.setup()
+    renderView()
+    const seed = await focusSeedInCommandMode()
+    await user.keyboard('a')
+    expect(cellsAtom()).toHaveLength(2)
+    // A used to be addCell + moveCellTo (two history steps); now it is one,
+    // so a single undo must bring the notebook back to just the seed cell.
+    await act(async () => undo())
+    const ids = cellsAtom().map((c) => c.id)
+    expect(ids).toEqual([seed.id])
   })
 
   test('M and Y switch the active cell kind', async () => {
@@ -99,6 +113,32 @@ describe('command-mode hotkeys', () => {
     expect(cellModeAtom()).toBe('command')
     await user.keyboard('{Enter}')
     expect(cellModeAtom()).toBe('edit')
+  })
+
+  test('clicking inside the editor does not force command mode', async () => {
+    const user = userEvent.setup()
+    const { container } = renderView()
+    // Seed cell is code -> CodeMirror. Clicking into it focuses the editor
+    // (edit mode); the row click handler must not override that with command.
+    const editor = container.querySelector('.cm-content') as HTMLElement
+    await user.click(editor)
+    expect(cellModeAtom()).toBe('edit')
+  })
+
+  test('clicking the cell shell (outside the editor) enters command mode', async () => {
+    const user = userEvent.setup()
+    const { container } = renderView()
+    const seed = cellsAtom()[0]
+    await act(async () => focusCell(seed.id))
+    await act(async () => {
+      const editor = container.querySelector('.cm-content') as HTMLElement
+      editor.focus()
+    })
+    // Click the row shell (the data-cell-id wrapper), not the editor.
+    const shell = container.querySelector(`[data-cell-id="${seed.id}"]`) as HTMLElement
+    await user.click(shell)
+    expect(cellModeAtom()).toBe('command')
+    expect(activeCellIdAtom()).toBe(seed.id)
   })
 })
 

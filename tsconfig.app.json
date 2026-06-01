@@ -23,13 +23,7 @@
 
     /* Path aliases */
     "paths": {
-      "@/*": ["./src/*"],
-      "@session/*": ["./src/entities/session/*"],
-      "@theme/*": ["./src/entities/theme/*"],
-      "@domain/*": ["./src/features/notebook/domain/*"],
-      "@model/*": ["./src/features/notebook/model/*"],
-      "@runtime/*": ["./src/features/notebook/runtime/*"],
-      "@ui/*": ["./src/features/notebook/ui/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src"]

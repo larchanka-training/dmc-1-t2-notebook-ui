@@ -31,7 +31,7 @@ import { useCommandModeHotkeys } from './commandHotkeys'
 import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
 import { redo, undo } from '../model/history'
-import { useHotkeys } from '@/shared/lib/hotkeys'
+import { isEditableTarget, useHotkeys } from '@/shared/lib/hotkeys'
 import type { Cell, CellViewMode } from '../domain/cell'
 import {
   addCell,
@@ -40,11 +40,17 @@ import {
   moveCell,
   moveCellTo,
   updateCellCode,
-} from '@model/notebook'
-import { activeCellIdAtom, cellModeAtom, enterCommand, enterEdit, focusCell } from '@model/cellMode'
-import { lineNumbersAtom } from '@/features/notebook'
-import { runCell, stopCell } from '@model/runtime'
-import { prewarmWorker } from '@runtime/workerHost'
+} from '../model/notebook'
+import {
+  activeCellIdAtom,
+  cellModeAtom,
+  enterCommand,
+  enterEdit,
+  focusCell,
+} from '../model/cellMode'
+import { lineNumbersAtom } from '../model/notebookSettings'
+import { runCell, stopCell } from '../model/runtime'
+import { prewarmWorker } from '../runtime/workerHost'
 
 // Run a cell, then focus the next one in edit mode — creating a trailing code
 // cell if this was the last. Shift+Enter's "run and advance" behaviour.
@@ -73,10 +79,23 @@ interface NotebookRowProps {
 const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }) => {
   const isActive = activeCellIdAtom() === cell.id
   const mode = cellModeAtom()
+  // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
+  // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
+  // re-render the entire cell (card + toolbar + output) on every search
+  // keystroke for every cell on screen.
   return (
     // Clicking the cell shell (outside the editor) puts it in command mode,
     // so the focus indicator also responds to the mouse, not just the keyboard.
-    <div data-cell-id={cell.id} onClick={wrap(() => focusCell(cell.id))}>
+    // A click that lands INSIDE the editor must NOT force command mode: the
+    // editor's own focus handler already switches to edit, and a competing
+    // focusCell() here would bubble afterwards and flip the indicator back to
+    // command while the caret is actually in the editor.
+    <div
+      data-cell-id={cell.id}
+      onClick={wrap((e: React.MouseEvent) => {
+        if (!isEditableTarget(e.target)) focusCell(cell.id)
+      })}
+    >
       <NotebookCell
         executionCount={cell.executionCount()}
         kind={cell.kind}
@@ -89,6 +108,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         autoFocus={isActive && mode === 'edit'}
         active={isActive}
         mode={mode}
+        cellId={cell.id}
         isFirst={isFirst}
         isLast={isLast}
         onCodeChange={wrap((code: string) => updateCellCode(cell.id, code))}

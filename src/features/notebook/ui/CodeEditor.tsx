@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
-import { EditorView, keymap, lineNumbers } from '@codemirror/view'
-import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view'
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Prec,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from '@codemirror/state'
+import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import {
   bracketMatching,
   defaultHighlightStyle,
@@ -20,6 +28,47 @@ import { editorThemeExtension } from './codemirror/theme'
 // values in.
 const External = Annotation.define<boolean>()
 
+// One notebook-search match inside this cell's document, as a character range.
+// `active` marks the single match the search bar is currently navigated to, so
+// it gets a stronger highlight than the rest.
+export interface SearchHighlight {
+  from: number
+  to: number
+  active: boolean
+}
+
+// Replace the whole set of search-match decorations in one shot. Sent from the
+// React layer whenever the notebook-search results for this cell change.
+const setSearchHighlights = StateEffect.define<SearchHighlight[]>()
+
+// Holds the search-match decorations. They are remapped across edits so they
+// track the text until the next explicit update, and rebuilt on each effect.
+const searchHighlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setSearchHighlights)) continue
+      const builder = new RangeSetBuilder<Decoration>()
+      // Ranges arrive in document order (search scans source left-to-right),
+      // which RangeSetBuilder requires. Clamp defensively and skip empties.
+      for (const m of effect.value) {
+        if (m.from >= m.to) continue
+        builder.add(
+          m.from,
+          m.to,
+          Decoration.mark({
+            class: m.active ? 'cm-searchMatch cm-searchMatch-active' : 'cm-searchMatch',
+          }),
+        )
+      }
+      deco = builder.finish()
+    }
+    return deco
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
+
 // Run-key callbacks. Kept in a ref so the keymap (frozen at mount) always calls
 // the latest handlers. Each returns nothing; the keymap wrapper returns `true`
 // to stop CodeMirror from falling through to the default keymap.
@@ -37,6 +86,8 @@ export interface CodeEditorProps {
   readOnly?: boolean
   /** When true, focus the editor (used when this cell becomes active in edit mode). */
   autoFocus?: boolean
+  /** Notebook-search matches within this cell, highlighted in the gutter text. */
+  searchMatches?: SearchHighlight[]
   onChange: (value: string) => void
   onFocus?: () => void
   onRun?: () => void
@@ -58,6 +109,7 @@ export function CodeEditor({
   showLineNumbers = false,
   readOnly = false,
   autoFocus = false,
+  searchMatches,
   onChange,
   onFocus,
   onRun,
@@ -145,13 +197,19 @@ export function CodeEditor({
         extensions: [
           runKeymap,
           lineNumbersComp.of(showLineNumbers ? lineNumbers() : []),
-          history(),
+          // No CodeMirror `history()` here on purpose: notebook-level history
+          // (model/history.ts) is the single owner of Mod-Z / Mod-Shift-Z.
+          // Edits already flow into it through onChange -> updateCellCode
+          // (coalesced per cell). If CM kept its own history too, one Mod-Z
+          // while editing would undo at BOTH layers, and the CM undo would
+          // re-enter onChange and wipe the notebook redo branch.
           indentOnInput(),
           bracketMatching(),
           syntaxHighlighting(defaultHighlightStyle),
           javascript({ typescript: true }),
           autocompletion(),
-          keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+          searchHighlightField,
+          keymap.of([...defaultKeymap, ...completionKeymap, indentWithTab]),
           themeComp.of(editorThemeExtension(theme)),
           readOnlyComp.of(EditorState.readOnly.of(readOnly)),
           EditorView.lineWrapping,
@@ -201,6 +259,20 @@ export function CodeEditor({
       effects: readOnlyComp.reconfigure(EditorState.readOnly.of(readOnly)),
     })
   }, [readOnly, readOnlyComp])
+
+  // Serialise the matches so the effect below only re-dispatches when the
+  // actual ranges change, not on every parent re-render (new array identity).
+  const matchesKey = useMemo(
+    () => (searchMatches ?? []).map((m) => `${m.from}:${m.to}:${m.active ? 1 : 0}`).join(','),
+    [searchMatches],
+  )
+
+  // Push notebook-search matches into the decoration field.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setSearchHighlights.of(searchMatches ?? []) })
+    // matchesKey captures the meaningful content of searchMatches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchesKey])
 
   // Pull focus into the editor when the cell becomes active in edit mode
   // (e.g. Enter in command mode, or Shift+Enter advancing into this cell).

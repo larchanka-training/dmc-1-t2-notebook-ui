@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   addCell,
+  addCellAt,
   cellsAtom,
   changeCellKind,
   deleteCell,
@@ -84,6 +85,28 @@ describe('notebook store', () => {
     const b = addCell()
     moveCellTo(a.id, 99)
     expect(cellsAtom().map((cell) => cell.id)).toEqual([b.id, a.id])
+  })
+
+  test('addCellAt inserts at an absolute index (including the front)', () => {
+    const a = cellsAtom()[0]
+    const inserted = addCellAt(0)
+    const ids = cellsAtom().map((c) => c.id)
+    expect(ids[0]).toBe(inserted.id)
+    expect(ids[1]).toBe(a.id)
+  })
+
+  test('addCellAt clamps an out-of-range index to the end', () => {
+    const a = cellsAtom()[0]
+    const inserted = addCellAt(99)
+    expect(cellsAtom().map((c) => c.id)).toEqual([a.id, inserted.id])
+  })
+
+  test('addCellAt is a single undoable step', () => {
+    const inserted = addCellAt(0)
+    expect(cellsAtom().some((c) => c.id === inserted.id)).toBe(true)
+    // One undo must fully remove the inserted cell (no leftover move step).
+    undo()
+    expect(cellsAtom().some((c) => c.id === inserted.id)).toBe(false)
   })
 
   test('updateCellCode mutates only the targeted cell', () => {
