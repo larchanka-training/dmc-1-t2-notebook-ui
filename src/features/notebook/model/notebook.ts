@@ -4,7 +4,19 @@ import { recordOperation } from './history'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
+// Single-notebook MVP: the editor owns exactly one notebook with a stable id.
+// Multi-notebook (a list, routing by id) is a later epic; until then this
+// constant is the persistence key for the one local notebook.
+export const LOCAL_NOTEBOOK_ID = '00000000-0000-4000-8000-000000000001'
+
 export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
+
+// Notebook-level metadata, separate from the cell list. There is no title UI
+// yet, but the persistent format carries these fields (aligned with the
+// backend contract), so they live here as the single source the serializer
+// and the loader read/write.
+export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
+export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
 
 // Record a structural change (add/delete/move/change-kind) as a history entry
 // by snapshotting the cell array. Undo/redo restore the snapshot directly via
