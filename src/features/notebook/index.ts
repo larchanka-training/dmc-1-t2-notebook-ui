@@ -38,6 +38,20 @@ export {
 } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'
+export {
+  searchOpenAtom,
+  searchQueryAtom,
+  useRegexAtom,
+  searchMatchesAtom,
+  matchCountLabelAtom,
+  activeMatchIndexAtom,
+  openSearch,
+  closeSearch,
+  setSearchQuery,
+  nextMatch,
+  prevMatch,
+} from './model/search'
+export type { SearchMatch } from './model/search'
 export { reatomCell } from './domain/cell'
 export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'
 export { runInWorker, restartWorker } from './runtime/workerHost'
