@@ -97,18 +97,38 @@ describe('useHotkeys', () => {
     input.remove()
   })
 
-  test('the top scope shadows the ones below it', () => {
+  test('the top scope binding wins for the same key', () => {
     const base = vi.fn()
-    const modal = vi.fn()
+    const top = vi.fn()
     renderHook(() => useHotkeys({ Escape: base }))
-    const { unmount } = renderHook(() => useHotkeys({ Escape: modal }))
+    const { unmount } = renderHook(() => useHotkeys({ Escape: top }))
     press({ key: 'Escape' })
-    expect(modal).toHaveBeenCalledOnce()
+    expect(top).toHaveBeenCalledOnce()
     expect(base).not.toHaveBeenCalled()
-    // once the modal scope unmounts, the base scope handles it again
+    // once the top scope unmounts, the base scope handles it again
     unmount()
     press({ key: 'Escape' })
     expect(base).toHaveBeenCalledOnce()
+  })
+
+  test('a non-modal top scope lets unbound keys fall through', () => {
+    const baseA = vi.fn()
+    const topB = vi.fn()
+    renderHook(() => useHotkeys({ 'Mod-a': baseA }))
+    renderHook(() => useHotkeys({ 'Mod-b': topB }))
+    // 'Mod-a' is not bound by the top scope -> falls through to the base
+    press({ key: 'a', metaKey: true })
+    expect(baseA).toHaveBeenCalledOnce()
+  })
+
+  test('a modal top scope absorbs keys it does not bind', () => {
+    const baseA = vi.fn()
+    const modalEsc = vi.fn()
+    renderHook(() => useHotkeys({ 'Mod-a': baseA }))
+    renderHook(() => useHotkeys({ Escape: modalEsc }, { modal: true }))
+    // modal scope doesn't bind Mod-a, but blocks it from reaching the base
+    press({ key: 'a', metaKey: true })
+    expect(baseA).not.toHaveBeenCalled()
   })
 
   test('disabled hotkeys do not register', () => {

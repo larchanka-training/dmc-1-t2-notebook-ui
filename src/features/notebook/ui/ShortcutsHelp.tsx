@@ -55,8 +55,10 @@ const GROUPS: ShortcutGroup[] = [
 export const ShortcutsHelp = reatomComponent(() => {
   const open = shortcutsOpenAtom()
 
-  useHotkeys({ '?': wrap(() => shortcutsOpenAtom.set(true)) }, !open)
-  useHotkeys({ Escape: wrap(() => shortcutsOpenAtom.set(false)) }, open)
+  // '?' coexists with the notebook shortcuts (non-modal). Once open, the
+  // dialog's Escape scope is modal so it shields the shortcuts beneath it.
+  useHotkeys({ '?': wrap(() => shortcutsOpenAtom.set(true)) }, { enabled: !open })
+  useHotkeys({ Escape: wrap(() => shortcutsOpenAtom.set(false)) }, { enabled: open, modal: true })
 
   return (
     <Dialog open={open} onOpenChange={wrap((next: boolean) => shortcutsOpenAtom.set(next))}>

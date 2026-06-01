@@ -9,6 +9,7 @@ import {
   SEED_CODE,
   updateCellCode,
 } from './notebook'
+import { canRedoAtom, canUndoAtom, redo, undo } from './history'
 
 describe('notebook store', () => {
   test('starts with exactly one seed cell', () => {
@@ -116,6 +117,41 @@ describe('notebook store', () => {
     changeCellKind(cell.id, 'code')
     // identity preserved — no needless re-creation
     expect(cellsAtom()[0]).toBe(cell)
+  })
+
+  test('undo/redo reverts and replays adding a cell', () => {
+    expect(cellsAtom()).toHaveLength(1)
+    addCell()
+    expect(cellsAtom()).toHaveLength(2)
+    undo()
+    expect(cellsAtom()).toHaveLength(1)
+    redo()
+    expect(cellsAtom()).toHaveLength(2)
+  })
+
+  test('undo restores a deleted cell with its source intact', () => {
+    const created = addCell()
+    updateCellCode(created.id, 'value = 42')
+    deleteCell(created.id)
+    expect(cellsAtom().some((c) => c.id === created.id)).toBe(false)
+    undo() // revert delete
+    const restored = cellsAtom().find((c) => c.id === created.id)
+    expect(restored?.code()).toBe('value = 42')
+  })
+
+  test('editing source is undoable', () => {
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'changed')
+    expect(cell.code()).toBe('changed')
+    undo()
+    expect(cell.code()).toBe(SEED_CODE)
+  })
+
+  test('running-state-free actions do not pollute history beyond their op', () => {
+    addCell()
+    expect(canUndoAtom()).toBe(true)
+    undo()
+    expect(canRedoAtom()).toBe(true)
   })
 
   // runCell-related tests live in runtime.test.ts (this file covers only

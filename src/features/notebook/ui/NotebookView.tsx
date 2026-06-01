@@ -30,6 +30,8 @@ import { NotebookToolbar } from './NotebookToolbar'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { ShortcutsHelp } from './ShortcutsHelp'
 import { SortableCell } from './CellDragHandle'
+import { redo, undo } from '../model/history'
+import { useHotkeys } from '@/shared/lib/hotkeys'
 import type { Cell, CellViewMode } from '../domain/cell'
 import {
   addCell,
@@ -173,6 +175,12 @@ export const NotebookView = reatomComponent(() => {
 
   // Jupyter-style command-mode shortcuts (A/B/D D/M/Y/arrows/Enter).
   useCommandModeHotkeys()
+
+  // Notebook-wide undo/redo. Mod combos fire even while typing in a cell.
+  useHotkeys({
+    'Mod-z': wrap(() => undo()),
+    'Mod-Shift-z': wrap(() => redo()),
+  })
 
   // Pointer drag needs a small activation distance so a click on the handle
   // (e.g. to focus) doesn't immediately start a drag. Keyboard sensor enables

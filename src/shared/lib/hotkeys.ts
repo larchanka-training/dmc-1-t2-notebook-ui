@@ -13,8 +13,17 @@ import { useEffect, useRef } from 'react'
 export type HotkeyHandler = (event: KeyboardEvent) => void
 export type HotkeyBindings = Record<string, HotkeyHandler>
 
+export interface UseHotkeysOptions {
+  enabled?: boolean
+  // A modal scope (e.g. an open dialog) absorbs all keys: handlers below it on
+  // the stack never fire, even for keys it doesn't bind. Non-modal scopes
+  // coexist — a key not bound by the top scope falls through to the next.
+  modal?: boolean
+}
+
 interface Scope {
   id: number
+  modal: boolean
   getBindings: () => HotkeyBindings
 }
 
@@ -51,21 +60,25 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-  const scope = scopeStack[scopeStack.length - 1]
-  if (!scope) return
-
   const bindingKey = eventToBindingKey(event)
-  const handler = scope.getBindings()[bindingKey]
-  if (!handler) return
-
   // Single-key / Shift / Alt shortcuts must not fire while the user is typing
   // in an editor — only modifier (Mod-*) combos are safe there. CodeMirror
   // already handles its own Enter/Esc variants internally.
   const isModCombo = event.metaKey || event.ctrlKey
-  if (!isModCombo && isEditableTarget(event.target)) return
+  const blockedByEditor = !isModCombo && isEditableTarget(event.target)
 
-  event.preventDefault()
-  handler(event)
+  // Walk the stack top-down: the first scope that binds the key handles it.
+  // A modal scope stops the walk even when it doesn't bind the key.
+  for (let i = scopeStack.length - 1; i >= 0; i--) {
+    const scope = scopeStack[i]
+    const handler = scope.getBindings()[bindingKey]
+    if (handler && !blockedByEditor) {
+      event.preventDefault()
+      handler(event)
+      return
+    }
+    if (scope.modal) return
+  }
 }
 
 function pushScope(scope: Scope): void {
@@ -88,7 +101,13 @@ function popScope(id: number): void {
  * and `enabled`. The latest `bindings` object is always used (read through a
  * ref), so callers can pass freshly-closed handlers each render.
  */
-export function useHotkeys(bindings: HotkeyBindings, enabled = true): void {
+export function useHotkeys(
+  bindings: HotkeyBindings,
+  options: boolean | UseHotkeysOptions = {},
+): void {
+  const opts: UseHotkeysOptions = typeof options === 'boolean' ? { enabled: options } : options
+  const { enabled = true, modal = false } = opts
+
   const bindingsRef = useRef(bindings)
   useEffect(() => {
     bindingsRef.current = bindings
@@ -96,8 +115,8 @@ export function useHotkeys(bindings: HotkeyBindings, enabled = true): void {
 
   useEffect(() => {
     if (!enabled) return
-    const scope: Scope = { id: nextScopeId++, getBindings: () => bindingsRef.current }
+    const scope: Scope = { id: nextScopeId++, modal, getBindings: () => bindingsRef.current }
     pushScope(scope)
     return () => popScope(scope.id)
-  }, [enabled])
+  }, [enabled, modal])
 }
