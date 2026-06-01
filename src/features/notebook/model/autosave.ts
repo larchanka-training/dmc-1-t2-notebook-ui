@@ -14,8 +14,7 @@
 
 import { atom, computed, wrap } from '@reatom/core'
 import * as notebookStorage from '@/shared/lib/storage/notebook'
-import { toJSON } from '../persistence/serialize'
-import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookCreatedAtAtom, notebookTitleAtom } from './notebook'
+import { cellsAtom, notebookSnapshot, notebookTitleAtom } from './notebook'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -44,21 +43,11 @@ const dirtyAtom = computed(() => {
   ).concat('\u0000', notebookTitleAtom())
 }, 'notebook.autosave.dirty')
 
-/** Build the current notebook snapshot for persistence. */
-function snapshot() {
-  return toJSON(cellsAtom(), {
-    id: LOCAL_NOTEBOOK_ID,
-    title: notebookTitleAtom(),
-    createdAt: notebookCreatedAtAtom(),
-    updatedAt: Date.now(),
-  })
-}
-
 /** Persist the current notebook now, updating the status atoms. */
 async function save(): Promise<void> {
   saveStatusAtom.set('saving')
   try {
-    await wrap(notebookStorage.put(snapshot()))
+    await wrap(notebookStorage.put(notebookSnapshot()))
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
   } catch {

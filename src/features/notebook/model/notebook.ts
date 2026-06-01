@@ -1,6 +1,9 @@
-import { action, atom } from '@reatom/core'
+import { action, atom, wrap } from '@reatom/core'
+import * as notebookStorage from '@/shared/lib/storage/notebook'
+import { fromJSON, toJSON } from '../persistence/serialize'
+import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
-import { recordOperation } from './history'
+import { clearHistory, recordOperation } from './history'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
@@ -17,6 +20,43 @@ export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.c
 // and the loader read/write.
 export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
 export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
+
+/** Serialize the current in-memory notebook (cells + metadata) to JSON. */
+export function notebookSnapshot(): NotebookJSON {
+  return toJSON(cellsAtom(), {
+    id: LOCAL_NOTEBOOK_ID,
+    title: notebookTitleAtom(),
+    createdAt: notebookCreatedAtAtom(),
+    updatedAt: Date.now(),
+  })
+}
+
+/**
+ * Load the local notebook from IndexedDB on startup. If a notebook is stored,
+ * its cells and metadata replace the in-memory seed; otherwise the seed is
+ * persisted as the initial "Welcome" notebook so a reload before any edit
+ * still finds it. History is cleared either way — the boot transition is not
+ * an undoable user edit. Best-effort: a storage failure leaves the seed in
+ * place rather than blocking the editor.
+ */
+export const loadNotebook = action(async () => {
+  let stored: NotebookJSON | undefined
+  try {
+    stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+  } catch {
+    // Corrupt/unreadable storage — fall back to the in-memory seed.
+    return
+  }
+
+  if (stored) {
+    notebookTitleAtom.set(stored.title)
+    notebookCreatedAtAtom.set(stored.createdAt)
+    cellsAtom.set(fromJSON(stored))
+  } else {
+    await wrap(notebookStorage.put(notebookSnapshot()))
+  }
+  clearHistory()
+}, 'notebook.load')
 
 // Record a structural change (add/delete/move/change-kind) as a history entry
 // by snapshotting the cell array. Undo/redo restore the snapshot directly via

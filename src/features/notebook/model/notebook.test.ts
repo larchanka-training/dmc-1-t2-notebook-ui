@@ -1,12 +1,17 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import * as notebookStorage from '@/shared/lib/storage/notebook'
+import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
   addCell,
   addCellAt,
   cellsAtom,
   changeCellKind,
   deleteCell,
+  loadNotebook,
+  LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
+  notebookTitleAtom,
   SEED_CODE,
   updateCellCode,
 } from './notebook'
@@ -261,5 +266,51 @@ describe('cell updatedAt + id (sync prep)', () => {
     expect(cell.updatedAt()).toBeGreaterThan(before)
     undo()
     expect(cell.updatedAt()).toBe(before)
+  })
+})
+
+describe('loadNotebook (boot)', () => {
+  beforeEach(async () => {
+    await notebookStorage.clear()
+    notebookTitleAtom.set('Untitled notebook')
+  })
+
+  test('seeds and persists a Welcome notebook when storage is empty', async () => {
+    await loadNotebook()
+    // Seed cell stays in memory…
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    // …and was written to storage so a reload finds it.
+    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
+    expect(stored?.cells[0].content).toBe(SEED_CODE)
+  })
+
+  test('restores cells and title from a stored notebook', async () => {
+    const stored: NotebookJSON = {
+      formatVersion: FORMAT_VERSION,
+      id: LOCAL_NOTEBOOK_ID,
+      title: 'Restored',
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_500_000,
+      cells: [
+        {
+          id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          kind: 'code',
+          content: 'restored()',
+          updatedAt: 1,
+        },
+      ],
+    }
+    await notebookStorage.put(stored)
+    await loadNotebook()
+    expect(cellsAtom().map((c) => c.code())).toEqual(['restored()'])
+    expect(notebookTitleAtom()).toBe('Restored')
+  })
+
+  test('does not record the boot transition in history', async () => {
+    addCell()
+    expect(canUndoAtom()).toBe(true)
+    await loadNotebook()
+    expect(canUndoAtom()).toBe(false)
   })
 })
