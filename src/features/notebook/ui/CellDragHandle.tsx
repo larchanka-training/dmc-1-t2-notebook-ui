@@ -23,6 +23,10 @@ export function SortableCell({ id, children }: SortableCellProps) {
     transform,
     transition,
     isDragging,
+    isOver,
+    activeIndex,
+    overIndex,
+    index,
   } = useSortable({ id })
 
   const style: React.CSSProperties = {
@@ -30,11 +34,23 @@ export function SortableCell({ id, children }: SortableCellProps) {
     transition,
   }
 
+  // Show the drop indicator on the edge the dragged cell will land on: above
+  // when moving up the list, below when moving down.
+  const showDropBefore = isOver && !isDragging && activeIndex > overIndex
+  const showDropAfter = isOver && !isDragging && activeIndex < overIndex && index === overIndex
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('group/drag relative', isDragging && 'z-10 opacity-60')}
+      className={cn(
+        'group/drag relative',
+        isDragging && 'z-10 opacity-60',
+        showDropBefore &&
+          'before:absolute before:-top-3 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-primary',
+        showDropAfter &&
+          'after:absolute after:-bottom-3 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-primary',
+      )}
     >
       <button
         type="button"

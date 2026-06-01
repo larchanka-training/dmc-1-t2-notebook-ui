@@ -208,7 +208,15 @@ export const NotebookView = reatomComponent(() => {
             <NotebookToolbar />
           </header>
 
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          {/* autoScroll keeps the page scrolling when a drag nears the
+              viewport edge on a long notebook; dnd-kit cancels an in-flight
+              drag on Esc out of the box (pointer + keyboard sensors). */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+            autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+          >
             <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-6">
                 {cells.map((cell, idx) => (
