@@ -2,6 +2,20 @@ import { useEffect } from 'react'
 import { Code2, Plus, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { themeAtom } from '@/entities/theme'
 import { Button } from '@/shared/ui/button'
 import {
@@ -15,8 +29,16 @@ import { NotebookOutline } from './NotebookOutline'
 import { NotebookToolbar } from './NotebookToolbar'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { ShortcutsHelp } from './ShortcutsHelp'
+import { SortableCell } from './CellDragHandle'
 import type { Cell, CellViewMode } from '../domain/cell'
-import { addCell, cellsAtom, deleteCell, moveCell, updateCellCode } from '../model/notebook'
+import {
+  addCell,
+  cellsAtom,
+  deleteCell,
+  moveCell,
+  moveCellTo,
+  updateCellCode,
+} from '../model/notebook'
 import {
   activeCellIdAtom,
   cellModeAtom,
@@ -152,6 +174,21 @@ export const NotebookView = reatomComponent(() => {
   // Jupyter-style command-mode shortcuts (A/B/D D/M/Y/arrows/Enter).
   useCommandModeHotkeys()
 
+  // Pointer drag needs a small activation distance so a click on the handle
+  // (e.g. to focus) doesn't immediately start a drag. Keyboard sensor enables
+  // accessible reordering (Space to lift, arrows to move, Space to drop).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const onDragEnd = wrap((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const toIndex = cellsAtom().findIndex((c) => c.id === over.id)
+    if (toIndex !== -1) moveCellTo(String(active.id), toIndex)
+  })
+
   // Spin up the sandbox worker (chunk fetch + QuickJS init) as soon as the
   // notebook is on screen, so the user's first Run feels instant instead of
   // paying the cold-start cost.
@@ -171,19 +208,29 @@ export const NotebookView = reatomComponent(() => {
             <NotebookToolbar />
           </header>
 
-          <div className="flex flex-col gap-6">
-            {cells.map((cell, idx) => (
-              <div key={cell.id} className="flex flex-col gap-6">
-                <NotebookRow cell={cell} isFirst={idx === 0} isLast={idx === cells.length - 1} />
-                {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
-              </div>
-            ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+              <div className="flex flex-col gap-6">
+                {cells.map((cell, idx) => (
+                  <div key={cell.id} className="flex flex-col gap-6">
+                    <SortableCell id={cell.id}>
+                      <NotebookRow
+                        cell={cell}
+                        isFirst={idx === 0}
+                        isLast={idx === cells.length - 1}
+                      />
+                    </SortableCell>
+                    {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+                  </div>
+                ))}
 
-            <CellInserter
-              afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
-              variant="end"
-            />
-          </div>
+                <CellInserter
+                  afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
+                  variant="end"
+                />
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       </main>
 
