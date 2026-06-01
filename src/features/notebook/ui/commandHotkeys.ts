@@ -2,25 +2,41 @@ import { wrap } from '@reatom/core'
 import { useHotkeys } from '@/shared/lib/hotkeys'
 import { addCell, addCellAt, cellsAtom, changeCellKind, deleteCell } from '../model/notebook'
 import { activeCellIdAtom, cellModeAtom, enterEdit, focusCell } from '../model/cellMode'
+import { isCellQueuedOrRunning } from '../model/runtime'
+
+// Change the active cell's kind, unless it is part of the current run. A cell
+// that is executing or still queued for Run All must not be converted: the
+// queue holds ids and would otherwise reach `executeCell` with a now-markdown
+// cell. (Running cells are also guarded inside `changeCellKind` itself; this
+// blocks the queued case too, which the model can't see.)
+function changeKind(kind: 'code' | 'markdown'): void {
+  const id = activeCellIdAtom()
+  if (!id || isCellQueuedOrRunning(id)) return
+  changeCellKind(id, kind)
+}
 
 // Time window for the Jupyter "D D" delete gesture: two quick D presses.
 const DOUBLE_KEY_MS = 600
 
-// Timestamp of the last lone "D". Module-level because command mode is a
-// single global interaction (one focused cell at a time), and keeping it out
-// of the render body avoids reading a ref during render.
-let lastDPress = 0
+// The cell + timestamp of the last lone "D". Module-level because command mode
+// is a single global interaction (one focused cell at a time), and keeping it
+// out of the render body avoids reading a ref during render. Tracking the cell
+// (not just the time) means the two D presses must land on the SAME cell:
+// D on A, arrow to B, D on B within the window must NOT delete B.
+let lastD: { id: string; at: number } | null = null
 
 // The "D D" delete gesture lives in a plain module function (not inside the
 // hook body) so its impure timer/state access is outside React's render path.
 function handleDeleteGesture(): void {
   const now = Date.now()
-  if (now - lastDPress > DOUBLE_KEY_MS) {
-    lastDPress = now
+  const id = activeCellIdAtom()
+  // First D, or the confirming D landed on a different cell / too late: (re)arm
+  // the gesture on the current cell and wait for the second press.
+  if (!lastD || lastD.id !== id || now - lastD.at > DOUBLE_KEY_MS) {
+    lastD = id ? { id, at: now } : null
     return
   }
-  lastDPress = 0
-  const id = activeCellIdAtom()
+  lastD = null
   if (!id) return
   const fallback = neighbourId(id, 1) ?? neighbourId(id, -1)
   const before = cellsAtom().length
@@ -72,14 +88,8 @@ export function useCommandModeHotkeys(): void {
         focusCell(inserted.id)
       }),
       d: wrap(handleDeleteGesture),
-      m: wrap(() => {
-        const id = activeCellIdAtom()
-        if (id) changeCellKind(id, 'markdown')
-      }),
-      y: wrap(() => {
-        const id = activeCellIdAtom()
-        if (id) changeCellKind(id, 'code')
-      }),
+      m: wrap(() => changeKind('markdown')),
+      y: wrap(() => changeKind('code')),
       ArrowUp: wrap(() => {
         const id = activeCellIdAtom()
         if (!id) return

@@ -141,7 +141,7 @@ Deferred to a later phase (not part of the first layout milestone):
 2. **Sidebar notebook list** — _done_. New `Notebooks` group in `AppSidebar` reads `notebookListResource` and is gated on `userAtom`. `NotebookListPanel` deleted. `ScrollArea` not added — `SidebarContent` already scrolls natively.
 3. **Main content centering + header** — _done_. `NotebookView` wraps content in `max-w-3xl mx-auto px-6 py-8` with an H1 + subtitle header. Title is a static `JS Notebook` placeholder for now — see "Open layout decisions".
 4. **Cell anatomy refresh** — _done_. `NotebookCell` uses `Card` (`size="sm"`) as the shell, `DropdownMenu` (`MoreHorizontal` trigger) for `Move up` / `Move down` / `Delete`, `Tooltip` on the Run button, `Alert` (`variant="destructive"`) for error output, and a thin `before:` strip in `--primary` for the running state.
-5. **"+ Add cell" between blocks** — _done_. `CellInserter` renders between cells (hover-revealed strip + small `Button`) and at the end as a persistent `Button variant="outline"`. No type picker yet — only one cell type exists.
+5. **"+ Add cell" between blocks** — _done_. `CellInserter` renders between cells (hover-revealed strip + small `Button`) and at the end as a persistent `Button variant="outline"`. Each opens a `DropdownMenu` type picker with **Code** / **Text** (markdown) — added once markdown cells landed (Round 2).
 6. **Right outline pane** — _done_. Implemented as a plain `<aside>` (not the `Sidebar` family — multiple sidebars under one `SidebarProvider` share open/closed state, which is wrong for a fixed outline). Hidden < `xl`. Auto-hides entirely until the notebook has **at least 2 headings** — outline doesn't earn its 224px otherwise. Uses `ScrollArea`. Outline entries come from a regex pass over markdown cells' raw text; click scrolls the parent cell into view via `[data-cell-id="…"]`.
 
 ## Round 2 additions
@@ -178,7 +178,7 @@ cells are no longer a `<textarea>`, markdown is no longer CommonMark-only, and
 
 ## Open layout decisions
 
-- **Markdown cell support timing.** Outline pane and "+ Add cell text" require it. Current `NotebookCell` is code-only. Either add markdown cells together with phase 4, or postpone phase 6.
+- ~~**Markdown cell support timing.**~~ **Resolved (Round 2/3).** Markdown cells exist (`Cell.kind`, edit/preview, GFM/LaTeX in Round 4); the outline and "+ Add cell text" picker are wired.
 - **Sync indicator copy and placement.** "Synced 14 May 12:04" vs "Saved" vs an icon-only status — depends on whether sync is implicit (autosave) or manual (sync button).
 - **Mobile editing.** Plan above assumes read-only on mobile (no editor toolbar). If editing is in scope, the right outline goes away and the left sidebar needs a `Sheet`-based drawer (already installed).
-- **Dark theme trigger.** Manual `Switch` in sidebar footer vs system `prefers-color-scheme`. Tokens for dark are not yet defined.
+- ~~**Dark theme trigger.**~~ **Resolved (Round 4).** A 3-way Light/System/Dark `radiogroup` in the sidebar footer (`themeModeAtom`, default `system`, persisted); dark tokens are defined and `system` follows `prefers-color-scheme` live.

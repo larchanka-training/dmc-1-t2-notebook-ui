@@ -56,6 +56,12 @@ export const addCellAt = action((index: number, kind: CellKind = 'code') => {
 }, 'notebook.cells.addAt')
 
 export const deleteCell = action((id: string) => {
+  // Refuse to delete a cell that is mid-execution: the running `executeCell`
+  // holds this Cell's atoms and would keep writing output/status into a cell
+  // that no longer exists, and the kernel would stay 'busy' until timeout with
+  // no way to interrupt. Stop the cell first, then delete.
+  const target = cellsAtom().find((c) => c.id === id)
+  if (target?.status() === 'running') return
   const before = cellsAtom()
   cellsAtom.set((cells) => (cells.length === 1 ? cells : cells.filter((c) => c.id !== id)))
   recordStructural(before)
@@ -117,6 +123,11 @@ export const updateCellCode = action((id: string, code: string) => {
 export const changeCellKind = action((id: string, kind: CellKind) => {
   const current = cellsAtom().find((c) => c.id === id)
   if (!current || current.kind === kind) return
+  // Re-creating the Cell while it is executing would orphan the atoms the
+  // running `executeCell` still writes to: the new cell would stay idle/empty
+  // while the worker finishes into the discarded instance. Block until the run
+  // settles (Restart/Stop/normal completion).
+  if (current.status() === 'running') return
   const before = cellsAtom()
   const source = current.code()
   cellsAtom.set((cells) => {

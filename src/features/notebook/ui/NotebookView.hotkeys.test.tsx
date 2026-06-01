@@ -3,7 +3,8 @@ import { act, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
-import { cellsAtom } from '../model/notebook'
+import { addCell, cellsAtom } from '../model/notebook'
+import { queueAtom } from '../model/runtime'
 import { undo } from '../model/history'
 import { activeCellIdAtom, cellModeAtom, focusCell } from '../model/cellMode'
 
@@ -68,6 +69,19 @@ describe('command-mode hotkeys', () => {
     expect(cellsAtom()[0].kind).toBe('code')
   })
 
+  test('M does not convert a cell that is queued for Run All', async () => {
+    renderView()
+    const second = await act(async () => addCell())
+    // Simulate the cell sitting in the Run All queue (kind change must be
+    // refused so it can't reach the kernel as a now-markdown cell).
+    await act(async () => queueAtom.set([second.id]))
+    await act(async () => focusCell(second.id))
+    const user = userEvent.setup()
+    await user.keyboard('m')
+    expect(cellsAtom().find((c) => c.id === second.id)?.kind).toBe('code')
+    await act(async () => queueAtom.set([]))
+  })
+
   test('D D deletes the active cell', async () => {
     const user = userEvent.setup()
     renderView()
@@ -90,6 +104,22 @@ describe('command-mode hotkeys', () => {
     await act(async () => focusCell(cellsAtom()[1].id))
     await user.keyboard('d')
     expect(cellsAtom()).toHaveLength(2)
+  })
+
+  test('D on one cell then D on another does not delete (gesture is per-cell)', async () => {
+    const user = userEvent.setup()
+    renderView()
+    await focusSeedInCommandMode()
+    await user.keyboard('b')
+    const [first, second] = cellsAtom()
+    // D on the first cell arms the gesture there...
+    await act(async () => focusCell(first.id))
+    await user.keyboard('d')
+    // ...then focus moves and a second D lands on a DIFFERENT cell: this must
+    // re-arm, not confirm — neither cell is deleted.
+    await act(async () => focusCell(second.id))
+    await user.keyboard('d')
+    expect(cellsAtom().map((c) => c.id)).toEqual([first.id, second.id])
   })
 
   test('D D on the last remaining cell keeps command mode working', async () => {

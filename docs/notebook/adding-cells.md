@@ -6,20 +6,23 @@ Cells are stored in a Reatom atom (`cellsAtom`) in `src/features/notebook/model/
 
 ## Adding a cell
 
-**From the toolbar** — click **+ Add Cell** in the top bar. The new cell is added at the bottom.
+**Between cells** — hover the gap between two cells to reveal a **+ Add cell** button; it opens a small menu to pick **Code** or **Text** (markdown). The new cell is inserted at that position.
 
-**From the bottom of the list** — click the ghost **+ Add cell** button below the last cell.
+**At the bottom of the list** — click the persistent **+ Add cell** button below the last cell; the same Code / Text menu inserts a new cell at the end.
 
-Programmatically, cells are added via the `addCell(afterId?)` Reatom action:
+**In command mode** — press `A` / `B` to insert a code cell above / below the focused cell (see [keyboard shortcuts](#keyboard-shortcuts)).
+
+Programmatically, cells are added via the `addCell(afterId?, kind?)` Reatom action (or `addCellAt(index, kind?)` for an absolute position):
 
 ```ts
 import { addCell } from '@/features/notebook'
 
-addCell() // adds at the end
-addCell(cell.id) // inserts immediately after the cell with this id
+addCell() // adds a code cell at the end
+addCell(cell.id) // inserts a code cell immediately after the cell with this id
+addCell(cell.id, 'markdown') // inserts a markdown (text) cell after it
 ```
 
-Both buttons call `addCell()` wrapped in `wrap(...)` so they preserve Reatom's async context (see [reatom.md](../architecture/reatom.md)).
+The inserter menus call `addCell(afterId, kind)` wrapped in `wrap(...)` so they preserve Reatom's async context (see [reatom.md](../architecture/reatom.md)). Command-mode `A` / `B` use `addCellAt` / `addCell` the same way.
 
 ---
 

@@ -142,6 +142,24 @@ describe('notebook store', () => {
     expect(cellsAtom()[0]).toBe(cell)
   })
 
+  test('changeCellKind is a no-op while the cell is running', () => {
+    const [cell] = cellsAtom()
+    cell.status.set('running')
+    changeCellKind(cell.id, 'markdown')
+    // Re-creating a running cell would orphan the atoms executeCell writes to.
+    expect(cellsAtom()[0]).toBe(cell)
+    expect(cellsAtom()[0].kind).toBe('code')
+  })
+
+  test('deleteCell is a no-op while the cell is running', () => {
+    const [seed] = cellsAtom()
+    const second = addCell()
+    second.status.set('running')
+    deleteCell(second.id)
+    // The running cell survives so the kernel can finish / be interrupted.
+    expect(cellsAtom().map((c) => c.id)).toEqual([seed.id, second.id])
+  })
+
   test('undo/redo reverts and replays adding a cell', () => {
     expect(cellsAtom()).toHaveLength(1)
     addCell()

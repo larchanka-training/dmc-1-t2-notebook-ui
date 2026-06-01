@@ -57,7 +57,7 @@ export const NotebookToolbar = reatomComponent(() => {
             </Button>
           }
         />
-        <TooltipContent>Run every code cell in order</TooltipContent>
+        <TooltipContent>Run every code cell in order; render all text cells</TooltipContent>
       </Tooltip>
 
       {canResume && (
