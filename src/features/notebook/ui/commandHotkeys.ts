@@ -15,16 +15,21 @@ let lastDPress = 0
 // hook body) so its impure timer/state access is outside React's render path.
 function handleDeleteGesture(): void {
   const now = Date.now()
-  if (now - lastDPress <= DOUBLE_KEY_MS) {
-    lastDPress = 0
-    const id = activeCellIdAtom()
-    if (!id) return
-    const fallback = neighbourId(id, 1) ?? neighbourId(id, -1)
-    deleteCell(id)
-    focusCell(fallback)
-  } else {
+  if (now - lastDPress > DOUBLE_KEY_MS) {
     lastDPress = now
+    return
   }
+  lastDPress = 0
+  const id = activeCellIdAtom()
+  if (!id) return
+  const fallback = neighbourId(id, 1) ?? neighbourId(id, -1)
+  const before = cellsAtom().length
+  deleteCell(id)
+  // deleteCell is a no-op when this is the last remaining cell (the model
+  // protects it). Only move focus when a cell was actually removed — otherwise
+  // focusCell(null) would clear activeCellId and silently disable every
+  // command-mode shortcut until the next mouse click.
+  if (cellsAtom().length < before) focusCell(fallback)
 }
 
 function neighbourId(id: string, dir: -1 | 1): string | null {

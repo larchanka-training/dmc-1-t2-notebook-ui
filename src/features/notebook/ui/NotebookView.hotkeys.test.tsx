@@ -92,6 +92,20 @@ describe('command-mode hotkeys', () => {
     expect(cellsAtom()).toHaveLength(2)
   })
 
+  test('D D on the last remaining cell keeps command mode working', async () => {
+    const user = userEvent.setup()
+    renderView()
+    await focusSeedInCommandMode()
+    // Single seed cell: D D must NOT delete it (the last cell is protected) and
+    // must NOT clear active focus. If focus were cleared, the command-mode
+    // scope would unmount and the next shortcut (B) would be silently ignored.
+    await user.keyboard('dd')
+    expect(cellsAtom()).toHaveLength(1)
+    // B still works: a second cell is inserted, proving command mode is alive.
+    await user.keyboard('b')
+    expect(cellsAtom()).toHaveLength(2)
+  })
+
   test('arrows move focus between cells', async () => {
     const user = userEvent.setup()
     renderView()

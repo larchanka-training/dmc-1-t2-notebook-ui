@@ -108,7 +108,7 @@ src/features/notebook/
     MarkdownView.tsx              ← новый, рендерит markdown
     CodeEditor.tsx                ← новый, обёртка над CodeMirror 6
     CellDragHandle.tsx            ← новый, drag handle + zone
-    HotkeysProvider.tsx           ← новый, глобальные шорткаты
+    commandHotkeys.ts             ← command-mode шорткаты (A/B/DD/M/Y/↑↓/Enter)
     SearchBar.tsx                 ← новый, поиск по ноутбуку
     ShortcutsHelp.tsx             ← новый, модалка справки
   model/
@@ -117,7 +117,7 @@ src/features/notebook/
     cellMode.ts                   ← edit/command mode атом
     search.ts                     ← search state, matches
 src/shared/lib/
-  hotkeys.ts                      ← хук reatomHotkeys (через @reatom/react)
+  hotkeys.ts                      ← useHotkeys: document-level scope-stack
 ```
 
 ### Markdown
