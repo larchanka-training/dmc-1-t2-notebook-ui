@@ -19,14 +19,12 @@ import {
   useRegexAtom,
 } from '../model/search'
 
-// Bring the cell holding the active match into view. Cells expose
-// `data-cell-id` (also used by the outline), so we can scroll without a ref
-// into every cell.
-function scrollToActiveMatch(): void {
-  const matches = searchMatchesAtom()
-  const match = matches[activeMatchIndexAtom()]
-  if (!match) return
-  const el = document.querySelector(`[data-cell-id="${match.cellId}"]`)
+// Bring a cell into view by its `data-cell-id` (also used by the outline).
+// Takes the id as an argument — it must NOT read Reatom atoms, because it runs
+// from a useEffect, which is outside the Reatom stack; reading an atom there
+// throws `missing async stack` under clearStack().
+function scrollCellIntoView(cellId: string): void {
+  const el = document.querySelector(`[data-cell-id="${cellId}"]`)
   // scrollIntoView is absent in JSDOM and may be missing on non-element nodes.
   el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
 }
@@ -42,11 +40,14 @@ export const SearchBar = reatomComponent(() => {
   // Cmd/Ctrl+F opens search (and steals the key from the browser find).
   useHotkeys({ 'Mod-f': wrap(() => searchOpenAtom.set(true)) })
 
-  // Keep the viewport on the active match as it changes.
+  // Resolve the active match's cell id HERE, in the reactive component body
+  // where the Reatom stack is active. The effect below only touches the DOM.
+  const matches = searchMatchesAtom()
   const activeIndex = activeMatchIndexAtom()
+  const activeCellId = open ? matches[activeIndex]?.cellId : undefined
   useEffect(() => {
-    if (open) scrollToActiveMatch()
-  }, [open, activeIndex])
+    if (activeCellId) scrollCellIntoView(activeCellId)
+  }, [activeCellId])
 
   if (!open) return null
 

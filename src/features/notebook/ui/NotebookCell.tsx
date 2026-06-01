@@ -22,6 +22,7 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { modKeyLabel } from '@/shared/lib/platform'
 import type { Theme } from '@/entities/theme'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
 import type { OutputItem } from '../runtime/types'
@@ -42,6 +43,10 @@ export interface NotebookCellProps {
   showLineNumbers?: boolean
   /** Focus the code editor (cell is active in edit mode). */
   autoFocus?: boolean
+  /** Whether this cell currently holds focus (command or edit mode). */
+  active?: boolean
+  /** Modal state of the active cell; drives the focus indicator colour. */
+  mode?: 'edit' | 'command'
   isFirst?: boolean
   isLast?: boolean
   readOnly?: boolean
@@ -71,6 +76,8 @@ export function NotebookCell({
   theme = 'light',
   showLineNumbers = false,
   autoFocus = false,
+  active = false,
+  mode = 'command',
   isFirst = false,
   isLast = false,
   readOnly = false,
@@ -122,11 +129,16 @@ export function NotebookCell({
         size="sm"
         className={cn(
           'relative gap-0 py-0 ring-0 border border-border overflow-visible transition-shadow',
+          // A focused cell gets a coloured left bar: blue in command mode,
+          // green in edit mode — the Jupyter convention, so "which cell is
+          // active and in which mode" is visible at a glance.
+          'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:rounded-l-xl before:transition-colors',
+          active && mode === 'command' && 'before:bg-primary ring-1 ring-primary/40',
+          active && mode === 'edit' && 'before:bg-success ring-1 ring-success/40',
           isError && 'border-destructive',
           isHalted && 'border-amber-500/60',
           isSkipped && 'border-dashed border-muted-foreground/40',
-          isRunning &&
-            'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary before:rounded-l-xl',
+          isRunning && 'before:bg-primary',
         )}
       >
         <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/40 rounded-t-xl">
@@ -167,7 +179,7 @@ export function NotebookCell({
                   </Button>
                 }
               />
-              <TooltipContent>Run cell (⌘+Enter)</TooltipContent>
+              <TooltipContent>Run cell ({modKeyLabel}+Enter)</TooltipContent>
             </Tooltip>
           ) : (
             <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground select-none">
@@ -198,7 +210,9 @@ export function NotebookCell({
                     </Button>
                   }
                 />
-                <TooltipContent>{showPreview ? 'Edit (⌘+E)' : 'Preview (⌘+E)'}</TooltipContent>
+                <TooltipContent>
+                  {showPreview ? `Edit (${modKeyLabel}+E)` : `Preview (${modKeyLabel}+E)`}
+                </TooltipContent>
               </Tooltip>
             ) : null}
 

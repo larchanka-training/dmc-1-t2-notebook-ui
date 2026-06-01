@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@/shared/ui/dialog'
 import { useHotkeys } from '@/shared/lib/hotkeys'
+import { altKeyLabel, modKeyLabel, shiftKeyLabel } from '@/shared/lib/platform'
 
 /** Whether the shortcuts cheat-sheet dialog is open. */
 export const shortcutsOpenAtom = atom(false, 'notebook.shortcutsOpen')
@@ -21,9 +22,9 @@ const GROUPS: ShortcutGroup[] = [
   {
     title: 'Edit mode (in the editor)',
     items: [
-      { keys: '⇧ Enter', desc: 'Run cell, go to next' },
-      { keys: '⌘/Ctrl Enter', desc: 'Run cell, stay' },
-      { keys: '⌥ Enter', desc: 'Run cell, insert below' },
+      { keys: `${shiftKeyLabel} Enter`, desc: 'Run cell, go to next' },
+      { keys: `${modKeyLabel} Enter`, desc: 'Run cell, stay' },
+      { keys: `${altKeyLabel} Enter`, desc: 'Run cell, insert below' },
       { keys: 'Esc', desc: 'Leave editor (command mode)' },
     ],
   },
@@ -40,9 +41,9 @@ const GROUPS: ShortcutGroup[] = [
   {
     title: 'Global',
     items: [
-      { keys: '⌘/Ctrl Z', desc: 'Undo' },
-      { keys: '⌘/Ctrl ⇧ Z', desc: 'Redo' },
-      { keys: '⌘/Ctrl F', desc: 'Search notebook' },
+      { keys: `${modKeyLabel} Z`, desc: 'Undo' },
+      { keys: `${modKeyLabel} ${shiftKeyLabel} Z`, desc: 'Redo' },
+      { keys: `${modKeyLabel} F`, desc: 'Search notebook' },
       { keys: '?', desc: 'This help' },
     ],
   },
