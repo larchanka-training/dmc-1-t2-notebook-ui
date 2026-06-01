@@ -68,4 +68,23 @@ describe('CodeEditor', () => {
     // otherwise undo/redo (S5) pushing an old value would re-record it.
     expect(onChange).not.toHaveBeenCalled()
   })
+
+  test('Escape exits to command mode and blurs the editor', async () => {
+    const onExitToCommand = vi.fn()
+    const { container } = render(
+      <CodeEditor value="x" theme="light" onChange={() => {}} onExitToCommand={onExitToCommand} />,
+    )
+    const host = container.querySelector('.cm-content') as HTMLElement
+    await waitFor(() => expect(host.textContent).toContain('x'))
+    const view = EditorView.findFromDOM(host)!
+    view.focus()
+    // Dispatch the Escape key through the DOM so CodeMirror's keymap runs it.
+    host.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+    expect(onExitToCommand).toHaveBeenCalledOnce()
+    // Focus must leave the editor, otherwise command-mode shortcuts get eaten
+    // by the contenteditable as text.
+    expect(view.hasFocus).toBe(false)
+  })
 })

@@ -124,7 +124,13 @@ export function CodeEditor({
         },
         {
           key: 'Escape',
-          run: () => {
+          run: (view) => {
+            // Blur the editor FIRST: just flipping the mode atom leaves focus
+            // in the contenteditable, so command-mode single-key shortcuts
+            // (A/B/M/Y/…) would be swallowed as text and the user stays stuck
+            // in edit. Blurring moves focus to <body> so the document-level
+            // hotkeys take over.
+            view.contentDOM.blur()
             handlersRef.current.exitToCommand()
             return true
           },
