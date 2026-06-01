@@ -29,6 +29,7 @@ import { NotebookOutline } from './NotebookOutline'
 import { NotebookToolbar } from './NotebookToolbar'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { ShortcutsHelp } from './ShortcutsHelp'
+import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
 import { redo, undo } from '../model/history'
 import { useHotkeys } from '@/shared/lib/hotkeys'
@@ -48,6 +49,7 @@ import {
   enterEdit,
   focusCell,
 } from '../model/cellMode'
+import { lineNumbersAtom } from '../model/notebookSettings'
 import { runCell, stopCell } from '../model/runtime'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -86,6 +88,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         status={cell.status()}
         viewMode={cell.viewMode()}
         theme={themeAtom()}
+        showLineNumbers={lineNumbersAtom()}
         autoFocus={activeCellIdAtom() === cell.id && cellModeAtom() === 'edit'}
         isFirst={isFirst}
         isLast={isLast}
@@ -213,7 +216,10 @@ export const NotebookView = reatomComponent(() => {
               <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
               <p className="mt-1 text-sm text-muted-foreground">Local scratchpad · autosaved</p>
             </div>
-            <NotebookToolbar />
+            <div className="flex items-center gap-2">
+              <SearchBar />
+              <NotebookToolbar />
+            </div>
           </header>
 
           {/* autoScroll keeps the page scrolling when a drag nears the
