@@ -15,7 +15,21 @@ export function ensureKatexStyles(): void {
   })
 }
 
-/** Cheap pre-check: does the source plausibly contain TeX math delimiters? */
+// Inline TeX math per remark-math's rule: a `$`, a non-space, then any run
+// closing on a non-space `$`. The leading/trailing non-space requirement is
+// what separates real math (`$e^{i\pi}$`) from prose with currency
+// (`costs $5 and $10`, which has no space-free `$…$` span).
+const INLINE_MATH = /\$[^\s$](?:[^$]*[^\s$])?\$/
+
+/**
+ * Cheap pre-check: does the source plausibly contain TeX math delimiters?
+ *
+ * A bare `$` (e.g. a price) must NOT trigger the lazy KaTeX CSS load, since
+ * `remark-math` would not render anything. We match block math (`$$…$$`) or a
+ * space-free inline `$…$` span. This is a heuristic, not a full parser: the
+ * cost of a rare miss is only unstyled math, and of a rare extra match only a
+ * one-time ~23 KB CSS load — both harmless.
+ */
 export function hasMathDelimiter(source: string): boolean {
-  return source.includes('$')
+  return source.includes('$$') || INLINE_MATH.test(source)
 }
