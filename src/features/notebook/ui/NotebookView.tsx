@@ -225,9 +225,11 @@ export const NotebookView = reatomComponent(() => {
 
   // Spin up the sandbox worker (chunk fetch + QuickJS init) as soon as the
   // notebook is on screen, so the user's first Run feels instant instead of
-  // paying the cold-start cost.
+  // paying the cold-start cost. Skip this in Vitest: mounting NotebookView in
+  // RTL tests does not need a warm worker, and eager worker import can race the
+  // jsdom environment teardown.
   useEffect(() => {
-    prewarmWorker()
+    if (import.meta.env.MODE !== 'test') prewarmWorker()
   }, [])
 
   return (

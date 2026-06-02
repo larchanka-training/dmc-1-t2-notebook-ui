@@ -12,9 +12,18 @@ export {
   updateCellCode,
   loadNotebook,
   notebookLoadedAtom,
+  notebookBaseUpdatedAtAtom,
+  restoreNotebook,
   SEED_CODE,
 } from './model/notebook'
-export { startAutosave, saveStatusAtom, lastSavedAtAtom } from './model/autosave'
+export {
+  startAutosave,
+  saveStatusAtom,
+  lastSavedAtAtom,
+  hasLocalChangesAtom,
+  reloadFromStorage,
+  saveMine,
+} from './model/autosave'
 export type { SaveStatus } from './model/autosave'
 export {
   runCell,

@@ -14,8 +14,9 @@
 //      continuation now runs with an empty stack. Without the `await wrap(...)`
 //      around the put in saveNow, the continuation throws and the indicator
 //      never reaches 'saved'.
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { clearStack, context, STACK, wrap } from '@reatom/core'
+import * as notebookStorage from '../persistence/storage'
 import { saveNow, saveStatusAtom } from './autosave'
 
 let frame: ReturnType<typeof context.start>
@@ -23,9 +24,11 @@ let frame: ReturnType<typeof context.start>
 beforeEach(() => {
   // Fresh isolated context per test → clean atom state (seed notebook, idle status).
   frame = context.start()
+  vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   // Re-seed the global stack emptied by clearStack() so the shared
   // `context.reset()` in src/test/setup.ts (it calls top()) doesn't throw.
   if (STACK.length === 0) STACK.push(context.start())

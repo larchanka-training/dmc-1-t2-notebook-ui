@@ -1,7 +1,13 @@
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Check, CircleAlert, Loader2 } from 'lucide-react'
-import { lastSavedAtAtom, saveNow, saveStatusAtom } from '../model/autosave'
+import {
+  lastSavedAtAtom,
+  reloadFromStorage,
+  saveMine,
+  saveNow,
+  saveStatusAtom,
+} from '../model/autosave'
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, {
@@ -37,6 +43,22 @@ export const SaveIndicator = reatomComponent(() => {
         <CircleAlert className="size-3.5" />
         Save failed — retry
       </button>
+    )
+  }
+
+  if (status === 'conflict') {
+    return (
+      <span className="flex flex-wrap items-center gap-1.5 text-sm text-destructive">
+        <CircleAlert className="size-3.5" />
+        Changed in another tab
+        <button type="button" onClick={wrap(() => void reloadFromStorage())} className="underline">
+          Reload
+        </button>
+        <span aria-hidden="true">/</span>
+        <button type="button" onClick={wrap(() => void saveMine())} className="underline">
+          Save mine
+        </button>
+      </span>
     )
   }
 

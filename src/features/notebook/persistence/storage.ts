@@ -67,9 +67,53 @@ export async function list(): Promise<NotebookJSON[]> {
   return valid.reverse()
 }
 
-/** Insert or replace a notebook. */
+/** Insert or replace a notebook unconditionally (last-write-wins). */
 export async function put(notebook: NotebookJSON): Promise<void> {
   await (await getDB()).put(STORE, notebook)
+}
+
+/** Outcome of a conditional write. */
+export type PutResult =
+  | { ok: true }
+  /** Another writer got there first; `current` is the newer stored version. */
+  | { ok: false; current: NotebookJSON }
+
+/**
+ * Compare-and-swap write: persist `notebook` only if no other tab has written
+ * a newer version since this tab's `base` timestamp. Read and write happen in
+ * ONE `readwrite` transaction, so the check is atomic — IndexedDB serializes
+ * readwrite transactions on a store, closing the read-modify-write race that a
+ * separate `get` + `put` would leave open between two tabs.
+ *
+ * Returns `{ ok: true }` on a successful write. If a newer record is already
+ * stored (`stored.updatedAt > base`), the write is skipped and the newer
+ * `current` is returned so the caller can resolve the conflict instead of
+ * silently overwriting it. A `base` of `null` means "this tab has no known
+ * baseline yet" and only writes into an empty slot. A stored record that fails
+ * migration/validation is treated as absent and overwritten (best-effort
+ * recovery from a corrupt slot).
+ */
+export async function putIfNewer(notebook: NotebookJSON, base: number | null): Promise<PutResult> {
+  const db = await getDB()
+  const tx = db.transaction(STORE, 'readwrite')
+  // No `await` on anything outside this transaction between get and put — that
+  // would let idb auto-commit the tx early. `applyMigrations` is synchronous.
+  const existingRaw = await tx.store.get(notebook.id)
+  let existing: NotebookJSON | undefined
+  if (existingRaw !== undefined) {
+    try {
+      existing = applyMigrations(existingRaw)
+    } catch {
+      existing = undefined // corrupt slot — overwrite it
+    }
+  }
+  if (existing && (base === null || existing.updatedAt > base)) {
+    await tx.done
+    return { ok: false, current: existing }
+  }
+  await tx.store.put(notebook)
+  await tx.done
+  return { ok: true }
 }
 
 /** Delete a notebook by id. No-op if it does not exist. */

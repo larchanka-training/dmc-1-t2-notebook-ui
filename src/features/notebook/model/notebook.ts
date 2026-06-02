@@ -21,6 +21,12 @@ export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.c
 export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
 export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
 
+// The `updatedAt` of the stored notebook version this tab is based on. Autosave
+// uses it as the compare-and-swap baseline: if IndexedDB contains a newer
+// version, this tab must not silently overwrite it. `null` means the tab has no
+// trusted persisted baseline yet (e.g. storage failed during boot).
+export const notebookBaseUpdatedAtAtom = atom<number | null>(null, 'notebook.baseUpdatedAt')
+
 // Flips to true once the boot-time load has settled (whether it restored a
 // stored notebook, seeded a fresh one, or failed and kept the seed). The page
 // gates the editor behind this so the user can't type into the seed in the
@@ -37,6 +43,15 @@ export function notebookSnapshot(): NotebookJSON {
     updatedAt: Date.now(),
   })
 }
+
+/** Replace the in-memory notebook with a persisted document. */
+export const restoreNotebook = action((stored: NotebookJSON) => {
+  notebookTitleAtom.set(stored.title)
+  notebookCreatedAtAtom.set(stored.createdAt)
+  notebookBaseUpdatedAtAtom.set(stored.updatedAt)
+  cellsAtom.set(fromJSON(stored))
+  clearHistory()
+}, 'notebook.restore')
 
 /**
  * Load the local notebook from IndexedDB on startup. If a notebook is stored,
@@ -55,11 +70,11 @@ export const loadNotebook = action(async () => {
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
     if (stored) {
-      notebookTitleAtom.set(stored.title)
-      notebookCreatedAtAtom.set(stored.createdAt)
-      cellsAtom.set(fromJSON(stored))
+      restoreNotebook(stored)
     } else {
-      await wrap(notebookStorage.put(notebookSnapshot()))
+      const seed = notebookSnapshot()
+      await wrap(notebookStorage.put(seed))
+      notebookBaseUpdatedAtAtom.set(seed.updatedAt)
     }
   } catch {
     // Corrupt/unreadable storage OR a failed seed write — keep the in-memory

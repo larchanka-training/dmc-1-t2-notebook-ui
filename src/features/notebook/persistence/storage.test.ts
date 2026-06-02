@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { FORMAT_VERSION, type NotebookJSON } from './schema'
-import { clear, get, list, put, remove } from './storage'
+import { clear, get, list, put, putIfNewer, remove } from './storage'
 
 // Cell id must be a UUID (schema validates `format: uuid`); notebooks here are
 // keyed/asserted by their own id, so a single fixed cell UUID is enough.
@@ -38,6 +38,31 @@ describe('notebook IndexedDB storage', () => {
     await put(notebook(id, 2, 'second'))
     expect((await get(id))?.title).toBe('second')
     expect(await list()).toHaveLength(1)
+  })
+
+  test('putIfNewer writes when the stored version matches the caller baseline', async () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    await put(notebook(id, 10, 'base'))
+    await expect(putIfNewer(notebook(id, 20, 'mine'), 10)).resolves.toEqual({ ok: true })
+    expect((await get(id))?.title).toBe('mine')
+  })
+
+  test('putIfNewer refuses to overwrite a newer stored version', async () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const otherTab = notebook(id, 30, 'other tab')
+    await put(otherTab)
+    const result = await putIfNewer(notebook(id, 20, 'stale tab'), 10)
+    expect(result).toEqual({ ok: false, current: otherTab })
+    expect((await get(id))?.title).toBe('other tab')
+  })
+
+  test('putIfNewer with a null baseline writes only into an empty slot', async () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const mine = notebook(id, 20, 'mine')
+    await expect(putIfNewer(mine, null)).resolves.toEqual({ ok: true })
+    expect((await get(id))?.title).toBe('mine')
+    await expect(putIfNewer(notebook(id, 30, 'other'), null)).resolves.toMatchObject({ ok: false })
+    expect((await get(id))?.title).toBe('mine')
   })
 
   test('list returns notebooks most recently edited first', async () => {

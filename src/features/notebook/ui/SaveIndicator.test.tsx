@@ -41,4 +41,12 @@ describe('SaveIndicator', () => {
     render(<SaveIndicator />)
     expect(screen.getByRole('button', { name: /save failed — retry/i })).toBeInTheDocument()
   })
+
+  test('offers reload and overwrite actions on cross-tab conflict', () => {
+    seedStatus('conflict')
+    render(<SaveIndicator />)
+    expect(screen.getByText(/changed in another tab/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /reload/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save mine/i })).toBeInTheDocument()
+  })
 })
