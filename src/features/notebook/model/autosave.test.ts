@@ -14,6 +14,7 @@ import {
 import {
   hasLocalChangesAtom,
   lastSavedAtAtom,
+  markBootRestored,
   reloadFromStorage,
   saveNow,
   saveStatusAtom,
@@ -227,5 +228,29 @@ describe('notebook autosave', () => {
     await vi.advanceTimersByTimeAsync(500)
     expect(putIfNewer).not.toHaveBeenCalled()
     stop()
+  })
+
+  describe('markBootRestored', () => {
+    test('surfaces "saved" from the stored timestamp after a real restore', () => {
+      notebookBaseUpdatedAtAtom.set(1_700_000_500_000)
+      markBootRestored()
+      expect(saveStatusAtom()).toBe('saved')
+      expect(lastSavedAtAtom()).toBe(1_700_000_500_000)
+    })
+
+    test('stays idle when there is no stored baseline (fresh seed / failed boot)', () => {
+      notebookBaseUpdatedAtAtom.set(null)
+      markBootRestored()
+      expect(saveStatusAtom()).toBe('idle')
+      expect(lastSavedAtAtom()).toBeNull()
+    })
+
+    test('does not override the newer-format gate', () => {
+      notebookBaseUpdatedAtAtom.set(1_700_000_500_000)
+      storageCompatibilityAtom.set('newer-format')
+      markBootRestored()
+      expect(saveStatusAtom()).toBe('idle')
+      expect(lastSavedAtAtom()).toBeNull()
+    })
   })
 })

@@ -171,6 +171,22 @@ export async function saveMine(): Promise<void> {
 }
 
 /**
+ * After boot, surface the saved indicator immediately when an EXISTING notebook
+ * was restored from storage — seeded from its stored `updatedAt` — instead of
+ * leaving the header blank until the first edit. Call this only when
+ * `loadNotebook()` reported a real restore (returns `true`): a fresh seed has
+ * nothing meaningful saved yet, and the newer-format gate already owns the
+ * status, so both are intentionally left untouched.
+ */
+export function markBootRestored(): void {
+  if (storageCompatibilityAtom() === 'newer-format') return
+  const base = notebookBaseUpdatedAtAtom()
+  if (base === null) return
+  lastSavedAtAtom.set(base)
+  saveStatusAtom.set('saved')
+}
+
+/**
  * Start autosaving for the app's lifetime. Subscribes to the content signal;
  * each change (re)arms a 500 ms timer, so only the last edit in a burst is
  * written. The first synchronous call on subscribe is skipped — loading a

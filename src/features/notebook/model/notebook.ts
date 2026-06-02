@@ -91,13 +91,21 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
  * (a later edit will retry the write and surface 'error' via the indicator).
  * History is cleared on every path (success or failure): the boot transition
  * is not an undoable user edit.
+ *
+ * Returns `true` only when an EXISTING stored notebook was restored, so the
+ * caller can show the saved indicator immediately. Seeding a fresh notebook,
+ * the newer-format gate, and any storage failure all return `false` (a base
+ * timestamp is set after seeding too, so the return value — not the base — is
+ * the reliable "was something restored" signal).
  */
 export const loadNotebook = action(async () => {
   storageCompatibilityAtom.set('ok')
+  let restored = false
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
     if (stored) {
       restoreNotebook(stored)
+      restored = true
     } else {
       const seed = notebookSnapshot()
       await wrap(notebookStorage.put(seed))
@@ -114,6 +122,7 @@ export const loadNotebook = action(async () => {
     clearHistory()
     notebookLoadedAtom.set(true)
   }
+  return restored
 }, 'notebook.load')
 
 // Record a structural change (add/delete/move/change-kind) as a history entry

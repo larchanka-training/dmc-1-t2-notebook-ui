@@ -20,6 +20,7 @@ export {
 } from './model/notebook'
 export {
   startAutosave,
+  markBootRestored,
   saveStatusAtom,
   lastSavedAtAtom,
   hasLocalChangesAtom,

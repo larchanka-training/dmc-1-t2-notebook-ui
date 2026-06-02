@@ -4,7 +4,7 @@ import { setAuthTokenGetter } from '@/shared/api'
 import { tokenAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
-import { loadNotebook, startAutosave } from '@/features/notebook'
+import { loadNotebook, markBootRestored, startAutosave } from '@/features/notebook'
 
 if (import.meta.env.MODE === 'development') {
   connectLogger()
@@ -47,7 +47,12 @@ rootFrame.run(() => {
 // being silently disabled for the whole session.
 rootFrame.run(async () => {
   try {
-    await wrap(loadNotebook())
+    // A real restore (existing stored notebook) surfaces "Saved · <time>" right
+    // away, seeded from the stored timestamp — instead of a blank indicator
+    // until the first edit. A fresh seed / newer-format / failure returns false
+    // and keeps the idle state.
+    const restored = await wrap(loadNotebook())
+    if (restored) markBootRestored()
   } finally {
     startAutosave()
   }

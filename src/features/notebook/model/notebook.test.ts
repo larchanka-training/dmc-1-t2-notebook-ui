@@ -285,7 +285,9 @@ describe('loadNotebook (boot)', () => {
   })
 
   test('seeds and persists a Welcome notebook when storage is empty', async () => {
-    await loadNotebook()
+    // Seeding is not a restore — the return flag is false so the caller keeps
+    // the indicator idle for a brand-new notebook.
+    expect(await loadNotebook()).toBe(false)
     // Seed cell stays in memory…
     expect(cellsAtom()).toHaveLength(1)
     expect(cellsAtom()[0].code()).toBe(SEED_CODE)
@@ -311,7 +313,9 @@ describe('loadNotebook (boot)', () => {
       ],
     }
     await notebookStorage.put(stored)
-    await loadNotebook()
+    // Restoring an existing notebook returns true so the caller can show the
+    // saved indicator immediately, seeded from the stored timestamp.
+    expect(await loadNotebook()).toBe(true)
     expect(cellsAtom().map((c) => c.code())).toEqual(['restored()'])
     expect(notebookTitleAtom()).toBe('Restored')
   })
@@ -329,7 +333,8 @@ describe('loadNotebook (boot)', () => {
     // must NOT reject, so app setup can still start autosave afterwards.
     vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
     vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
-    await expect(loadNotebook()).resolves.toBeUndefined()
+    // A failed seed write is not a restore — returns false, never rejects.
+    await expect(loadNotebook()).resolves.toBe(false)
     // Seed stays in memory (not wiped by the failed load), history is cleared
     // on the failure path too (clearHistory moved into `finally`).
     expect(cellsAtom()).toHaveLength(1)
@@ -341,7 +346,8 @@ describe('loadNotebook (boot)', () => {
     vi.spyOn(notebookStorage, 'get').mockRejectedValue(
       new NewerFormatError(FORMAT_VERSION + 1, FORMAT_VERSION),
     )
-    await expect(loadNotebook()).resolves.toBeUndefined()
+    // Newer-format is gated, not restored — returns false.
+    await expect(loadNotebook()).resolves.toBe(false)
     expect(storageCompatibilityAtom()).toBe('newer-format')
     expect(cellsAtom()).toHaveLength(1)
     expect(cellsAtom()[0].code()).toBe(SEED_CODE)
