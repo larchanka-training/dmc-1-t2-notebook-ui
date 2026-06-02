@@ -1,12 +1,11 @@
 # Authentication & Persistence — Frontend
 
-> Архитектурный документ. Целевая модель авторизации и хранения данных для JS Notebook (ui). Соответствует требованиям TARDIS-15.
+> Архитектурный документ. Реализованная модель авторизации и хранения данных для JS Notebook (ui). Соответствует TARDIS-15.
 >
-> Документ разделяет **текущее MVP-состояние PR #29** и **целевую**
-> OTP/JWT-модель. Backend PR #29 даёт placeholder auth:
-> `GET /api/v1/auth/me`, dev/test/local `X-User-Id` и `DEV_USER` fallback.
-> Реальная OTP/JWT-авторизация и замена текущего UI login-flow выполняются
-> отдельной задачей.
+> Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
+> Реализация завершена в PR #44 и ожидает готовности backend OTP/JWT endpoints
+> (`POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`).
+> До мержа BE-PR оба PR должны быть синхронизированы.
 
 ## Содержание
 
@@ -89,21 +88,28 @@
 | `session.refreshToken` | Opaque string, TTL 30 дней. Используется только в `POST /auth/refresh`. |
 | `session.user`         | Кэш текущего `User` (id, email, displayName).                           |
 
-Reatom-атомы (расширение текущего `ui/src/entities/session/model/session.ts`):
+Reatom-атомы (`ui/src/entities/session/model/session.ts`):
 
 ```ts
 export const accessTokenAtom = atom<string | null>(null, 'session.accessToken').extend(
-  withLocalStorage('session.accessToken'),
+  withLocalStorage({ key: 'session.accessToken', subscribe: false }),
 )
 
 export const refreshTokenAtom = atom<string | null>(null, 'session.refreshToken').extend(
-  withLocalStorage('session.refreshToken'),
+  withLocalStorage({ key: 'session.refreshToken', subscribe: false }),
 )
 
 export const userAtom = atom<User | null>(null, 'session.user').extend(
-  withLocalStorage('session.user'),
+  withLocalStorage({ key: 'session.user', subscribe: false }),
 )
+
+// Становится true после первого завершения loadCurrentUserAction (успех или ошибка).
+// AuthRouteGuard ждёт этого флага перед редиректом, чтобы не выбрасывать пользователя
+// при корректных токенах, когда user ещё не загружен из /auth/me.
+export const sessionRestoredAtom = atom(false, 'session.restored')
 ```
+
+> `subscribe: false` — `withLocalStorage` не регистрирует storage-listener сам; кросс-табовая синхронизация выполняется вручную в `setup.ts` (см. §7).
 
 ### 3.2. Почему localStorage, а не cookie
 
@@ -241,7 +247,15 @@ async function refreshOnce(): Promise<void> {
 | `/`                                           | redirect → `/login`             | redirect → `/notebooks` |
 | `/notebooks`, `/notebooks/:id`, `/about`, ... | redirect → `/login?from=<path>` | OK                      |
 
-«Авторизован» = `accessTokenAtom() !== null` **и** `userAtom() !== null` (последнее проверяется через `loadCurrentUserAction` при первой загрузке).
+«Авторизован» = `accessTokenAtom() !== null` **и** `userAtom() !== null`.
+
+При первой загрузке `setup.ts` запускает `loadCurrentUserAction`, который:
+
+1. Если токен есть — вызывает `GET /auth/me` и заполняет `userAtom`.
+2. При `401` — чистит сессию (`clearSession()`).
+3. В любом случае — устанавливает `sessionRestoredAtom = true`.
+
+`AuthRouteGuard` ждёт `sessionRestoredAtom`, чтобы не редиректить пользователя с валидным токеном, у которого `session.user` отсутствовал в `localStorage` (eviction, миграция).
 
 ### 6.2. Гостевого режима нет
 
@@ -249,7 +263,11 @@ async function refreshOnce(): Promise<void> {
 
 ### 6.3. Реализация
 
-`AuthRouteGuard` — компонент-обёртка вокруг `<Outlet />` в `ui/src/app/model/routes.tsx`. Проверяет `accessTokenAtom`, делает redirect через `<Navigate />` с сохранением `from` в state.
+`AuthRouteGuard` (`ui/src/app/ui/AuthRouteGuard.tsx`) — `reatomComponent`-обёртка вокруг защищённого контента. Логика:
+
+- `sessionRestoredAtom = false` + токен есть, но `userAtom = null` → показывает `null` (skeleton), ждёт restore.
+- `sessionRestoredAtom = true` + не авторизован → `window.location.replace('/login?from=<path>')`.
+- Авторизован → рендерит `children`.
 
 ---
 

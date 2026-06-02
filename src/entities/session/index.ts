@@ -5,4 +5,5 @@ export {
   setSession,
   setSessionUser,
   clearSession,
+  sessionRestoredAtom,
 } from './model/session'

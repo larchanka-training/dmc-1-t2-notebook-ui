@@ -212,14 +212,14 @@ components:
           type: string
           format: email
         displayName:
-          type: string
+          type: [string, 'null']
         roles:
           type: array
           items:
             type: string
           default: []
 
-    Error:
+    ApiError:
       type: object
       required: [code, message]
       properties:
@@ -229,6 +229,18 @@ components:
         message:
           type: string
           description: Human-readable error description.
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-field validation errors (validation errors only).
+
+    ApiErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiError'
 
   responses:
     Unauthorized:
@@ -236,16 +248,16 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            $ref: '#/components/schemas/ApiErrorResponse'
     BadRequest:
       description: Malformed request
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            $ref: '#/components/schemas/ApiErrorResponse'
     TooManyRequests:
       description: Rate limit exceeded
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            $ref: '#/components/schemas/ApiErrorResponse'

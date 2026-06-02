@@ -11,7 +11,7 @@ export async function requestOtp(email: string): Promise<OtpRequestResponse | nu
   const { data, error, response } = await authClient.POST('/auth/otp/request', {
     body: { email },
   })
-  if (error !== undefined) throw toApiError(response.status, error)
+  if (error !== undefined || !response.ok) throw toApiError(response.status, error)
   // 200 dev/local/test → OTP in body; 204 production → null
   return data ?? null
 }
@@ -31,8 +31,8 @@ export async function refreshTokens(refreshToken: string): Promise<RefreshRespon
 }
 
 export async function logout(refreshToken: string): Promise<void> {
-  // Logout is always 204 — no error responses defined in the schema.
-  await authClient.POST('/auth/logout', { body: { refreshToken } })
+  const { error, response } = await authClient.POST('/auth/logout', { body: { refreshToken } })
+  if (!response.ok) throw toApiError(response.status, error)
 }
 
 export async function getMe(): Promise<User> {

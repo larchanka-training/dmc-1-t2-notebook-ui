@@ -35,3 +35,7 @@ export const clearSession = action(() => {
   refreshTokenAtom.set(null)
   userAtom.set(null)
 }, 'session.clear')
+
+// Becomes true after the first loadCurrentUserAction attempt completes (success or failure).
+// AuthRouteGuard uses this to avoid redirecting before the initial /auth/me fetch settles.
+export const sessionRestoredAtom = atom(false, 'session.restored')

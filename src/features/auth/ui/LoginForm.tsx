@@ -1,22 +1,27 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, type FormEvent } from 'react'
 import { BookText, Loader2 } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { userAtom } from '@/entities/session'
-import type { auth as authApi } from '@/shared/api'
 import { OTP_EXPIRED_CODE, requestOtpAction, verifyOtpAction } from '../model/auth'
+import {
+  devOtpDataAtom,
+  loginEmailAtom,
+  loginOtpAtom,
+  loginStepAtom,
+  resendCountdownAtom,
+  tickCountdownAction,
+} from '../model/loginForm'
 import { DevOtpBanner } from './DevOtpBanner'
 
-type DevData = authApi.OtpRequestResponse
-
 export const LoginForm = reatomComponent(() => {
-  const [step, setStep] = useState<1 | 2>(1)
-  const [email, setEmail] = useState('')
-  const [otp, setOtp] = useState('')
-  const [devData, setDevData] = useState<DevData | null>(null)
-  const [countdown, setCountdown] = useState(45)
+  const step = loginStepAtom()
+  const email = loginEmailAtom()
+  const otp = loginOtpAtom()
+  const devData = devOtpDataAtom()
+  const countdown = resendCountdownAtom()
 
   const isSending = !requestOtpAction.ready()
   const isVerifying = !verifyOtpAction.ready()
@@ -26,8 +31,10 @@ export const LoginForm = reatomComponent(() => {
   // otp_expired → go back to step 1 so user can request a fresh code.
   useEffect(() => {
     if (verifyError === OTP_EXPIRED_CODE) {
-      setStep(1)
-      setOtp('')
+      wrap(() => {
+        loginStepAtom.set(1)
+        loginOtpAtom.set('')
+      })()
     }
   }, [verifyError])
 
@@ -36,17 +43,17 @@ export const LoginForm = reatomComponent(() => {
   // (cleanup + re-create on every tick), doubling up under React StrictMode.
   useEffect(() => {
     if (step !== 2) return
-    const id = window.setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : 0)), 1000)
+    const id = window.setInterval(wrap(tickCountdownAction), 1000)
     return () => clearInterval(id)
   }, [step])
 
   async function sendCode(emailToSend: string) {
     try {
       const data = await requestOtpAction(emailToSend)
-      setDevData(data)
-      setOtp('')
-      setCountdown(45)
-      setStep(2)
+      devOtpDataAtom.set(data)
+      loginOtpAtom.set('')
+      resendCountdownAtom.set(45)
+      loginStepAtom.set(2)
     } catch {
       // Error displayed via requestOtpAction.error().
     }
@@ -74,7 +81,7 @@ export const LoginForm = reatomComponent(() => {
   // doesn't appear immediately on the next step-2 screen before any attempt.
   const onBackToStep1 = wrap(() => {
     verifyOtpAction.error.set(undefined)
-    setStep(1)
+    loginStepAtom.set(1)
   })
 
   const user = userAtom()
@@ -112,7 +119,7 @@ export const LoginForm = reatomComponent(() => {
               autoComplete="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={wrap((e) => loginEmailAtom.set(e.target.value))}
               disabled={isSending}
             />
           </div>
@@ -152,7 +159,7 @@ export const LoginForm = reatomComponent(() => {
                 placeholder="000000"
                 className="tracking-[0.5em] text-center font-mono text-lg"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                onChange={wrap((e) => loginOtpAtom.set(e.target.value.replace(/\D/g, '')))}
                 disabled={isVerifying}
                 autoFocus
               />

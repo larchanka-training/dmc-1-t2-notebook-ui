@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Copy, Wrench } from 'lucide-react'
 import type { auth as authApi } from '@/shared/api'
 
@@ -6,14 +6,26 @@ type Props = authApi.OtpRequestResponse
 
 export function DevOtpBanner({ otp, expiresAt }: Props) {
   const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const expiresStr =
     new Date(expiresAt).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false }) + ' UTC'
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
+    },
+    [],
+  )
 
   const copy = () => {
     navigator.clipboard.writeText(otp).then(
       () => {
+        if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
         setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+        resetTimerRef.current = setTimeout(() => {
+          setCopied(false)
+          resetTimerRef.current = null
+        }, 2000)
       },
       () => {
         // Clipboard API unavailable (non-HTTPS or permission denied) — fail silently.

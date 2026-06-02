@@ -42,19 +42,35 @@ describe('requestOtp', () => {
     await expect(auth.requestOtp('a@b.com')).resolves.toEqual(body)
   })
 
-  test('400 throws BadRequestError', async () => {
+  test('400 throws BadRequestError with code from envelope', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(400, { code: 'invalid_email', message: 'bad email' }),
+      jsonResponse(400, { error: { code: 'invalid_email', message: 'bad email', fields: {} } }),
     )
-    await expect(auth.requestOtp('not-an-email')).rejects.toBeInstanceOf(BadRequestError)
+    const err = await auth.requestOtp('not-an-email').catch((e) => e)
+    expect(err).toBeInstanceOf(BadRequestError)
+    expect(err.code).toBe('invalid_email')
   })
 
   test('429 throws ApiError with status 429', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(429, { code: 'too_many_otp_requests', message: 'slow down' }),
+      jsonResponse(429, {
+        error: { code: 'too_many_otp_requests', message: 'slow down', fields: {} },
+      }),
     )
     const err = await auth.requestOtp('a@b.com').catch((e) => e)
     expect(err.status).toBe(429)
+  })
+
+  test('404 (undocumented) throws ApiError with status 404', async () => {
+    fetchMock.mockResolvedValueOnce(emptyResponse(404))
+    const err = await auth.requestOtp('a@b.com').catch((e) => e)
+    expect(err.status).toBe(404)
+  })
+
+  test('500 throws ApiError with status 500', async () => {
+    fetchMock.mockResolvedValueOnce(emptyResponse(500))
+    const err = await auth.requestOtp('a@b.com').catch((e) => e)
+    expect(err.status).toBe(500)
   })
 })
 
@@ -71,7 +87,7 @@ describe('verifyOtp', () => {
 
   test('401 invalid_otp throws UnauthorizedError', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(401, { code: 'invalid_otp', message: 'wrong code' }),
+      jsonResponse(401, { error: { code: 'invalid_otp', message: 'wrong code', fields: {} } }),
     )
     await expect(auth.verifyOtp({ email: 'a@b.com', otp: '000000' })).rejects.toBeInstanceOf(
       UnauthorizedError,
@@ -79,7 +95,9 @@ describe('verifyOtp', () => {
   })
 
   test('401 otp_expired throws UnauthorizedError with matching code', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(401, { code: 'otp_expired', message: 'expired' }))
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { error: { code: 'otp_expired', message: 'expired', fields: {} } }),
+    )
     const err = await auth.verifyOtp({ email: 'a@b.com', otp: '123456' }).catch((e) => e)
     expect(err).toBeInstanceOf(UnauthorizedError)
     expect(err.code).toBe('otp_expired')
@@ -95,7 +113,9 @@ describe('refreshTokens', () => {
 
   test('401 throws UnauthorizedError', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(401, { code: 'refresh_expired', message: 'expired' }),
+      jsonResponse(401, {
+        error: { code: 'refresh_expired', message: 'expired', fields: {} },
+      }),
     )
     await expect(auth.refreshTokens('stale')).rejects.toBeInstanceOf(UnauthorizedError)
   })
@@ -112,6 +132,12 @@ describe('logout', () => {
     await auth.logout('my-refresh-token')
     const body = JSON.parse(await lastRequest().text())
     expect(body).toEqual({ refreshToken: 'my-refresh-token' })
+  })
+
+  test('500 throws ApiError with status 500', async () => {
+    fetchMock.mockResolvedValueOnce(emptyResponse(500))
+    const err = await auth.logout('refresh-tok').catch((e) => e)
+    expect(err.status).toBe(500)
   })
 })
 

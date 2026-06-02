@@ -143,15 +143,22 @@ export interface components {
             id: string;
             /** Format: email */
             email: string;
-            displayName?: string;
+            displayName?: string | null;
             /** @default [] */
             roles: string[];
         };
-        Error: {
+        ApiError: {
             /** @description Machine-readable error code (e.g. `invalid_otp`). */
             code: string;
             /** @description Human-readable error description. */
             message: string;
+            /** @description Per-field validation errors (validation errors only). */
+            fields?: {
+                [key: string]: string;
+            };
+        };
+        ApiErrorResponse: {
+            error: components["schemas"]["ApiError"];
         };
     };
     responses: {
@@ -161,7 +168,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
         /** @description Malformed request */
@@ -170,7 +177,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
         /** @description Rate limit exceeded */
@@ -179,7 +186,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
     };

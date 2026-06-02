@@ -4,6 +4,7 @@ import {
   accessTokenAtom,
   clearSession,
   refreshTokenAtom,
+  sessionRestoredAtom,
   setSession,
   setSessionUser,
 } from '@/entities/session'
@@ -59,13 +60,15 @@ export const logoutAction = action(async () => {
 }, 'auth.logout')
 
 export const loadCurrentUserAction = action(async () => {
-  if (accessTokenAtom() === null) return
-  try {
-    const user = await wrap(authApi.getMe())
-    setSessionUser(user)
-  } catch (e) {
-    if (e instanceof UnauthorizedError) {
-      clearSession()
+  if (accessTokenAtom() !== null) {
+    try {
+      const user = await wrap(authApi.getMe())
+      setSessionUser(user)
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        clearSession()
+      }
     }
   }
+  sessionRestoredAtom.set(true)
 }, 'auth.loadCurrentUser')
