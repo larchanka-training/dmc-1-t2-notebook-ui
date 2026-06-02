@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   BookText,
   LogIn,
+  LogOut,
   LayoutGrid,
   Puzzle,
   Info,
@@ -16,6 +17,7 @@ import { reatomComponent } from '@reatom/react'
 import { userAtom } from '@/entities/session'
 import { themeAtom } from '@/entities/theme'
 import { createNotebookAction, notebookListResource } from '@/features/notebook'
+import { logoutAction } from '@/features/auth'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { ScrollArea } from '@/shared/ui/scroll-area'
@@ -42,9 +44,42 @@ const navComponents: NavItem[] = [
   { title: 'Custom', icon: Puzzle, url: '/components/custom' },
 ]
 
-const navAuth: NavItem[] = [{ title: 'Login', icon: LogIn, url: '/login' }]
-
 const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: '/about' }]
+
+const AuthSection = reatomComponent(() => {
+  const user = userAtom()
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>Account</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {user ? (
+            <>
+              <SidebarMenuItem>
+                <div className="px-2 py-1 text-xs text-muted-foreground truncate">
+                  {user.displayName ?? user.email}
+                </div>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={wrap(async () => logoutAction())}>
+                  <LogOut />
+                  <span>Log out</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </>
+          ) : (
+            <SidebarMenuItem>
+              <SidebarMenuButton render={<a href="/login" />}>
+                <LogIn />
+                <span>Log in</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}, 'AuthSection')
 
 const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavItem[] }) => {
   const { pathname } = urlAtom()
@@ -163,7 +198,7 @@ export function AppSidebar() {
         <NavGroup label="Workspace" items={navMain} />
         <NotebooksGroup />
         <NavGroup label="Components" items={navComponents} />
-        <NavGroup label="Auth" items={navAuth} />
+        <AuthSection />
         <NavGroup label="Info" items={navInfo} />
       </SidebarContent>
       <SidebarFooter className="border-t">

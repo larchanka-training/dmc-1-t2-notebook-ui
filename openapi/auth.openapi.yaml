@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auth API
-  version: 0.1.0
-  description: Demo auth API for PoC of API client generation.
+  version: 1.0.0
+  description: Authentication API — email OTP + JWT access/refresh tokens.
 
 servers:
   - url: http://localhost:3000/api
@@ -12,10 +12,10 @@ security:
   - bearerAuth: []
 
 paths:
-  /auth/login:
+  /auth/otp/request:
     post:
-      operationId: login
-      summary: Exchange credentials for a session token
+      operationId: requestOtp
+      summary: Request a one-time password for the given email
       tags: [auth]
       security: []
       requestBody:
@@ -23,36 +23,92 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginRequest'
+              $ref: '#/components/schemas/OtpRequest'
       responses:
         '200':
-          description: OK
+          description: >
+            OTP returned in response body (dev/local/test only).
+            Production always returns 204 — OTP is sent by email.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: '#/components/schemas/OtpRequestResponse'
+        '204':
+          description: No Content — OTP sent by email (production).
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      summary: Verify the one-time password and issue access + refresh tokens
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: OK — session created, tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      operationId: refreshTokens
+      summary: Rotate the refresh token and issue a new access token
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: OK — tokens rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /auth/logout:
     post:
       operationId: logout
-      summary: Invalidate the current session
+      summary: Revoke the current session
+      description: >
+        Idempotent — always returns 204 regardless of token state.
+        Authorization via refreshToken in the request body (not Bearer).
       tags: [auth]
-      security:
-        - bearerAuth: []
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
       responses:
         '204':
-          description: No Content
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: No Content — session revoked (idempotent)
 
   /auth/me:
     get:
       operationId: getMe
-      summary: Current authenticated user
+      summary: Return the current authenticated user
       tags: [auth]
       security:
         - bearerAuth: []
@@ -74,28 +130,76 @@ components:
       bearerFormat: JWT
 
   schemas:
-    LoginRequest:
+    OtpRequest:
       type: object
-      required: [email, password]
+      required: [email]
       properties:
         email:
           type: string
           format: email
           examples: ['user@example.com']
-        password:
-          type: string
-          format: password
-          minLength: 6
 
-    LoginResponse:
+    OtpRequestResponse:
       type: object
-      required: [token, user]
+      required: [otp, expiresAt]
+      description: Returned only in dev/local/test. Never present in production.
       properties:
-        token:
+        otp:
           type: string
-          description: 'JWT bearer token. Send as `Authorization: Bearer <token>`.'
+          description: One-time password value.
+          examples: ['123456']
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds when the OTP expires.
+
+    OtpVerifyRequest:
+      type: object
+      required: [email, otp]
+      properties:
+        email:
+          type: string
+          format: email
+        otp:
+          type: string
+          minLength: 6
+          maxLength: 6
+
+    AuthResponse:
+      type: object
+      required: [accessToken, refreshToken, user]
+      properties:
+        accessToken:
+          type: string
+          description: 'Short-lived JWT (15 min). Send as `Authorization: Bearer <token>`.'
+        refreshToken:
+          type: string
+          description: 'Opaque token (30 days). Use only in POST /auth/refresh and POST /auth/logout.'
         user:
           $ref: '#/components/schemas/User'
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    RefreshResponse:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    LogoutRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
 
     User:
       type: object
@@ -109,6 +213,11 @@ components:
           format: email
         displayName:
           type: string
+        roles:
+          type: array
+          items:
+            type: string
+          default: []
 
     Error:
       type: object
@@ -116,7 +225,7 @@ components:
       properties:
         code:
           type: string
-          description: Machine-readable error code (e.g. `invalid_credentials`).
+          description: Machine-readable error code (e.g. `invalid_otp`).
         message:
           type: string
           description: Human-readable error description.
@@ -130,6 +239,12 @@ components:
             $ref: '#/components/schemas/Error'
     BadRequest:
       description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded
       content:
         application/json:
           schema:

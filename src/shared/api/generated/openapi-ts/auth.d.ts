@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/auth/login": {
+    "/auth/otp/request": {
         parameters: {
             query?: never;
             header?: never;
@@ -13,8 +13,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Exchange credentials for a session token */
-        post: operations["login"];
+        /** Request a one-time password for the given email */
+        post: operations["requestOtp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/otp/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify the one-time password and issue access + refresh tokens */
+        post: operations["verifyOtp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate the refresh token and issue a new access token */
+        post: operations["refreshTokens"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30,7 +64,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Invalidate the current session */
+        /**
+         * Revoke the current session
+         * @description Idempotent — always returns 204 regardless of token state. Authorization via refreshToken in the request body (not Bearer).
+         */
         post: operations["logout"];
         delete?: never;
         options?: never;
@@ -45,7 +82,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current authenticated user */
+        /** Return the current authenticated user */
         get: operations["getMe"];
         put?: never;
         post?: never;
@@ -59,19 +96,47 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        LoginRequest: {
+        OtpRequest: {
             /**
              * Format: email
              * @example user@example.com
              */
             email: string;
-            /** Format: password */
-            password: string;
         };
-        LoginResponse: {
-            /** @description JWT bearer token. Send as `Authorization: Bearer <token>`. */
-            token: string;
+        /** @description Returned only in dev/local/test. Never present in production. */
+        OtpRequestResponse: {
+            /**
+             * @description One-time password value.
+             * @example 123456
+             */
+            otp: string;
+            /**
+             * Format: int64
+             * @description Unix timestamp in milliseconds when the OTP expires.
+             */
+            expiresAt: number;
+        };
+        OtpVerifyRequest: {
+            /** Format: email */
+            email: string;
+            otp: string;
+        };
+        AuthResponse: {
+            /** @description Short-lived JWT (15 min). Send as `Authorization: Bearer <token>`. */
+            accessToken: string;
+            /** @description Opaque token (30 days). Use only in POST /auth/refresh and POST /auth/logout. */
+            refreshToken: string;
             user: components["schemas"]["User"];
+        };
+        RefreshRequest: {
+            refreshToken: string;
+        };
+        RefreshResponse: {
+            accessToken: string;
+            refreshToken: string;
+        };
+        LogoutRequest: {
+            refreshToken: string;
         };
         User: {
             /** Format: uuid */
@@ -79,9 +144,11 @@ export interface components {
             /** Format: email */
             email: string;
             displayName?: string;
+            /** @default [] */
+            roles: string[];
         };
         Error: {
-            /** @description Machine-readable error code (e.g. `invalid_credentials`). */
+            /** @description Machine-readable error code (e.g. `invalid_otp`). */
             code: string;
             /** @description Human-readable error description. */
             message: string;
@@ -106,6 +173,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Rate limit exceeded */
+        TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -114,7 +190,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    login: {
+    requestOtp: {
         parameters: {
             query?: never;
             header?: never;
@@ -123,20 +199,78 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LoginRequest"];
+                "application/json": components["schemas"]["OtpRequest"];
             };
         };
         responses: {
-            /** @description OK */
+            /** @description OTP returned in response body (dev/local/test only). Production always returns 204 — OTP is sent by email. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoginResponse"];
+                    "application/json": components["schemas"]["OtpRequestResponse"];
+                };
+            };
+            /** @description No Content — OTP sent by email (production). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    verifyOtp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtpVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK — session created, tokens issued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    refreshTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description OK — tokens rotated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -147,16 +281,19 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
         responses: {
-            /** @description No Content */
+            /** @description No Content — session revoked (idempotent) */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            401: components["responses"]["Unauthorized"];
         };
     };
     getMe: {
