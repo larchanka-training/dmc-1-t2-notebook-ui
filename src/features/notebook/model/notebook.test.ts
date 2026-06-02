@@ -1,13 +1,20 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
+import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
   addCell,
   addCellAt,
   cellsAtom,
   changeCellKind,
   deleteCell,
+  loadNotebook,
+  LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
+  notebookTitleAtom,
   SEED_CODE,
+  storageCompatibilityAtom,
   updateCellCode,
 } from './notebook'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
@@ -197,4 +204,152 @@ describe('notebook store', () => {
 
   // runCell-related tests live in runtime.test.ts (this file covers only
   // CRUD over cellsAtom now).
+})
+
+// Persistence/sync prep: every cell carries a content-modification timestamp
+// (basis for last-write-wins) and a real UUID id (the backend contract expects
+// `format: uuid`). These cover the domain guarantees the serializer relies on.
+describe('cell updatedAt + id (sync prep)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('reatomCell assigns a UUID id', () => {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    expect(cellsAtom()[0].id).toMatch(uuidRe)
+    expect(addCell().id).toMatch(uuidRe)
+  })
+
+  test('updateCellCode bumps updatedAt', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, 'changed')
+    expect(cell.updatedAt()).toBeGreaterThan(before)
+  })
+
+  test('updateCellCode does not bump updatedAt for a no-op edit', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, cell.code()) // same content
+    expect(cell.updatedAt()).toBe(before)
+  })
+
+  test('reorder does not bump updatedAt (order is notebook-level)', () => {
+    vi.useFakeTimers()
+    const a = cellsAtom()[0]
+    const b = addCell()
+    const aBefore = a.updatedAt()
+    const bBefore = b.updatedAt()
+    vi.advanceTimersByTime(1000)
+    moveCellTo(b.id, 0)
+    expect(a.updatedAt()).toBe(aBefore)
+    expect(b.updatedAt()).toBe(bBefore)
+  })
+
+  test('changeCellKind bumps updatedAt on the re-created cell', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    changeCellKind(cell.id, 'markdown')
+    expect(cellsAtom()[0].updatedAt()).toBeGreaterThan(before)
+  })
+
+  test('undo restores the previous updatedAt', () => {
+    vi.useFakeTimers()
+    const [cell] = cellsAtom()
+    const before = cell.updatedAt()
+    vi.advanceTimersByTime(1000)
+    updateCellCode(cell.id, 'changed')
+    expect(cell.updatedAt()).toBeGreaterThan(before)
+    undo()
+    expect(cell.updatedAt()).toBe(before)
+  })
+})
+
+describe('loadNotebook (boot)', () => {
+  beforeEach(async () => {
+    await notebookStorage.clear()
+    notebookTitleAtom.set('Untitled notebook')
+    storageCompatibilityAtom.set('ok')
+  })
+
+  afterEach(() => {
+    // This block spies on storage; restore so the spy never leaks into the
+    // sibling tests above (no global restore in this file).
+    vi.restoreAllMocks()
+  })
+
+  test('seeds and persists a Welcome notebook when storage is empty', async () => {
+    // Seeding is not a restore — the return flag is false so the caller keeps
+    // the indicator idle for a brand-new notebook.
+    expect(await loadNotebook()).toBe(false)
+    // Seed cell stays in memory…
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    // …and was written to storage so a reload finds it.
+    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
+    expect(stored?.cells[0].content).toBe(SEED_CODE)
+  })
+
+  test('restores cells and title from a stored notebook', async () => {
+    const stored: NotebookJSON = {
+      formatVersion: FORMAT_VERSION,
+      id: LOCAL_NOTEBOOK_ID,
+      title: 'Restored',
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_500_000,
+      cells: [
+        {
+          id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          kind: 'code',
+          content: 'restored()',
+          updatedAt: 1,
+        },
+      ],
+    }
+    await notebookStorage.put(stored)
+    // Restoring an existing notebook returns true so the caller can show the
+    // saved indicator immediately, seeded from the stored timestamp.
+    expect(await loadNotebook()).toBe(true)
+    expect(cellsAtom().map((c) => c.code())).toEqual(['restored()'])
+    expect(notebookTitleAtom()).toBe('Restored')
+  })
+
+  test('does not record the boot transition in history', async () => {
+    addCell()
+    expect(canUndoAtom()).toBe(true)
+    await loadNotebook()
+    expect(canUndoAtom()).toBe(false)
+  })
+
+  test('stays best-effort when the initial seed write fails', async () => {
+    // Empty storage (so the seed-write branch runs) + a rejecting put: the
+    // documented failure case (quota / private mode / blocked DB). loadNotebook
+    // must NOT reject, so app setup can still start autosave afterwards.
+    vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
+    // A failed seed write is not a restore — returns false, never rejects.
+    await expect(loadNotebook()).resolves.toBe(false)
+    // Seed stays in memory (not wiped by the failed load), history is cleared
+    // on the failure path too (clearHistory moved into `finally`).
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    expect(canUndoAtom()).toBe(false)
+  })
+
+  test('marks storage as newer-format and keeps the seed when the stored notebook is too new', async () => {
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(
+      new NewerFormatError(FORMAT_VERSION + 1, FORMAT_VERSION),
+    )
+    // Newer-format is gated, not restored — returns false.
+    await expect(loadNotebook()).resolves.toBe(false)
+    expect(storageCompatibilityAtom()).toBe('newer-format')
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+  })
 })

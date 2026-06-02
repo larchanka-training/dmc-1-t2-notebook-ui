@@ -10,8 +10,25 @@ export {
   moveCellTo,
   changeCellKind,
   updateCellCode,
+  setNotebookTitle,
+  loadNotebook,
+  notebookLoadedAtom,
+  notebookBaseUpdatedAtAtom,
+  storageCompatibilityAtom,
+  restoreNotebook,
   SEED_CODE,
 } from './model/notebook'
+export {
+  startAutosave,
+  markBootRestored,
+  saveStatusAtom,
+  lastSavedAtAtom,
+  hasLocalChangesAtom,
+  reloadFromStorage,
+  saveMine,
+  saveNow,
+} from './model/autosave'
+export type { SaveStatus } from './model/autosave'
 export {
   runCell,
   runAll,

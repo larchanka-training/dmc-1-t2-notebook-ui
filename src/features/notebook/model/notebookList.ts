@@ -8,6 +8,7 @@ import {
   wrap,
 } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { newId } from '@/shared/lib/id'
 
 export const notebookListResource = computed(
   async () => await wrap(notebookApi.list()),
@@ -21,7 +22,7 @@ export const createNotebookAction = action(async (title: string) => {
   if (!trimmed) return null
 
   const optimistic: notebookApi.Notebook = {
-    id: `tmp-${crypto.randomUUID()}`,
+    id: `tmp-${newId()}`,
     title: trimmed,
     createdAt: new Date().toISOString(),
     cells: [],

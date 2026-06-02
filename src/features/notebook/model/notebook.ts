@@ -1,20 +1,140 @@
-import { action, atom } from '@reatom/core'
+import { action, atom, wrap } from '@reatom/core'
+import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
+import { fromJSON, toJSON } from '../persistence/serialize'
+import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
-import { recordOperation } from './history'
+import { clearHistory, recordOperation } from './history'
+import { bumpNotebookRevision } from './revision'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
+// Single-notebook MVP: the editor owns exactly one notebook with a stable id.
+// Multi-notebook (a list, routing by id) is a later epic; until then this
+// constant is the persistence key for the one local notebook.
+export const LOCAL_NOTEBOOK_ID = '00000000-0000-4000-8000-000000000001'
+
 export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
+
+// Notebook-level metadata, separate from the cell list. There is no title UI
+// yet, but the persistent format carries these fields (aligned with the
+// backend contract), so they live here as the single source the serializer
+// and the loader read/write.
+export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
+export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
+
+// The `updatedAt` of the stored notebook version this tab is based on. Autosave
+// uses it as the compare-and-swap baseline: if IndexedDB contains a newer
+// version, this tab must not silently overwrite it. `null` means the tab has no
+// trusted persisted baseline yet (e.g. storage failed during boot).
+export const notebookBaseUpdatedAtAtom = atom<number | null>(null, 'notebook.baseUpdatedAt')
+
+// Flips to true once the boot-time load has settled (whether it restored a
+// stored notebook, seeded a fresh one, or failed and kept the seed). The page
+// gates the editor behind this so the user can't type into the seed in the
+// brief window before the async IndexedDB read resolves — that input would be
+// overwritten by the restored cells. Single-notebook MVP; one boot per session.
+export const notebookLoadedAtom = atom(false, 'notebook.loaded')
+
+export type StorageCompatibility = 'ok' | 'newer-format'
+
+// Storage compatibility gate. If IndexedDB contains a notebook created by a
+// newer app version, this older client must not write over it. The editor stays
+// readable with the in-memory seed, but autosave/overwrite actions are blocked
+// until the user opens the notebook in a newer build.
+export const storageCompatibilityAtom = atom<StorageCompatibility>(
+  'ok',
+  'notebook.storageCompatibility',
+)
+
+/** Serialize the current in-memory notebook (cells + metadata) to JSON. */
+export function notebookSnapshot(): NotebookJSON {
+  return toJSON(cellsAtom(), {
+    id: LOCAL_NOTEBOOK_ID,
+    title: notebookTitleAtom(),
+    createdAt: notebookCreatedAtAtom(),
+    updatedAt: Date.now(),
+  })
+}
+
+// The only sanctioned way to change the notebook title. Title is persisted
+// content, so every mutation MUST bump the revision (otherwise a title-only
+// edit would not be picked up by autosave). Routing it through one action keeps
+// that guarantee in a single place instead of relying on every future caller to
+// remember the bump.
+export const setNotebookTitle = action((title: string) => {
+  if (notebookTitleAtom() === title) return
+  notebookTitleAtom.set(title)
+  bumpNotebookRevision()
+}, 'notebook.setTitle')
+
+/** Replace the in-memory notebook with a persisted document. */
+export const restoreNotebook = action((stored: NotebookJSON) => {
+  notebookTitleAtom.set(stored.title)
+  notebookCreatedAtAtom.set(stored.createdAt)
+  notebookBaseUpdatedAtAtom.set(stored.updatedAt)
+  cellsAtom.set(fromJSON(stored))
+  // One bump for the whole restore (cells + title + metadata replaced at once).
+  bumpNotebookRevision()
+  clearHistory()
+}, 'notebook.restore')
+
+/**
+ * Load the local notebook from IndexedDB on startup. If a notebook is stored,
+ * its cells and metadata replace the in-memory seed; otherwise the seed is
+ * persisted as the initial "Welcome" notebook so a reload before any edit
+ * still finds it.
+ *
+ * Best-effort by design: ANY storage failure — an unreadable read OR a failed
+ * seed write — is swallowed, leaving the in-memory seed in place. The action
+ * never rejects, so the caller can unconditionally start autosave afterwards
+ * (a later edit will retry the write and surface 'error' via the indicator).
+ * History is cleared on every path (success or failure): the boot transition
+ * is not an undoable user edit.
+ *
+ * Returns `true` only when an EXISTING stored notebook was restored, so the
+ * caller can show the saved indicator immediately. Seeding a fresh notebook,
+ * the newer-format gate, and any storage failure all return `false` (a base
+ * timestamp is set after seeding too, so the return value — not the base — is
+ * the reliable "was something restored" signal).
+ */
+export const loadNotebook = action(async () => {
+  storageCompatibilityAtom.set('ok')
+  let restored = false
+  try {
+    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    if (stored) {
+      restoreNotebook(stored)
+      restored = true
+    } else {
+      const seed = notebookSnapshot()
+      await wrap(notebookStorage.put(seed))
+      notebookBaseUpdatedAtAtom.set(seed.updatedAt)
+    }
+  } catch (error) {
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      notebookBaseUpdatedAtAtom.set(null)
+    }
+    // Corrupt/unreadable storage OR a failed seed write — keep the in-memory
+    // seed. Never block the editor or autosave startup on storage I/O.
+  } finally {
+    clearHistory()
+    notebookLoadedAtom.set(true)
+  }
+  return restored
+}, 'notebook.load')
 
 // Record a structural change (add/delete/move/change-kind) as a history entry
 // by snapshotting the cell array. Undo/redo restore the snapshot directly via
 // `cellsAtom.set`, never through these actions, so they don't re-enter the
 // stack. Snapshots keep the same Cell instances, so a restored cell brings
-// back its code/output/executionCount intact. No-ops (before === after) are
-// not recorded.
+// back its code/output/executionCount/updatedAt intact. No-ops (before ===
+// after) are not recorded.
 function recordStructural(before: Cell[]): void {
   const after = cellsAtom()
   if (before === after) return
+  bumpNotebookRevision()
   recordOperation({
     undo: () => cellsAtom.set(before),
     redo: () => cellsAtom.set(after),
@@ -104,13 +224,25 @@ export const updateCellCode = action((id: string, code: string) => {
   if (!cell) return
   const previous = cell.code()
   if (previous === code) return
+  const previousUpdatedAt = cell.updatedAt()
+  const now = Date.now()
   cell.code.set(code)
+  cell.updatedAt.set(now)
+  bumpNotebookRevision()
   // Edits coalesce per cell within the history time window, so a burst of
-  // keystrokes collapses into one undo step. Restoring drives the code atom
-  // directly (not via this action), so undo/redo don't re-record.
+  // keystrokes collapses into one undo step. Restoring drives the atoms
+  // directly (not via this action), so undo/redo don't re-record. The
+  // content timestamp is snapshotted both ways so undo/redo stay
+  // deterministic (no Date.now() at restore time).
   recordOperation({
-    undo: () => cell.code.set(previous),
-    redo: () => cell.code.set(code),
+    undo: () => {
+      cell.code.set(previous)
+      cell.updatedAt.set(previousUpdatedAt)
+    },
+    redo: () => {
+      cell.code.set(code)
+      cell.updatedAt.set(now)
+    },
     coalesceKey: `edit:${id}`,
   })
 }, 'notebook.cells.updateCode')
