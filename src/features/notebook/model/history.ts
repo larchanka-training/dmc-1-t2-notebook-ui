@@ -3,8 +3,10 @@ import { action, atom, computed } from '@reatom/core'
 // Notebook-level undo/redo. The stack holds the last 50 user operations over
 // the cell list — add, delete, move, change-kind, edit-source. Output and
 // executionCount changes are deliberately NOT recorded (running a cell is not
-// an "edit" you undo). The stack is in-memory and cleared when a different
-// notebook is opened (or on reload — there is no persistence yet).
+// an "edit" you undo). The stack itself is in-memory: it is reset on boot-load
+// (`clearHistory` in notebook.ts). Cell content is persisted separately (in
+// IndexedDB), but the undo history is not — a reloaded notebook starts with an
+// empty stack.
 //
 // An Operation is a pair of thunks that drive the model directly (not through
 // the recording actions), so applying undo/redo never re-enters the history.
