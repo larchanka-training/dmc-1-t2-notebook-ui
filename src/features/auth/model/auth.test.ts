@@ -10,6 +10,7 @@ import {
   accessTokenAtom,
   clearSession,
   refreshTokenAtom,
+  sessionRestoredAtom,
   setSession,
   userAtom,
 } from '@/entities/session'
@@ -127,6 +128,11 @@ describe('loadCurrentUserAction', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
+  test('sets sessionRestoredAtom when no token', async () => {
+    await loadCurrentUserAction()
+    expect(sessionRestoredAtom()).toBe(true)
+  })
+
   test('loads user when token is present', async () => {
     setSession(stubSession)
     vi.spyOn(authApi, 'getMe').mockResolvedValue({ ...stubUser, displayName: 'Alice' })
@@ -134,6 +140,15 @@ describe('loadCurrentUserAction', () => {
     await loadCurrentUserAction()
 
     expect(userAtom()).toEqual({ ...stubUser, displayName: 'Alice' })
+  })
+
+  test('sets sessionRestoredAtom after successful user load', async () => {
+    setSession(stubSession)
+    vi.spyOn(authApi, 'getMe').mockResolvedValue(stubUser)
+
+    await loadCurrentUserAction()
+
+    expect(sessionRestoredAtom()).toBe(true)
   })
 
   test('drops session when server returns 401', async () => {
@@ -146,5 +161,16 @@ describe('loadCurrentUserAction', () => {
 
     expect(accessTokenAtom()).toBeNull()
     expect(userAtom()).toBeNull()
+  })
+
+  test('sets sessionRestoredAtom even after 401', async () => {
+    setSession(stubSession)
+    vi.spyOn(authApi, 'getMe').mockRejectedValue(
+      new UnauthorizedError('unauthenticated', 'expired'),
+    )
+
+    await loadCurrentUserAction()
+
+    expect(sessionRestoredAtom()).toBe(true)
   })
 })
