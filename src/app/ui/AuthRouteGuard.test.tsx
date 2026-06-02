@@ -27,7 +27,11 @@ afterEach(() => {
 describe('AuthRouteGuard', () => {
   test('unauthenticated (session restored): redirects to /login?from=<pathname>', () => {
     sessionRestoredAtom.set(true)
-    render(<AuthRouteGuard><div>secret</div></AuthRouteGuard>)
+    render(
+      <AuthRouteGuard>
+        <div>secret</div>
+      </AuthRouteGuard>,
+    )
     expect(replaceSpy).toHaveBeenCalledWith('/login?from=%2Fprotected')
     expect(screen.queryByText('secret')).toBeNull()
   })
@@ -35,7 +39,11 @@ describe('AuthRouteGuard', () => {
   test('authenticated: renders children without redirecting', () => {
     setSession(stubSession)
     sessionRestoredAtom.set(true)
-    render(<AuthRouteGuard><div>secret</div></AuthRouteGuard>)
+    render(
+      <AuthRouteGuard>
+        <div>secret</div>
+      </AuthRouteGuard>,
+    )
     expect(screen.getByText('secret')).toBeInTheDocument()
     expect(replaceSpy).not.toHaveBeenCalled()
   })
@@ -45,7 +53,11 @@ describe('AuthRouteGuard', () => {
     // Token is in localStorage but /auth/me hasn't resolved yet.
     accessTokenAtom.set('tok')
     // userAtom = null, sessionRestoredAtom = false → isPendingRestore
-    render(<AuthRouteGuard><div>secret</div></AuthRouteGuard>)
+    render(
+      <AuthRouteGuard>
+        <div>secret</div>
+      </AuthRouteGuard>,
+    )
     expect(screen.queryByText('secret')).toBeNull()
     expect(replaceSpy).not.toHaveBeenCalled()
   })
@@ -54,7 +66,11 @@ describe('AuthRouteGuard', () => {
     // Simulates loadCurrentUserAction completing with a 401 → clearSession() ran
     sessionRestoredAtom.set(true)
     // accessTokenAtom = null (cleared), userAtom = null
-    render(<AuthRouteGuard><div>secret</div></AuthRouteGuard>)
+    render(
+      <AuthRouteGuard>
+        <div>secret</div>
+      </AuthRouteGuard>,
+    )
     expect(replaceSpy).toHaveBeenCalledWith('/login?from=%2Fprotected')
   })
 })
