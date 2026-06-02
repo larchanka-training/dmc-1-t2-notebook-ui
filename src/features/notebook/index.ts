@@ -11,6 +11,7 @@ export {
   changeCellKind,
   updateCellCode,
   loadNotebook,
+  notebookLoadedAtom,
   SEED_CODE,
 } from './model/notebook'
 export { startAutosave, saveStatusAtom, lastSavedAtAtom } from './model/autosave'

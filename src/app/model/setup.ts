@@ -40,7 +40,15 @@ rootFrame.run(() => {
 // pending debounced save is never dropped by navigating to another route
 // mid-edit. `loadNotebook` is async and dispatched through rootFrame under
 // clearStack(), the same way the session restore above is.
+//
+// `startAutosave()` runs in `finally`: `loadNotebook` is best-effort and
+// shouldn't reject, but should it ever throw, autosave must still start so a
+// later edit can persist (and surface 'error' on the indicator) instead of
+// being silently disabled for the whole session.
 rootFrame.run(async () => {
-  await wrap(loadNotebook())
-  startAutosave()
+  try {
+    await wrap(loadNotebook())
+  } finally {
+    startAutosave()
+  }
 })

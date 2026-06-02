@@ -21,6 +21,13 @@ export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.c
 export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
 export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
 
+// Flips to true once the boot-time load has settled (whether it restored a
+// stored notebook, seeded a fresh one, or failed and kept the seed). The page
+// gates the editor behind this so the user can't type into the seed in the
+// brief window before the async IndexedDB read resolves — that input would be
+// overwritten by the restored cells. Single-notebook MVP; one boot per session.
+export const notebookLoadedAtom = atom(false, 'notebook.loaded')
+
 /** Serialize the current in-memory notebook (cells + metadata) to JSON. */
 export function notebookSnapshot(): NotebookJSON {
   return toJSON(cellsAtom(), {
@@ -35,27 +42,32 @@ export function notebookSnapshot(): NotebookJSON {
  * Load the local notebook from IndexedDB on startup. If a notebook is stored,
  * its cells and metadata replace the in-memory seed; otherwise the seed is
  * persisted as the initial "Welcome" notebook so a reload before any edit
- * still finds it. History is cleared either way — the boot transition is not
- * an undoable user edit. Best-effort: a storage failure leaves the seed in
- * place rather than blocking the editor.
+ * still finds it.
+ *
+ * Best-effort by design: ANY storage failure — an unreadable read OR a failed
+ * seed write — is swallowed, leaving the in-memory seed in place. The action
+ * never rejects, so the caller can unconditionally start autosave afterwards
+ * (a later edit will retry the write and surface 'error' via the indicator).
+ * History is cleared on every path (success or failure): the boot transition
+ * is not an undoable user edit.
  */
 export const loadNotebook = action(async () => {
-  let stored: NotebookJSON | undefined
   try {
-    stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    if (stored) {
+      notebookTitleAtom.set(stored.title)
+      notebookCreatedAtAtom.set(stored.createdAt)
+      cellsAtom.set(fromJSON(stored))
+    } else {
+      await wrap(notebookStorage.put(notebookSnapshot()))
+    }
   } catch {
-    // Corrupt/unreadable storage — fall back to the in-memory seed.
-    return
+    // Corrupt/unreadable storage OR a failed seed write — keep the in-memory
+    // seed. Never block the editor or autosave startup on storage I/O.
+  } finally {
+    clearHistory()
+    notebookLoadedAtom.set(true)
   }
-
-  if (stored) {
-    notebookTitleAtom.set(stored.title)
-    notebookCreatedAtAtom.set(stored.createdAt)
-    cellsAtom.set(fromJSON(stored))
-  } else {
-    await wrap(notebookStorage.put(notebookSnapshot()))
-  }
-  clearHistory()
 }, 'notebook.load')
 
 // Record a structural change (add/delete/move/change-kind) as a history entry

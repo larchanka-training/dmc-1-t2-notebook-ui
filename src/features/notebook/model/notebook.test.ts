@@ -275,6 +275,12 @@ describe('loadNotebook (boot)', () => {
     notebookTitleAtom.set('Untitled notebook')
   })
 
+  afterEach(() => {
+    // This block spies on storage; restore so the spy never leaks into the
+    // sibling tests above (no global restore in this file).
+    vi.restoreAllMocks()
+  })
+
   test('seeds and persists a Welcome notebook when storage is empty', async () => {
     await loadNotebook()
     // Seed cell stays in memory…
@@ -311,6 +317,20 @@ describe('loadNotebook (boot)', () => {
     addCell()
     expect(canUndoAtom()).toBe(true)
     await loadNotebook()
+    expect(canUndoAtom()).toBe(false)
+  })
+
+  test('stays best-effort when the initial seed write fails', async () => {
+    // Empty storage (so the seed-write branch runs) + a rejecting put: the
+    // documented failure case (quota / private mode / blocked DB). loadNotebook
+    // must NOT reject, so app setup can still start autosave afterwards.
+    vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
+    await expect(loadNotebook()).resolves.toBeUndefined()
+    // Seed stays in memory (not wiped by the failed load), history is cleared
+    // on the failure path too (clearHistory moved into `finally`).
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
     expect(canUndoAtom()).toBe(false)
   })
 })
