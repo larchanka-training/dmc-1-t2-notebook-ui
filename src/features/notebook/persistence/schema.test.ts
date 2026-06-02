@@ -48,6 +48,18 @@ describe('notebook schema validator', () => {
     expect(isNotebookJSON({ ...nb, cells: [{ ...nb.cells[0], kind: 'text' }] })).toBe(false)
   })
 
+  test('rejects a cell whose id is not a UUID', () => {
+    // A broken client-side id fallback (non-secure origin) used to leak short
+    // random strings; the backend contract is `format: uuid`, so reject them
+    // at the boundary rather than letting them through to sync.
+    const nb = validNotebook()
+    expect(isNotebookJSON({ ...nb, cells: [{ ...nb.cells[0], id: 'k3n9xqz' }] })).toBe(false)
+  })
+
+  test('rejects a notebook whose id is not a UUID', () => {
+    expect(isNotebookJSON({ ...validNotebook(), id: 'not-a-uuid' })).toBe(false)
+  })
+
   test('rejects a cell with a non-number updatedAt', () => {
     const nb = validNotebook()
     expect(isNotebookJSON({ ...nb, cells: [{ ...nb.cells[0], updatedAt: '0' }] })).toBe(false)

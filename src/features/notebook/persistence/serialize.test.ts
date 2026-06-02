@@ -23,7 +23,9 @@ describe('notebook serialize', () => {
   })
 
   test('toJSON produces schema-valid output', () => {
-    const json = toJSON([reatomCell('x', 'code', 'c1', 1)], meta)
+    // schema validation requires UUID ids, so use one here (the mapping tests
+    // above keep short ids for readability since the pure mapper doesn't validate).
+    const json = toJSON([reatomCell('x', 'code', '22222222-2222-2222-2222-222222222222', 1)], meta)
     expect(isNotebookJSON(json)).toBe(true)
     expect(json.formatVersion).toBe(1)
   })

@@ -46,14 +46,23 @@ export interface NotebookJSON {
 
 const CELL_KINDS: readonly CellKind[] = ['code', 'markdown']
 
+// Cell/notebook ids are RFC 4122 UUIDs (backend `CellSchema.id` is
+// `format: uuid`). Validate the shape at the boundary so a non-UUID id — e.g.
+// from a broken client-side fallback — is rejected before it can reach sync.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_RE.test(value)
 }
 
 function isCellJSON(value: unknown): value is CellJSON {
   if (!isObject(value)) return false
   return (
-    typeof value['id'] === 'string' &&
+    isUuid(value['id']) &&
     typeof value['content'] === 'string' &&
     typeof value['updatedAt'] === 'number' &&
     Number.isFinite(value['updatedAt']) &&
@@ -71,7 +80,7 @@ export function isNotebookJSON(value: unknown): value is NotebookJSON {
   if (!isObject(value)) return false
   return (
     typeof value['formatVersion'] === 'number' &&
-    typeof value['id'] === 'string' &&
+    isUuid(value['id']) &&
     typeof value['title'] === 'string' &&
     typeof value['createdAt'] === 'number' &&
     Number.isFinite(value['createdAt']) &&

@@ -1,4 +1,5 @@
 import { atom, type Atom } from '@reatom/core'
+import { newId } from '@/shared/lib/id'
 import type { OutputItem } from '../runtime/types'
 
 export type CellStatus =
@@ -36,7 +37,7 @@ export interface Cell {
 export function reatomCell(
   initialCode = '',
   kind: CellKind = 'code',
-  id: string = crypto.randomUUID(),
+  id: string = newId(),
   updatedAt: number = Date.now(),
 ): Cell {
   return {

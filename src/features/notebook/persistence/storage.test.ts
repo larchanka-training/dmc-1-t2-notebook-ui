@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, test } from 'vitest'
 import { FORMAT_VERSION, type NotebookJSON } from './schema'
 import { clear, get, list, put, remove } from './storage'
 
+// Cell id must be a UUID (schema validates `format: uuid`); notebooks here are
+// keyed/asserted by their own id, so a single fixed cell UUID is enough.
+const CELL_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+
 function notebook(id: string, updatedAt: number, title = 'NB'): NotebookJSON {
   return {
     formatVersion: FORMAT_VERSION,
@@ -9,7 +13,7 @@ function notebook(id: string, updatedAt: number, title = 'NB'): NotebookJSON {
     title,
     createdAt: 1_700_000_000_000,
     updatedAt,
-    cells: [{ id: `${id}-c1`, kind: 'code', content: 'x', updatedAt }],
+    cells: [{ id: CELL_ID, kind: 'code', content: 'x', updatedAt }],
   }
 }
 
