@@ -1,152 +1,265 @@
 # Epic 02 — Notebook data model & persistence
 
+> **Статус (TARDIS-72).** Локальная персистентность реализована: ноутбук
+> переживает перезагрузку вкладки. Этот документ приведён в соответствие с
+> кодом (AGENTS.md §9). Разделы ниже описывают **реализованное** состояние и
+> явно помечают отложенное. Исходный план эпика был шире и местами расходился
+> с тем, как уже устроен код, — устаревшие пункты переписаны под факт.
+
 ## Why
 
-Сегодня ноутбук живёт **только в Reatom-атомах в памяти** — при перезагрузке вкладки всё теряется. В доке проекта обещается «офлайн через IndexedDB», но это не реализовано.
+Раньше ноутбук жил **только в Reatom-атомах в памяти** — при перезагрузке
+вкладки всё терялось. Теперь ноутбук сохраняется в IndexedDB и восстанавливается
+при загрузке страницы.
 
-Дополнительно — модель противоречива:
+Что заложено этим эпиком:
 
-- Дока использует `type: "code" | "text"`.
-- Реализация — `kind: "code" | "markdown"`.
-- Сериализованного формата ноутбука нет вовсе.
-- Нет `schemaVersion` — любая будущая миграция (например, добавление shared-scope-metadata, executionCount, outputs) будет ломающей.
+- **Версионируемый persistent-формат** (`formatVersion`) — основа для будущих
+  миграций без поломки уже сохранённых ноутбуков.
+- **Локальный store** на IndexedDB.
+- Схема данных **выровнена с бэк-контрактом** (`api/docs/openapi.json`,
+  `api/docs/auth.md` §7.2), чтобы будущий sync (Epic 05) лёг поверх без
+  миграции формата.
 
-Эпик закладывает **версионируемый persistent-формат** и **локальный store**, на которые опираются все последующие эпики (sync, шеринг, .ipynb-импорт).
+Терминология `kind: 'code' | 'markdown'` уже была единой в коде и сохранена.
 
 ## User stories
 
-- Как пользователь, я не теряю ноутбук при перезагрузке вкладки.
-- Как пользователь, я работаю с ноутбуком офлайн — изменения сохраняются автоматически.
-- Как пользователь, я открываю ноутбук и вижу outputs, которые были в момент последнего запуска (если шарят ссылку — тоже видит).
-- Как разработчик, я могу выкатить новую версию формата без поломки уже сохранённых ноутбуков.
+- Как пользователь, я не теряю ноутбук при перезагрузке вкладки. ✅
+- Как пользователь, я работаю с ноутбуком офлайн — изменения сохраняются
+  автоматически (debounce-autosave). ✅
+- Как разработчик, я могу выкатить новую версию формата без поломки уже
+  сохранённых ноутбуков (скелет миграций + тест `v0 → v1`). ✅
 
-## Acceptance criteria
+Outputs **намеренно не персистятся** (см. раздел «Формат»), поэтому истории про
+«вижу сохранённые outputs» в этом эпике нет — вывод воспроизводится повторным
+запуском.
+
+## Реализовано (TARDIS-72)
 
 ### Формат
 
-- [ ] У каждого ноутбука есть `schemaVersion: number` (текущая — `1`).
-- [ ] Поля JSON: `id`, `schemaVersion`, `title`, `createdAt`, `updatedAt`, `cells[]`, `settings?`.
-- [ ] У каждой ячейки: `id`, `kind: 'code' | 'markdown'`, `source: string`, `executionCount: number | null`, `outputs: OutputItem[]` (из [Epic 01](./01-execution-runtime.md)), `metadata?: Record<string, unknown>`.
-- [ ] Терминология **единая везде**: `kind`, не `type`; `markdown`, не `text`; `source`, не `content`/`code`. OpenAPI (`openapi/notebook.openapi.yaml`) приводится к этой же терминологии.
-- [ ] JSON-схема валидируется (Zod) при чтении из IndexedDB и при импорте.
+Источник истины формата — `src/features/notebook/persistence/schema.ts`.
+
+- [x] У ноутбука есть `formatVersion: number` (текущая — `1`). Имя выровнено
+      с бэком (`format_version`), не `schemaVersion`.
+- [x] `NotebookJSON`: `formatVersion`, `id`, `title`, `createdAt`, `updatedAt`,
+      `cells[]`. Времена — **Unix epoch ms (`number`)**, как на бэке (не ISO).
+- [x] `CellJSON`: `id` (UUID), `kind: 'code' | 'markdown'`, `content: string`,
+      `updatedAt: number` (ms). Поле исходника — **`content`** (= бэк
+      `CellSchema.content`); домен-атом остаётся `code`, mapping живёт в
+      `toJSON`/`fromJSON`.
+- [x] cell `id` — client-generated UUID через `newId()` (`crypto.randomUUID()`
+      при наличии + UUID-shaped fallback для insecure origins; бэк ждёт
+      `format: uuid`).
+- [x] Валидация на границе — **ручной type-guard** `isNotebookJSON` /
+      `assertNotebookJSON` (не Zod: лишняя зависимость для v1 не нужна; Zod
+      окупится на импорте `.ipynb`).
+
+**Outputs и `executionCount` НЕ персистятся** (решение TARDIS-72):
+
+- вывод — эфемерный продукт прогона, воспроизводим повторным Run;
+- `OutputItem` включает base64-`image` и `html` — хранить их раздуло бы
+  storage без пользы;
+- бэк outputs тоже не хранит — выравниваемся с контрактом.
+
+`settings` и `metadata` в v1 не вводим — их добавит отдельная миграция, когда
+появится потребитель.
 
 ### Миграции
 
-- [ ] Есть массив `migrations: Record<from, (json) => json>` в `src/features/notebook/persistence/migrations.ts`.
-- [ ] При чтении ноутбука неизвестной версии — миграция последовательно до текущей.
-- [ ] При чтении версии > текущей (пользователь откатил клиент) — показываем явную ошибку «ноутбук создан в новой версии».
-- [ ] Юнит-тест прогоняет миграцию с фикстурой `v0 → v1` (даже если v0 пока синтетический — задаём паттерн).
+`src/features/notebook/persistence/migrations.ts`.
+
+- [x] `migrations: Record<number, (json) => json>` с `0: v0_to_v1` +
+      `applyMigrations(raw)`.
+- [x] Неизвестная старая версия — миграция последовательно до текущей.
+- [x] Версия > текущей — явная ошибка «notebook created in newer version».
+- [x] Юнит-тест на фикстуре `v0 → v1` (v0 синтетический, задаёт паттерн).
 
 ### Persistence
 
-- [ ] Локальный store — IndexedDB через **`idb`** (~1 КБ, без overhead Dexie; решено в Tech notes ниже).
-- [ ] Schema БД: object store `notebooks` (key = `id`), индекс по `updatedAt`.
-- [ ] CRUD API в `src/shared/lib/storage/notebooks.ts`: `get(id)`, `list()`, `put(notebook)`, `delete(id)`, `clear()`.
-- [ ] При первом запуске без ноутбуков — создаётся seed-ноутбук «Welcome» (из текущего `SEED_CODE`).
+- [x] Локальный store — IndexedDB через **`idb`** («на вырост» под
+      multi-notebook; см. Tech notes).
+- [x] Схема БД: object store `notebooks` (key = `id`), индекс по `updatedAt`.
+- [x] CRUD в `src/features/notebook/persistence/storage.ts`: `get(id)`,
+      `list()`, `put(notebook)`, `putIfNewer(notebook, baseUpdatedAt)`,
+      `remove(id)`, `clear()`. Чтение прогоняется через `applyMigrations` +
+      валидатор.
+- [x] `putIfNewer` — атомарный compare-and-swap в одной `readwrite`-транзакции
+      IndexedDB. Это защита от silent overwrite между вкладками: stale-вкладка
+      не может затереть более свежий ноутбук, сохранённый другой вкладкой.
+- [x] При первом запуске без ноутбука — seed «Welcome» (из `SEED_CODE`)
+      сохраняется в store.
+
+Отличие от плана: метод `remove` (не `delete` — зарезервированное слово);
+отдельного `db.ts` нет — `openDB` живёт в том же файле. Store лежит **внутри
+слайса** (`features/notebook/persistence/storage.ts`), а не в `shared/lib`:
+обёртка знает про `NotebookJSON` и гоняет доменные миграции, поэтому это
+фич-код, а не generic-инфраструктура (правило слоёв — `shared` не зависит от
+`features`).
 
 ### Autosave
 
-- [ ] При изменении `cells`/`title`/`outputs` ноутбук сохраняется в IndexedDB через **debounce 500 мс**.
-- [ ] Сохраняем **только если есть реальные изменения** (по deep-equal либо по dirty-флагу).
-- [ ] Индикатор в шапке: `Saved · 12:34:01` / `Saving…` / `Save failed — retry`.
-- [ ] Сохранение outputs — да, по умолчанию. Опт-аут в `settings.persistOutputs = false`.
+`src/features/notebook/model/autosave.ts`.
+
+- [x] При изменении `cells`/`title` — сохранение через **debounce 500 мс**.
+- [x] Сохраняем только при реальных изменениях — через monotonic
+      `notebookRevisionAtom`, без `JSON.stringify` всего notebook на каждый keypress.
+- [x] Индикатор в шапке: `Saved · HH:MM:SS` / `Saving…` /
+      `Save failed — retry` / `Changed in another tab — Reload / Save mine` /
+      `Saved in a newer app version — update to edit this notebook`
+      (`SaveIndicator`).
+- [x] Cross-tab safety: после успешного save вкладка отправляет
+      `BroadcastChannel`-событие; другие вкладки бесшовно подтягивают свежую
+      версию, если у них нет локальных правок, или показывают conflict state,
+      если локальные правки есть. При возврате во вкладку дополнительно
+      проверяется IndexedDB (`focus` / `visibilitychange`), поэтому защита не
+      зависит только от live-сообщений.
+- [x] Overlapping saves внутри одной вкладки сериализованы: если пользователь
+      редактирует во время pending write, текущий save записывает свой snapshot,
+      а затем запускается второй save для новой dirty-версии. Clean baseline
+      привязывается к реально записанному `NotebookJSON`, а dirty-детекция идёт
+      по revision, не по mutable state после `await`.
+- Опции `settings.persistOutputs` НЕТ — outputs не персистятся вообще (см.
+  «Формат»).
 
 ### Загрузка
 
-- [ ] При открытии страницы `/n/:id` — модель сначала пытается прочитать ноутбук из IndexedDB.
-- [ ] Если нет — фоллбэк к `notebookApi.get(id)` (через MSW).
-- [ ] Skeleton/loader пока идёт чтение.
+- [x] На старте приложения `loadNotebook` читает локальный ноутбук из
+      IndexedDB; пусто — seed.
+- [x] **Best-effort boot.** `loadNotebook` не реджектит ни на битом чтении,
+      ни на упавшей первичной seed-записи (quota / private mode / blocked DB):
+      любая ошибка хранилища глотается, seed остаётся в памяти. `setup.ts`
+      запускает autosave в `finally`, поэтому отказ хранилища на старте не
+      отключает автосейв на весь сеанс — следующая правка повторит запись
+      и покажет `Save failed — retry`.
+- [x] **Newer-format guard.** Если IndexedDB содержит notebook из более новой
+      версии приложения, старый клиент не открывает его как «битый» и не пишет
+      поверх. Выставляется `storageCompatibilityAtom = 'newer-format'`,
+      autosave/overwrite блокируются, а UI показывает сообщение об обновлении.
+- [x] **Loading-gate.** `NotebookPage` держит редактор за `Skeleton`, пока
+      `notebookLoadedAtom` не станет `true` (выставляется в `finally` после
+      boot-load — на любом исходе). Это закрывает race «сверхбыстрая правка до
+      разрешения get будет затёрта восстановленными ячейками». `NotebookView`
+      остаётся без гейта (и его тесты тоже).
+- Маршрут `/n/:id` и фоллбэк к API/MSW — **отложены** (single-notebook MVP,
+  см. «Out of scope»).
 
-### Совместимость со схемой
+### Совместимость со схемой — отложено
 
-- [ ] `openapi/notebook.openapi.yaml`: `Cell` обновлён до новой формы. Generation чистый.
-- [ ] `@/shared/api/notebook` экспортирует `type Notebook` и `type Cell` идентично доменной модели — никакого ручного преобразования в `features/`.
+Персистентный JSON уже выровнен по форме с бэк `CellSchema`/
+`NotebookResponse`, но фронтовый `openapi/notebook.openapi.yaml` и
+`@/shared/api/notebook` в этом тикете **не трогали** — это часть слоя
+синка (Epic 05), где нужны `GET/PATCH {id}`, tombstones и ручной порт
+контракта + `pnpm api:generate`.
 
 ## Tech notes
 
-### Файлы
+### Файлы (реализовано)
 
 ```
 src/features/notebook/
   domain/
-    cell.ts                     ← существующий, переименовать поля → source/kind
-    notebook.ts                 ← новый: тип Notebook, конструктор reatomNotebook
+    cell.ts                     ← добавлены updatedAt: Atom<number> и uuid-id;
+                                  поле исходника в домене осталось `code`
   persistence/
-    schema.ts                   ← Zod-схемы NotebookV1, CellV1
-    migrations.ts               ← { 0: v0_to_v1 }, плюс applyMigrations(json)
-    persistence.test.ts
+    schema.ts                   ← типы NotebookJSON/CellJSON + ручной валидатор
+    schema.test.ts
+    serialize.ts                ← чистые toJSON/fromJSON (mapping code↔content)
+    serialize.test.ts
+    migrations.ts               ← { 0: v0_to_v1 } + applyMigrations(raw)
+    migrations.test.ts
+    storage.ts                  ← openDB + CRUD + atomic putIfNewer CAS
+    storage.test.ts
+    crosstab.ts                 ← BroadcastChannel notifications for saved notebooks
+    crosstab.test.ts
   model/
-    notebook.ts                 ← перевести cellsAtom → reatomNotebook(id)
-    autosave.ts                 ← дебаунс + запись в storage
+    notebook.ts                 ← cellsAtom + meta-атомы + loadNotebook + snapshot
+                                  + notebookLoadedAtom (boot-gate) + baseUpdatedAt
+                                  + storageCompatibilityAtom
+    revision.ts                 ← O(1) dirty-signal for persisted notebook changes
+    autosave.ts                 ← debounce + revision-based dirty tracking
+                                  + saveStatusAtom + cross-tab guard + newer-format gate
     autosave.test.ts
-src/shared/lib/storage/
-  db.ts                         ← openDB('js-notebook', 1, …) через idb
-  notebooks.ts                  ← CRUD над object store
-  notebooks.test.ts
+  ui/
+    SaveIndicator.tsx           ← индикатор Saved/Saving/Failed/Conflict/Outdated
+    SaveIndicator.test.tsx
+src/pages/notebook/ui/
+  NotebookPage.tsx              ← loading-gate (Skeleton до notebookLoadedAtom)
+  NotebookPage.test.tsx
 ```
+
+Отличия от исходного плана: отдельного `domain/notebook.ts` с `reatomNotebook`
+НЕТ (см. «Reatom-модель»); валидатор ручной, не Zod; storage — один файл
+`persistence/storage.ts` (без отдельного `db.ts`), внутри notebook-слайса
+(не в `shared/lib` — это фич-код, зависящий от доменных schema/migrations).
 
 ### Почему `idb`, а не Dexie
 
 - Dexie ~50 КБ, тащит свой query-DSL — нам не нужен.
-- `idb` (~1 КБ) — тонкая Promise-обёртка над нативным API, читаемо и тривиально мокается в тестах через `fake-indexeddb`.
-- Если позже понадобятся индексы/range-query (поиск, [Epic 04](./04-notebook-management.md)) — `idb` справится; миграция на Dexie остаётся опцией.
+- `idb` — тонкая Promise-обёртка над нативным API, читаемо и тривиально
+  мокается в тестах через `fake-indexeddb`.
+- Выбран «на вырост» под multi-notebook + большие payload (индекс по
+  `updatedAt`, range-query для поиска в [Epic 04](./04-notebook-management.md)).
 
-### Reatom-модель
+### Reatom-модель (факт)
 
-```ts
-// доменная модель — без атомов на ячейке, см. ниже
-export interface Notebook {
-  id: string
-  schemaVersion: 1
-  title: Atom<string>
-  cells: Atom<Cell[]>
-  updatedAt: Atom<string>
-  settings: Atom<NotebookSettings>
-}
+Исходный план предлагал перевести ячейки на плоские POJO и ввести
+`reatomNotebook`. **Этот рефактор НЕ делался** — ячейка остаётся объектом
+атомов (`domain/cell.ts`), реактивность — через `cellsAtom: Atom<Cell[]>`.
+Персистентность решена без этого рефактора: чистый `toJSON` снапшотит атомы
+ячейки в POJO, `fromJSON` пересобирает ячейки через `reatomCell`.
 
-export const reatomNotebook = (initial: NotebookJSON): Notebook => { ... }
-```
+Метаданные ноутбука живут отдельными атомами в `model/notebook.ts`:
+`notebookTitleAtom`, `notebookCreatedAtAtom`, `notebookLoadedAtom` (boot-gate),
+плюс константа `LOCAL_NOTEBOOK_ID` (single-notebook MVP). Ячейка несёт
+`updatedAt: Atom<number>`
+(основа LWW), который бампится при редактировании содержимого, но НЕ при
+перестановке (порядок — notebook-уровень, `api/docs/auth.md` §7.2).
 
-**Важное решение**: атомы на ячейке (текущий подход в `domain/cell.ts`) сохранять сложно — приходится снапшотить вручную. Делаем плоские POJO-ячейки, а реактивность — через `cellsAtom: Atom<Cell[]>` и иммутабельные обновления. Это упрощает сериализацию, диффы для sync и тесты.
+### Autosave (факт)
 
-### Autosave
+Reatom v1001 не использует `onConnect` напрямую — применён паттерн
+«subscribe + дебаунс-таймер» (как `startThemeSync` в `entities/theme` и `flush` в
+`runtime.ts`):
 
-```ts
-const dirty = computed(() => /* hash of cells + title */, 'notebook.dirty')
+- dirty-трекинг — через monotonic `notebookRevisionAtom` (`model/revision.ts`),
+  без `JSON.stringify`/хэша всего notebook на каждый keypress. Ревизия бампится
+  на edit исходника, структурных операциях (add/delete/reorder/change-kind),
+  смене title и undo/redo; outputs/status/execution-count её НЕ трогают
+  (не персистятся);
+- `startAutosave()` подписывается на `notebookRevisionAtom`, каждое изменение
+  (ре)армит `setTimeout(runSave, 500)`; первый синхронный emit пропускается
+  (загрузка не должна сразу пересохранять). dirty определяется как
+  `notebookRevisionAtom() !== savedRevisionAtom()` (`hasLocalChangesAtom`);
+- `runSave` и все event-хендлеры (focus/visibilitychange, BroadcastChannel,
+  кнопки индикатора) обёрнуты в `wrap` — таймер/событие это свежая
+  async-граница, а в prod активен `clearStack()`;
+- `saveStatusAtom` ведёт индикатор и имеет шесть состояний —
+  `idle | saving | saved | error | conflict | outdated`: `error` —
+  `QuotaExceededError`/блокировка БД (UI не падает), `conflict` — более свежая
+  версия в другой вкладке, `outdated` — newer-format gate. `lastSavedAtAtom`
+  хранит время последнего успешного save; при boot из сохранённого
+  ноутбука `markBootRestored()` сразу показывает `Saved · <время>` по сохранённому
+  `updatedAt`, не оставляя шапку пустой до первой правки.
 
-onConnect(dirty, async (ctx) => {
-  // debounce 500ms, then notebooksStore.put(serialize(notebookAtom()))
-})
-```
+Сериализация — чистые `toJSON`/`fromJSON` без side-effects, тестируются
+отдельно.
 
-Сериализация — чистая функция `toJSON(notebook): NotebookJSON`. Никаких side-effects, тестируется отдельно.
+### OpenAPI — отложено
 
-### OpenAPI
-
-`Cell` приводится к:
-
-```yaml
-Cell:
-  type: object
-  required: [id, kind, source]
-  properties:
-    id: { type: string }
-    kind: { type: string, enum: [code, markdown] }
-    source: { type: string }
-    executionCount: { type: integer, nullable: true }
-    outputs:
-      type: array
-      items: { $ref: '#/components/schemas/OutputItem' }
-    metadata: { type: object, additionalProperties: true }
-```
-
-После правки — `pnpm api:generate`, обновить `@/shared/api/notebook.ts` (фасадные типы должны просто реэкспортировать сгенерированные).
+`openapi/notebook.openapi.yaml` и `@/shared/api/notebook` в этом тикете не
+трогали. Персистентный JSON уже выровнен по форме с бэк `CellSchema`
+(`{id, kind, content, updatedAt}`), так что синк (Epic 05) сможет слать
+ячейки без преобразования формата. Работа по контракту (ручной порт
+`GET/PATCH {id}` + tombstones + `pnpm api:generate`) — в слое синка.
 
 ## Mock strategy
 
-- IndexedDB — **реальный**, не мок. В тестах подменяется на `fake-indexeddb/auto`.
-- MSW-handler `GET /notebooks/:id` возвращает либо seed-ноутбук, либо in-memory копию (хранится в `src/app/mocks/store.ts`).
-- MSW-handler `PUT /notebooks/:id` принимает payload, кладёт в свой in-memory store, возвращает с новым `updatedAt`. Используется в [Epic 05](./05-sync-ui.md).
+- IndexedDB — **реальный**, не мок. В тестах подменяется на
+  `fake-indexeddb/auto` (подключён в `src/test/setup.ts`).
+- MSW в проекте нет; моки `GET/PUT /notebooks/:id` — часть слоя синка
+  ([Epic 05](./05-sync-ui.md)), не этого тикета.
 
 ## Out of scope
 
@@ -157,4 +270,7 @@ Cell:
 
 ## Dependencies
 
-- Для полноценного `outputs` — нужен [Epic 01](./01-execution-runtime.md) (он определяет `OutputItem`). Эпики 01 и 02 можно вести параллельно, согласовав `OutputItem` контракт первым шагом.
+Персистентный формат хранит только `content`/`kind`/`updatedAt`, поэтому
+от `OutputItem` (и следовательно от [Epic 01](./01-execution-runtime.md))
+этот эпик больше не зависит — outputs не сериализуются. Синк с бэкендом
+([Epic 05](./05-sync-ui.md)) опирается на уже выровненный здесь формат.

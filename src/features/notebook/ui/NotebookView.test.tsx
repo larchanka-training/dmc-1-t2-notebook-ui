@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
-import { SEED_CODE } from '../model/notebook'
+import { cellsAtom, SEED_CODE, updateCellCode } from '../model/notebook'
 
 function renderView() {
   return render(
@@ -13,12 +13,15 @@ function renderView() {
   )
 }
 
-function getCellTextareas() {
-  return screen.getAllByRole('textbox') as HTMLTextAreaElement[]
+// Code cells render as CodeMirror editors (contenteditable .cm-content), not
+// <textarea>. We count the editor hosts and read their text content. Driving
+// keystrokes into CM under JSDOM is unreliable (it needs layout geometry), so
+// text edits in these integration tests go through the model action.
+function getCodeEditors() {
+  return Array.from(document.querySelectorAll('.cm-content')) as HTMLElement[]
 }
 
 async function addCodeCell(user: UserEvent) {
-  // The "Add cell" trigger at the end of the list opens a menu; pick "Code".
   const triggers = screen.getAllByRole('button', { name: /add cell/i })
   await user.click(triggers[triggers.length - 1])
   const codeItem = await screen.findByRole('menuitem', { name: /code/i })
@@ -26,50 +29,53 @@ async function addCodeCell(user: UserEvent) {
 }
 
 describe('NotebookView (RTL integration)', () => {
-  test('renders a single seed cell on mount', () => {
+  test('renders a single seed cell on mount', async () => {
     renderView()
-    const textareas = getCellTextareas()
-    expect(textareas).toHaveLength(1)
-    expect(textareas[0]).toHaveValue(SEED_CODE)
+    const editors = getCodeEditors()
+    expect(editors).toHaveLength(1)
+    await waitFor(() => expect(editors[0].textContent).toContain(SEED_CODE))
   })
 
-  test('adding a cell renders one more textarea', async () => {
+  test('adding a cell renders one more editor', async () => {
     const user = userEvent.setup()
     renderView()
-    expect(getCellTextareas()).toHaveLength(1)
+    expect(getCodeEditors()).toHaveLength(1)
     await addCodeCell(user)
-    expect(getCellTextareas()).toHaveLength(2)
+    expect(getCodeEditors()).toHaveLength(2)
   })
 
   test('running a cell populates its output area', async () => {
     const user = userEvent.setup()
     renderView()
-    const [textarea] = getCellTextareas()
-    await user.clear(textarea)
-    await user.type(textarea, 'console.log(1+1)')
+    // Set the source through the model, then run via the UI button.
+    const [seed] = cellsAtom()
+    await act(async () => {
+      updateCellCode(seed.id, 'console.log(1+1)')
+    })
     await user.click(screen.getByRole('button', { name: /run cell/i }))
-    expect(await screen.findByText('2')).toBeInTheDocument()
-  })
+    // This is the only test that drives the REAL QuickJS WASM kernel through
+    // the UI. Cold WASM init + a busy parallel vitest pool can push the
+    // round-trip past RTL's default 1000ms findBy timeout, so wait explicitly.
+    expect(await screen.findByText('2', undefined, { timeout: 8000 })).toBeInTheDocument()
+  }, 15000)
 
   test('editing one cell leaves other cells untouched (atomization)', async () => {
     const user = userEvent.setup()
     renderView()
     await addCodeCell(user)
-    let [first, second] = getCellTextareas()
-    expect(first).toHaveValue(SEED_CODE)
-    expect(second).toHaveValue('')
+    const [first, second] = cellsAtom()
+    expect(first.code()).toBe(SEED_CODE)
+    expect(second.code()).toBe('')
 
-    // capture the node identities BEFORE editing
-    const firstNode = first
-    const secondNode = second
-
-    await user.clear(first)
-    await user.type(first, 'console.log("edited")')
-    ;[first, second] = getCellTextareas()
-    expect(first).toHaveValue('console.log("edited")')
-    expect(second).toHaveValue('')
-    // same DOM nodes — cell 2 didn't unmount/remount
-    expect(first).toBe(firstNode)
-    expect(second).toBe(secondNode)
+    await act(async () => {
+      updateCellCode(first.id, 'console.log("edited")')
+    })
+    expect(first.code()).toBe('console.log("edited")')
+    // sibling untouched
+    expect(second.code()).toBe('')
+    // same cell identities — no unmount/remount
+    const [firstAfter, secondAfter] = cellsAtom()
+    expect(firstAfter).toBe(first)
+    expect(secondAfter).toBe(second)
   })
 })

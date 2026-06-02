@@ -1,2 +1,2 @@
-export { themeAtom } from './model/theme'
-export type { Theme } from './model/theme'
+export { themeModeAtom, resolvedThemeAtom, startThemeSync } from './model/theme'
+export type { Theme, ThemeMode } from './model/theme'

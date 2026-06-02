@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Separator } from '@/shared/ui/separator'
-import { NotebookCell, executeJS } from '@/features/notebook'
+import { NotebookCell, runInWorker } from '@/features/notebook'
+import type { OutputItem } from '@/features/notebook'
 
 function Section({
   title,
@@ -94,20 +95,20 @@ function LiveCellDemo() {
   const [code, setCode] = useState(
     'const nums = [1, 2, 3, 4, 5]\nconsole.log(nums.map(n => n * 2))',
   )
-  const [output, setOutput] = useState('')
+  const [output, setOutput] = useState<OutputItem[]>([])
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
 
   const run = async () => {
     setStatus('running')
-    setOutput('')
-    const result = await executeJS(code)
-    setOutput(result.output)
-    setStatus(result.error ? 'error' : 'done')
+    setOutput([])
+    const result = await runInWorker(code)
+    setOutput(result.items)
+    setStatus(result.status === 'done' ? 'done' : 'error')
   }
 
   return (
     <NotebookCell
-      index={1}
+      executionCount={status === 'idle' ? null : 1}
       code={code}
       output={output}
       status={status}
@@ -139,24 +140,24 @@ export default function CustomComponentsPage() {
         <p className="text-xs text-muted-foreground">Static states:</p>
 
         <NotebookCell
-          index={1}
+          executionCount={1}
           code={`console.log("done state")`}
-          output="done state"
+          output={[{ type: 'stdout', text: 'done state' }]}
           status="done"
           isFirst
           readOnly
         />
 
         <NotebookCell
-          index={2}
+          executionCount={2}
           code={`throw new Error("something went wrong")`}
-          output="ReferenceError: something went wrong"
+          output={[{ type: 'error', name: 'Error', message: 'something went wrong' }]}
           status="error"
           readOnly
         />
 
         <NotebookCell
-          index={3}
+          executionCount={3}
           code={`await new Promise(r => setTimeout(r, 2000))`}
           status="running"
           readOnly
@@ -168,9 +169,9 @@ export default function CustomComponentsPage() {
 
         <PropTable
           rows={[
-            ['index', 'number', 'Cell number shown in the header badge'],
+            ['executionCount', 'number | null', 'Run-counter shown as [N]; null until first run'],
             ['code', 'string', 'The source code displayed in the editor'],
-            ['output', 'string?', 'Text output shown below the editor'],
+            ['output', 'OutputItem[]?', 'Structured output items (stdout, stderr, result, error)'],
             [
               'status',
               "'idle'|'running'|'done'|'error'",

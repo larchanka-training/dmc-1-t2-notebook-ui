@@ -2,168 +2,297 @@
 
 ## Overview
 
-The notebook executes real JavaScript — not a simulator. Code runs inside the browser's own JS engine using the `Function` constructor, which creates and immediately calls an async function wrapping your code.
+Each code cell runs in an **isolated QuickJS VM** that lives inside a
+dedicated **Web Worker**. Two layers of isolation, one path of data:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Main thread (React + Reatom)                                       │
+│  ┌─────────────┐    Run/Stop/Restart    ┌────────────────────────┐  │
+│  │ NotebookView│ ─────────────────────▶ │ model/runtime.ts       │  │
+│  │ + Toolbar   │                        │ runtimeStatusAtom      │  │
+│  └─────────────┘                        │ execCounterAtom        │  │
+│        ▲  OutputItem[]                  │ queueAtom              │  │
+│        │                                └─────────┬──────────────┘  │
+│        │                                          │ runInWorker     │
+│  ┌─────┴───────┐                                  ▼                 │
+│  │ OutputView  │                       ┌────────────────────────┐   │
+│  │ NotebookCell│                       │ runtime/workerHost.ts  │   │
+│  └─────────────┘                       │ singleton + queue      │   │
+│                                        └───────┬────────────────┘   │
+└────────────────────────────────────────────────│────────────────────┘
+                                                 │ postMessage
+                                                 │
+┌────────────────────────────────────────────────│────────────────────┐
+│  Worker thread (runtime/worker.ts)             ▼                    │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ runtime/transform.ts                                        │   │
+│   │ acorn → prelude + lift declarations + return trailing expr  │   │
+│   └─────────────────┬───────────────────────────────────────────┘   │
+│                     ▼                                               │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ runtime/quickjs.ts                                          │   │
+│   │ QuickJS context · console.log injected · deadline interrupt │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The user's code never touches the page — no `window`, no `document`, no
+`fetch`, no `localStorage`, no `IndexedDB`, no `crypto`. Even DOM-less
+browser APIs (`self`, `importScripts`) live in the worker, not in
+QuickJS, so the VM still cannot reach them.
 
 ---
 
 ## Execution pipeline
 
-When you press **Run** (or `Cmd+Enter`), this sequence happens:
-
 ```
-user code (string)
+NotebookCell (Run clicked)
     │
     ▼
-executeJS(code)                        ← src/features/notebook/model/executeJS.ts
-    │
-    ├─ 1. Capture console output
-    │       Override console.log / warn / error with collectors
-    │
-    ├─ 2. Wrap code in async function
-    │       new Function(`return (async () => { ${code} })()`)
-    │
-    ├─ 3. Execute
-    │       await fn()
-    │
-    ├─ 4. Capture return value
-    │       if result !== undefined → push to output lines
-    │
-    └─ 5. Restore console + return { output, error }
+model/runtime.ts: runCell(id)
+    │  cell.status = 'running'
+    │  executionCount = ++execCounterAtom
+    │  cell.output = []
     │
     ▼
-NotebookCell updates status → 'done' or 'error'
-Output string displayed below the editor
+runtime/workerHost.ts: runInWorker(code, { timeoutMs })
+    │  serialise after any pending run
+    │  worker = ensureWorker()
+    │
+    ▼
+postMessage({ kind: 'run', runId, code, timeoutMs })
+    │
+    ▼ (inside Worker, one persistent kernel for its whole lifetime)
+runtime/worker.ts: self.onmessage
+    │
+    ▼
+runtime/transform.ts: publish top-level declarations to globalThis;
+                       trailing ExpressionStatement becomes `return <expr>`
+    │
+    ▼
+runtime/quickjs.ts: kernel.run(transformedCode, { timeoutMs })
+    │  console + display already installed on the persistent VM
+    │  setInterruptHandler(deadline OR SharedArrayBuffer stop flag)
+    │  evalCode(`(async () => { ... })()`)  — scope lives in the VM
+    │  await vm.resolvePromise
+    │  collect OutputItem[]
+    │
+    ▼
+postMessage({ kind: 'output', item }) × N
+postMessage({ kind: 'done', status })
+    │
+    ▼ (back on main thread)
+workerHost resolves with { status, items }
+    │
+    ▼
+runtime.ts: cell.output = items
+           cell.status = mapStatus(...)
+           runtimeStatusAtom = 'idle'
 ```
 
 ---
 
-## executeJS — the core function
+## OutputItem model
+
+`cell.output()` is an array of **structured items**, not a string. Each
+item has its own renderer in `OutputView`:
 
 ```ts
-// src/features/notebook/model/executeJS.ts
-
-export async function executeJS(code: string): Promise<{ output: string; error: boolean }> {
-  const lines: string[] = []
-
-  // Step 1 — redirect console output into our array
-  const originalLog = console.log
-  console.log = (...args) => lines.push(args.map(String).join(' '))
-  // (same for console.warn and console.error)
-
-  try {
-    // Step 2 & 3 — wrap and run
-    const fn = new Function(`return (async () => { ${code} })()`)
-    const result = await fn()
-
-    // Step 4 — capture explicit return value
-    if (result !== undefined) lines.push(String(result))
-
-    return { output: lines.join('\n'), error: false }
-  } catch (err) {
-    return { output: String(err), error: true }
-  } finally {
-    // Step 5 — always restore console
-    console.log = originalLog
-  }
-}
+type OutputItem =
+  | { type: 'stdout'; text: string }
+  | { type: 'stderr'; text: string } // also: console.warn → '[warn] …'
+  | { type: 'result'; value: SerializedValue }
+  | { type: 'error'; name: string; message: string; stack?: string }
+  | { type: 'html'; html: string } // → sandboxed iframe
+  | { type: 'image'; mime: string; data: string } // base64 → <img>
 ```
+
+`SerializedValue` is recursion-safe up to depth 5; anything deeper, or a
+cyclic reference, becomes `{ kind: 'truncated', placeholder: '[Object]' }`.
+
+### Rich output: `display()`
+
+Inside the sandbox the user calls an explicit Jupyter-style function:
+
+```js
+display({ type: 'html', value: '<b>hi</b>' })
+display({ type: 'image', mime: 'image/png', data: '<base64>' })
+```
+
+HTML items render in an `<iframe sandbox="allow-scripts">` with a unique
+origin (no `allow-same-origin`), so scripts inside cannot read parent
+cookies, storage or DOM. The iframe reports its content height back via
+`postMessage` so we can auto-resize up to a 600 px cap; anything taller
+scrolls inside the frame. Image items render as
+`<img src="data:<mime>;base64,<data>">`. There is no magic
+auto-promotion of strings or `<svg>` tags — a rich output appears only
+when the user explicitly calls `display()`.
 
 ---
 
-## What you can run
+## Shared scope (Jupyter-style)
 
-### Basic expressions
+The worker holds **one persistent QuickJS VM** for its whole lifetime, so
+shared scope is just that VM's own global state. Top-level
+`var` / `let` / `const` / `function` / `class` declarations — including
+closures and live class instances — from cell N are visible in cell N+1.
+Mechanism:
 
-```js
-2 + 2
-// output: 4
-```
+1. `runtime/transform.ts` walks the cell's AST.
+2. Each cell runs inside a fresh async IIFE (so top-level `await` works).
+   Every top-level declaration is **rewritten into a plain assignment to a
+   `globalThis` slot**, dropping the declaration keyword entirely — there
+   is NO local lexical binding left behind:
+   - `const x = e` / `let x = e` / `var x = e` → `;(globalThis.x = (e));`
+   - destructuring → the binding pattern becomes an assignment pattern whose
+     targets are `globalThis.<name>` members;
+   - `function f(){}` / `class C {}` → `globalThis.f = function f(){}` /
+     `globalThis.C = class C {}` (the named expression keeps self-recursion).
+3. A later cell reads a bare identifier (`x`), which the VM resolves to
+   `globalThis.x`. There is no prelude and no `__ctx` snapshot — the
+   value lives in the VM, never crossing the postMessage boundary.
+4. Because there is a single storage slot per name (`globalThis.x`) and no
+   local binding, a top-level function that closes over `x` and a later cell
+   that reads `x` resolve to the **same** slot — a mutation is observed
+   everywhere (true Jupyter-like sharing, not a stale copy). Re-running a
+   cell with `const x = 1` is also safe: it is just a re-assignment of
+   `globalThis.x`, never a redeclaration clash.
 
-### console.log
+Because scope is real interpreter state (not a serialized copy), functions,
+closures and class instances survive across cells — unlike a data-only
+snapshot, which could only carry plain values. Nested declarations (inside
+`if`, `for`, function bodies, etc.) are left untouched: their scope stays
+private to the block.
 
-```js
-console.log('Hello', 'World')
-// output: Hello World
-```
+**Restart Kernel** terminates the worker (dropping the VM), and resets
+`execCounterAtom`, `queueAtom`, and every cell's `executionCount` /
+`status` / `output`. The next run spins up a fresh kernel with empty scope.
 
-### Multiple outputs
+**Deleting a cell does NOT remove its variables.** Jupyter semantics:
+once a binding made it into the kernel, it stays until Restart.
 
-```js
-console.log('first')
-console.log('second')
-// output:
-// first
-// second
-```
-
-### Variables and logic
-
-```js
-const nums = [1, 2, 3, 4, 5]
-const evens = nums.filter((n) => n % 2 === 0)
-console.log(evens)
-// output: 2,4
-```
-
-### Async / await
-
-```js
-const res = await fetch('https://jsonplaceholder.typicode.com/todos/1')
-const data = await res.json()
-console.log(data.title)
-```
-
-### Error handling
-
-```js
-JSON.parse('not valid json')
-// output (in red): SyntaxError: Unexpected token 'o', "not valid" is not valid JSON
-```
+`import` / `export` (static, dynamic `import(...)`, and `import.meta`) are
+rejected with a clear error — the kernel has no ESM module loader.
+`new.target` is **not** affected: it shares the `MetaProperty` AST node with
+`import.meta` but is left untouched.
 
 ---
 
-## Limitations
+## Stop and timeout
 
-| Limitation                          | Reason                                                                     |
-| ----------------------------------- | -------------------------------------------------------------------------- |
-| No `import` / `require`             | Code runs inside `new Function`, not a module — no module system available |
-| No access to `src/` files           | Browser sandbox — you can't read files from the project                    |
-| `console.warn` shown as `[warn] …`  | Captured and prefixed to distinguish from `console.log`                    |
-| Objects logged as `[object Object]` | `String(obj)` is used — use `JSON.stringify(obj)` for full output          |
+The kernel's `setInterruptHandler` runs synchronously between bytecode ops
+and can abort the current evaluation **without destroying the VM**, so the
+shared scope survives. It fires on three causes, and records which:
 
-### Workaround for objects
+1. **Timeout.** A per-run deadline (`timeoutMs`). Aborts `while(true){}`
+   even though the VM has no `await` point → status `'timeout'`.
+2. **User stop.** `stopCell` / `stopAll` flip a `SharedArrayBuffer` flag
+   that the handler reads. Because the buffer is shared, the host can set
+   it even while the worker thread is blocked in a tight loop → status
+   `'interrupted'`, scope preserved.
+3. **Output budget.** The kernel itself aborts once cumulative output
+   exceeds the budget (see Limits) → status `'error'`.
 
-```js
-const obj = { name: 'Alice', age: 30 }
-console.log(JSON.stringify(obj, null, 2))
-```
+A deadline / user-stop / budget abort surfaces a synthetic
+`InternalError("interrupted")` inside the VM. The kernel **swallows** that
+synthetic error (it carries no user value) and lets the status drive a
+single explicit marker — no confusing red "InternalError" on top of the
+friendly note.
+
+The SAB path requires a cross-origin isolated context (COOP/COEP headers,
+see `auth.md` § Cross-origin isolation). The SAB flag only aborts a VM that
+is **running bytecode**; code parked in a pending promise
+(`await new Promise(() => {})`) never reaches the handler. So a Stop arms a
+**watchdog** (`INTERRUPT_WATCHDOG_MS`, 250 ms): if the cooperative interrupt
+hasn't landed, the host falls back to `worker.terminate()` + respawn — the
+run still stops `'interrupted'` (scope is lost in that case). The same
+fallback is the only path **without isolation**. A host-side
+`setTimeout(timeoutMs + 100)` terminate remains as a last-resort safety net.
+
+`stopCell` only interrupts when its cell is the one actually running; a
+merely-queued cell is just dropped from the queue. The interrupted/timeout
+cell gets an explicit stderr marker in its output.
+
+---
+
+## Limits
+
+| Limit          | Default                 | Configurable via                               |
+| -------------- | ----------------------- | ---------------------------------------------- |
+| Execution time | 30 s                    | `runInWorker(code, { timeoutMs })`             |
+| Output size    | 5 MB cumulative per run | `runtime/outputBudget.ts: OUTPUT_BUDGET_BYTES` |
+
+The budget is enforced in **two layers** (`runtime/outputBudget.ts` is the
+shared definition):
+
+1. **In the kernel (primary).** `pushItem` tracks cumulative bytes as
+   `console.*` / `display` / result items are produced. On overflow it
+   records one `{ type: 'stderr', text: 'Output truncated at <N> bytes' }`
+   marker and trips the interrupt handler, so a runaway
+   `for(;;) console.log(...)` is stopped **while running** — the worker
+   cannot grow its memory without bound. Status → `error`.
+2. **In the host (defense-in-depth).** `workerHost` re-checks the size of
+   items it receives, covering an injected / fake worker that bypasses the
+   kernel. On overflow it appends the same marker, terminates the worker,
+   and resolves the run as `error`.
+
+The check happens **before** each item is accepted, so a single huge item
+cannot blow past the limit.
 
 ---
 
 ## Cell state machine
 
-Each cell has a `status` field that drives the UI:
-
 ```
-idle  ──(run)──▶  running  ──(success)──▶  done
+idle ──(runCell)──▶ running ──(success)─▶ done
                       │
-                      └──(error)──▶  error
+                      ├──(error)────────▶ error
+                      ├──(deadline)─────▶ timeout
+                      └──(stopCell)─────▶ interrupted
 ```
 
-| Status    | Border                     | Run button      | Output area          |
-| --------- | -------------------------- | --------------- | -------------------- |
-| `idle`    | default                    | green play icon | hidden               |
-| `running` | default                    | spinning loader | hidden               |
-| `done`    | default                    | green play icon | visible, normal text |
-| `error`   | red (`border-destructive`) | green play icon | visible, red text    |
+`runAll` evaluates the whole notebook: it switches every markdown cell to
+preview (rendering is a text cell's "run") and puts every code cell in the
+queue. The first non-`done` status short-circuits the rest as `skipped`.
+
+| Status        | Border / Lead-bar          | Run button | Output      |
+| ------------- | -------------------------- | ---------- | ----------- |
+| `idle`        | default                    | green play | hidden      |
+| `running`     | primary lead-bar           | red stop   | partial     |
+| `done`        | default                    | green play | visible     |
+| `error`       | red (`border-destructive`) | green play | red         |
+| `timeout`     | amber                      | green play | stderr note |
+| `interrupted` | amber                      | green play | stderr note |
+| `skipped`     | dashed muted               | green play | empty       |
+
+---
+
+## ExecutionCount badge
+
+Each cell shows `[N]` in its header — the **execution counter** value
+at the time of its last run. Editing the code does **not** change it.
+Only Restart Kernel resets the counter. A cell that never ran shows
+`[ ]`.
 
 ---
 
 ## Related files
 
-- `src/features/notebook/model/executeJS.ts` — execution logic
-- `src/features/notebook/model/notebook.ts` — `cellsAtom` + Reatom actions (`addCell`, `runCell`, `deleteCell`, `moveCell`, `updateCellCode`)
-- `src/features/notebook/domain/cell.ts` — `reatomCell()` factory; each cell's `code` / `output` / `status` are atoms
-- `src/features/notebook/ui/NotebookView.tsx` — list view that reads `cellsAtom` and dispatches actions (wrapped via `wrap`)
-- `src/features/notebook/ui/NotebookCell.tsx` — presentational cell UI
-- `src/pages/notebook/ui/NotebookPage.tsx` — the page that mounts `<NotebookView />`
+| File                                              | Layer                                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/features/notebook/runtime/types.ts`          | Worker protocol + OutputItem + SerializedValue                                |
+| `src/features/notebook/runtime/serialize.ts`      | Safe walk to depth 5, cycle-safe                                              |
+| `src/features/notebook/runtime/transform.ts`      | acorn AST: publish declarations to globalThis + trailing return               |
+| `src/features/notebook/runtime/quickjs.ts`        | Persistent QuickJS kernel: console, interrupt (deadline + SAB), async IIFE    |
+| `src/features/notebook/runtime/interrupt.ts`      | Worker-side `SharedArrayBuffer` interrupt flag                                |
+| `src/features/notebook/runtime/worker.ts`         | Worker entrypoint, owns the persistent kernel                                 |
+| `src/features/notebook/runtime/workerHost.ts`     | Main-thread facade, timeout, output budget, SAB interrupt, `setWorkerFactory` |
+| `src/features/notebook/model/notebook.ts`         | `cellsAtom`, CRUD                                                             |
+| `src/features/notebook/model/notebookSettings.ts` | `timeoutMsAtom` and default / max limits                                      |
+| `src/features/notebook/model/runtime.ts`          | `runCell`, `runAll`, `resumeQueue`, `stopCell`, `stopAll`, `restartKernel`    |
+| `src/features/notebook/domain/cell.ts`            | `reatomCell()` factory, atomized fields                                       |
+| `src/features/notebook/ui/OutputView.tsx`         | Renders `OutputItem[]`                                                        |
+| `src/features/notebook/ui/OutputFrame.tsx`        | Sandboxed iframe for `html` items                                             |
+| `src/features/notebook/ui/NotebookToolbar.tsx`    | Run All / Continue / Stop All / Restart                                       |
+| `src/features/notebook/ui/NotebookCell.tsx`       | Per-cell UI with Stop button                                                  |

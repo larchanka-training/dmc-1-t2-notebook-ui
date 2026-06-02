@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   Play,
+  Square,
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -10,8 +11,6 @@ import {
   Eye,
   Pencil,
 } from 'lucide-react'
-import ReactMarkdown, { type Components } from 'react-markdown'
-import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import {
@@ -23,77 +22,76 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { modKeyLabel } from '@/shared/lib/platform'
+import type { Theme } from '@/entities/theme'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
+import type { OutputItem } from '../runtime/types'
+import { CodeCellEditor } from './CodeCellEditor'
+import { MarkdownView } from './MarkdownView'
+import { OutputView } from './OutputView'
 
 export interface NotebookCellProps {
-  index: number
+  /** Execution counter shown as `[N]`; null means the cell has never run. */
+  executionCount?: number | null
   kind?: CellKind
   code: string
-  output?: string
+  output?: OutputItem[]
   status?: CellStatus
   viewMode?: CellViewMode
+  /** Drives the CodeMirror syntax palette; follows the global app theme. */
+  theme?: Theme
+  showLineNumbers?: boolean
+  /** Focus the code editor (cell is active in edit mode). */
+  autoFocus?: boolean
+  /** Whether this cell currently holds focus (command or edit mode). */
+  active?: boolean
+  /** Modal state of the active cell; drives the focus indicator colour. */
+  mode?: 'edit' | 'command'
   isFirst?: boolean
   isLast?: boolean
   readOnly?: boolean
+  /** Cell id, used by the code editor to pull its notebook-search matches. */
+  cellId?: string
   onCodeChange?: (code: string) => void
   onViewModeChange?: (mode: CellViewMode) => void
+  onFocus?: () => void
   onRun?: () => void
+  /** Shift+Enter: run, then move to (or create) the next cell. */
+  onRunAndAdvance?: () => void
+  /** Alt+Enter: run, then insert a fresh code cell below. */
+  onRunAndInsertBelow?: () => void
+  /** Esc: leave the editor for command mode. */
+  onExitToCommand?: () => void
+  onStop?: () => void
   onDelete?: () => void
   onMoveUp?: () => void
   onMoveDown?: () => void
 }
 
-const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="text-2xl font-semibold mt-2 mb-3">{children}</h1>,
-  h2: ({ children }) => <h2 className="text-xl font-semibold mt-2 mb-2">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-lg font-semibold mt-2 mb-2">{children}</h3>,
-  h4: ({ children }) => <h4 className="text-base font-semibold mt-2 mb-1">{children}</h4>,
-  p: ({ children }) => <p className="my-2 leading-relaxed">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      className="text-primary underline underline-offset-2 hover:text-primary/80"
-      target="_blank"
-      rel="noreferrer noopener"
-    >
-      {children}
-    </a>
-  ),
-  code: ({ className, children }) => {
-    const isBlock = className?.includes('language-')
-    if (isBlock) {
-      return (
-        <pre className="my-3 overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">
-          <code>{children}</code>
-        </pre>
-      )
-    }
-    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.875em]">{children}</code>
-  },
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-border pl-4 italic text-muted-foreground">
-      {children}
-    </blockquote>
-  ),
-  hr: () => <hr className="my-4 border-border" />,
-}
-
 export function NotebookCell({
-  index,
+  executionCount = null,
   kind = 'code',
   code,
-  output = '',
+  output = [],
   status = 'idle',
   viewMode = 'edit',
+  theme = 'light',
+  showLineNumbers = false,
+  autoFocus = false,
+  active = false,
+  mode = 'command',
   isFirst = false,
   isLast = false,
   readOnly = false,
+  cellId,
   onCodeChange,
   onViewModeChange,
+  onFocus,
   onRun,
+  onRunAndAdvance,
+  onRunAndInsertBelow,
+  onExitToCommand,
+  onStop,
   onDelete,
   onMoveUp,
   onMoveDown,
@@ -109,6 +107,10 @@ export function NotebookCell({
   const isMarkdown = kind === 'markdown'
   const isRunning = status === 'running'
   const isError = status === 'error'
+  // A user Stop or a timeout is not a code error — flag it distinctly so the
+  // cell that the user halted is not mistaken for a clean run or a crash.
+  const isHalted = status === 'interrupted' || status === 'timeout'
+  const isSkipped = status === 'skipped'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -118,6 +120,22 @@ export function NotebookCell({
     const el = textareaRef.current
     if (el) autoResize(el)
   }, [code, showPreview])
+
+  // Markdown cells mirror CodeEditor's modal focus: when the cell becomes
+  // active in edit mode (Enter in command mode, Shift+Enter advancing in),
+  // pull focus into the textarea. If it is showing the preview, drop to edit
+  // first so there is an input to focus. onViewModeChange is a freshly-wrapped
+  // fn each render, so it is intentionally left out of the deps.
+  useEffect(() => {
+    if (!autoFocus || !isMarkdown) return
+    if (showPreview) {
+      onViewModeChange?.('edit')
+      return
+    }
+    const el = textareaRef.current
+    if (el && document.activeElement !== el) el.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus, isMarkdown, showPreview])
 
   const enterEditMode = () => {
     onViewModeChange?.('edit')
@@ -130,13 +148,37 @@ export function NotebookCell({
         size="sm"
         className={cn(
           'relative gap-0 py-0 ring-0 border border-border overflow-visible transition-shadow',
+          // A focused cell gets a coloured left bar: blue in command mode,
+          // green in edit mode — the Jupyter convention, so "which cell is
+          // active and in which mode" is visible at a glance.
+          'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:rounded-l-xl before:transition-colors',
+          active && mode === 'command' && 'before:bg-primary ring-1 ring-primary/40',
+          active && mode === 'edit' && 'before:bg-success ring-1 ring-success/40',
           isError && 'border-destructive',
-          isRunning &&
-            'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary before:rounded-l-xl',
+          isHalted && 'border-amber-500/60',
+          isSkipped && 'border-dashed border-muted-foreground/40',
+          isRunning && 'before:bg-primary',
         )}
       >
         <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/40 rounded-t-xl">
-          {isCode && onRun ? (
+          {isCode && isRunning && onStop ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Stop cell"
+                    className="size-7 text-destructive hover:bg-destructive/10"
+                    onClick={onStop}
+                  >
+                    <Square className="size-4 fill-current" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Stop cell</TooltipContent>
+            </Tooltip>
+          ) : isCode && onRun ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -156,7 +198,7 @@ export function NotebookCell({
                   </Button>
                 }
               />
-              <TooltipContent>Run cell (⌘+Enter)</TooltipContent>
+              <TooltipContent>Run cell ({modKeyLabel}+Enter)</TooltipContent>
             </Tooltip>
           ) : (
             <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground select-none">
@@ -166,7 +208,9 @@ export function NotebookCell({
           )}
 
           {isCode ? (
-            <span className="text-xs text-muted-foreground font-mono select-none">[{index}]</span>
+            <span className="text-xs text-muted-foreground font-mono select-none">
+              [{executionCount ?? ' '}]
+            </span>
           ) : null}
 
           <div className="ml-auto flex items-center gap-1">
@@ -185,7 +229,9 @@ export function NotebookCell({
                     </Button>
                   }
                 />
-                <TooltipContent>{showPreview ? 'Edit (⌘+E)' : 'Preview (⌘+E)'}</TooltipContent>
+                <TooltipContent>
+                  {showPreview ? `Edit (${modKeyLabel}+E)` : `Preview (${modKeyLabel}+E)`}
+                </TooltipContent>
               </Tooltip>
             ) : null}
 
@@ -235,53 +281,74 @@ export function NotebookCell({
             className="text-left w-full p-4 cursor-text rounded-b-xl text-foreground font-sans text-base leading-relaxed focus:bg-muted/30 outline-none"
             title="Click to edit"
           >
-            <ReactMarkdown components={markdownComponents}>{code}</ReactMarkdown>
+            <MarkdownView source={code} />
           </button>
+        ) : isCode ? (
+          <CodeCellEditor
+            cellId={cellId ?? ''}
+            value={code}
+            theme={theme}
+            showLineNumbers={showLineNumbers}
+            readOnly={readOnly}
+            autoFocus={autoFocus}
+            onChange={(next) => onCodeChange?.(next)}
+            onFocus={onFocus}
+            onRun={onRun}
+            onRunAndAdvance={onRunAndAdvance}
+            onRunAndInsertBelow={onRunAndInsertBelow}
+            onExitToCommand={onExitToCommand}
+          />
         ) : (
           <textarea
             ref={textareaRef}
             value={code}
             readOnly={readOnly}
-            spellCheck={!isCode}
+            spellCheck
             rows={1}
-            placeholder={isCode ? '' : 'Markdown — supports `# headings` for the outline'}
+            placeholder="Markdown — supports `# headings` for the outline"
             onChange={(e) => {
               onCodeChange?.(e.target.value)
               autoResize(e.target)
             }}
             onKeyDown={(e) => {
-              if (isCode && (e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault()
-                onRun?.()
-              }
-              if (isMarkdown && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
                 e.preventDefault()
                 onViewModeChange?.('preview')
+                return
+              }
+              // Enter combos mirror the code editor's run keymap, but a
+              // markdown cell is RENDERED, not executed: we switch it to
+              // preview instead of calling the kernel (runAndAdvance /
+              // runAndInsertBelow skip the run for markdown). Blur first so
+              // the destination cell — or the document-level command-mode
+              // shortcuts — own the focus, not this textarea. A plain Enter
+              // (no modifier) falls through and inserts a newline as usual.
+              if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                e.currentTarget.blur()
+                onViewModeChange?.('preview')
+                if (e.shiftKey) onRunAndAdvance?.()
+                else if (e.altKey) onRunAndInsertBelow?.()
+                // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
+                else onExitToCommand?.()
+                return
+              }
+              // Esc leaves edit mode for command mode. Blur FIRST (like the
+              // CodeEditor keymap): otherwise focus stays in the textarea and
+              // the document-level command-mode shortcuts get typed as text.
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.currentTarget.blur()
+                onExitToCommand?.()
               }
             }}
             onInput={(e) => autoResize(e.currentTarget)}
-            className={cn(
-              'w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors rounded-b-xl focus:bg-muted/30',
-              isCode ? 'font-mono text-sm leading-relaxed' : 'font-sans text-base leading-relaxed',
-            )}
+            className="w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors rounded-b-xl focus:bg-muted/30 font-sans text-base leading-relaxed"
           />
         )}
       </Card>
 
-      {isCode && output && !isError && (
-        <Card
-          size="sm"
-          className="gap-0 py-3 ring-0 border-0 bg-secondary text-foreground font-mono text-sm whitespace-pre-wrap"
-        >
-          <div className="px-4">{output}</div>
-        </Card>
-      )}
-
-      {isCode && output && isError && (
-        <Alert variant="destructive" className="font-mono">
-          <AlertDescription className="whitespace-pre-wrap">{output}</AlertDescription>
-        </Alert>
-      )}
+      {isCode && output.length > 0 && <OutputView items={output} />}
     </div>
   )
 }

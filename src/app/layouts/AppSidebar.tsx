@@ -11,16 +11,19 @@ import {
   Search,
   Moon,
   Sun,
+  Monitor,
+  CircleHelp,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { userAtom } from '@/entities/session'
-import { themeAtom } from '@/entities/theme'
-import { createNotebookAction, notebookListResource } from '@/features/notebook'
+import { themeModeAtom, type ThemeMode } from '@/entities/theme'
+import { createNotebookAction, notebookListResource, shortcutsOpenAtom } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { ScrollArea } from '@/shared/ui/scroll-area'
+import { cn } from '@/shared/lib/cn'
 import {
   Sidebar,
   SidebarContent,
@@ -33,7 +36,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/shared/ui/sidebar'
-import { Switch } from '@/shared/ui/switch'
 
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
@@ -45,6 +47,25 @@ const navComponents: NavItem[] = [
 ]
 
 const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: '/about' }]
+
+// Help is an action (opens the shortcuts dialog), not a route, so it can't go
+// through NavGroup's <a>. It sits right under the Info group.
+const HelpButton = reatomComponent(() => {
+  return (
+    <SidebarGroup>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={wrap(() => shortcutsOpenAtom.set(true))}>
+              <CircleHelp />
+              <span>Help</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}, 'HelpButton')
 
 const AuthSection = reatomComponent(() => {
   const user = userAtom()
@@ -200,6 +221,7 @@ export function AppSidebar() {
         <NavGroup label="Components" items={navComponents} />
         <AuthSection />
         <NavGroup label="Info" items={navInfo} />
+        <HelpButton />
       </SidebarContent>
       <SidebarFooter className="border-t">
         <ThemeToggle />
@@ -208,19 +230,40 @@ export function AppSidebar() {
   )
 }
 
+const THEME_OPTIONS: Array<{ mode: ThemeMode; label: string; Icon: typeof Sun }> = [
+  { mode: 'light', label: 'Light', Icon: Sun },
+  { mode: 'system', label: 'System', Icon: Monitor },
+  { mode: 'dark', label: 'Dark', Icon: Moon },
+]
+
 const ThemeToggle = reatomComponent(() => {
-  const theme = themeAtom()
-  const isDark = theme === 'dark'
+  const mode = themeModeAtom()
   return (
-    <label className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-muted-foreground cursor-pointer">
-      <span className="flex items-center gap-2">
-        {isDark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
-        {isDark ? 'Dark' : 'Light'} mode
-      </span>
-      <Switch
-        checked={isDark}
-        onCheckedChange={wrap((checked) => themeAtom.set(checked ? 'dark' : 'light'))}
-      />
-    </label>
+    <div
+      role="radiogroup"
+      aria-label="Theme"
+      className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+    >
+      {THEME_OPTIONS.map(({ mode: optionMode, label, Icon }) => (
+        <button
+          key={optionMode}
+          type="button"
+          role="radio"
+          aria-checked={mode === optionMode}
+          aria-label={label}
+          title={`${label} theme`}
+          className={cn(
+            'flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 text-xs transition-colors',
+            mode === optionMode
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          onClick={wrap(() => themeModeAtom.set(optionMode))}
+        >
+          <Icon className="size-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
   )
 }, 'ThemeToggle')
