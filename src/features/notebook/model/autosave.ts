@@ -13,7 +13,7 @@
 //     subscriber, which `startAutosave` provides for the app's lifetime.
 
 import { atom, computed, wrap } from '@reatom/core'
-import * as notebookStorage from '@/shared/lib/storage/notebook'
+import * as notebookStorage from '../persistence/storage'
 import { cellsAtom, notebookSnapshot, notebookTitleAtom } from './notebook'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'

@@ -10,8 +10,8 @@
 // notebooks and large payloads, and gives us the `updatedAt` index for free.
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import { applyMigrations } from '@/features/notebook/persistence/migrations'
-import type { NotebookJSON } from '@/features/notebook/persistence/schema'
+import { applyMigrations } from './migrations'
+import type { NotebookJSON } from './schema'
 
 const DB_NAME = 'js-notebook'
 const DB_VERSION = 1

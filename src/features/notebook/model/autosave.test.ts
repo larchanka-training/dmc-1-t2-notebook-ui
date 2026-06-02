@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import * as notebookStorage from '@/shared/lib/storage/notebook'
+import * as notebookStorage from '../persistence/storage'
 import { addCell, cellsAtom, updateCellCode } from './notebook'
 import { lastSavedAtAtom, saveStatusAtom, startAutosave } from './autosave'
 

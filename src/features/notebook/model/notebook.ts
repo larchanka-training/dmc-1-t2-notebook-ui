@@ -1,5 +1,5 @@
 import { action, atom, wrap } from '@reatom/core'
-import * as notebookStorage from '@/shared/lib/storage/notebook'
+import * as notebookStorage from '../persistence/storage'
 import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'

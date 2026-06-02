@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import { FORMAT_VERSION, type NotebookJSON } from '@/features/notebook/persistence/schema'
-import { clear, get, list, put, remove } from './notebook'
+import { FORMAT_VERSION, type NotebookJSON } from './schema'
+import { clear, get, list, put, remove } from './storage'
 
 function notebook(id: string, updatedAt: number, title = 'NB'): NotebookJSON {
   return {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import * as notebookStorage from '@/shared/lib/storage/notebook'
+import * as notebookStorage from '../persistence/storage'
 import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
   addCell,
