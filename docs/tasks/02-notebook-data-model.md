@@ -223,14 +223,25 @@ Reatom v1001 не использует `onConnect` напрямую — прим
 «subscribe + дебаунс-таймер» (как `startThemeSync` в `entities/theme` и `flush` в
 `runtime.ts`):
 
-- `dirtyAtom = computed(...)` хэширует сериализованные cells + title;
-- `startAutosave()` подписывается на него, каждое изменение (ре)армит
-  `setTimeout(runSave, 500)`; первый синхронный emit пропускается (загрузка
-  не должна сразу пересохранять);
-- `runSave` обёрнут в `wrap` — таймер это свежая async-граница, а в prod
-  активен `clearStack()`;
-- `saveStatusAtom` (`idle/saving/saved/error`) и `lastSavedAtAtom` ведут
-  индикатор; `QuotaExceededError`/блокировка БД → `error`, UI не падает.
+- dirty-трекинг — через monotonic `notebookRevisionAtom` (`model/revision.ts`),
+  без `JSON.stringify`/хэша всего notebook на каждый keypress. Ревизия бампится
+  на edit исходника, структурных операциях (add/delete/reorder/change-kind),
+  смене title и undo/redo; outputs/status/execution-count её НЕ трогают
+  (не персистятся);
+- `startAutosave()` подписывается на `notebookRevisionAtom`, каждое изменение
+  (ре)армит `setTimeout(runSave, 500)`; первый синхронный emit пропускается
+  (загрузка не должна сразу пересохранять). dirty определяется как
+  `notebookRevisionAtom() !== savedRevisionAtom()` (`hasLocalChangesAtom`);
+- `runSave` и все event-хендлеры (focus/visibilitychange, BroadcastChannel,
+  кнопки индикатора) обёрнуты в `wrap` — таймер/событие это свежая
+  async-граница, а в prod активен `clearStack()`;
+- `saveStatusAtom` ведёт индикатор и имеет шесть состояний —
+  `idle | saving | saved | error | conflict | outdated`: `error` —
+  `QuotaExceededError`/блокировка БД (UI не падает), `conflict` — более свежая
+  версия в другой вкладке, `outdated` — newer-format gate. `lastSavedAtAtom`
+  хранит время последнего успешного save; при boot из сохранённого
+  ноутбука `markBootRestored()` сразу показывает `Saved · <время>` по сохранённому
+  `updatedAt`, не оставляя шапку пустой до первой правки.
 
 Сериализация — чистые `toJSON`/`fromJSON` без side-effects, тестируются
 отдельно.
