@@ -34,6 +34,12 @@ function getDB(): Promise<IDBPDatabase<NotebookDB>> {
         const store = db.createObjectStore(STORE, { keyPath: 'id' })
         store.createIndex('updatedAt', 'updatedAt')
       },
+    }).catch((err) => {
+      // Don't cache a rejected open (blocked DB, private mode): otherwise every
+      // later call reuses the failed promise and a "Save failed — retry" can
+      // never reopen the database. Clear the cache so the next call retries.
+      dbPromise = undefined
+      throw err
     })
   }
   return dbPromise
