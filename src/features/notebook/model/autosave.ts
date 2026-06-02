@@ -9,23 +9,24 @@
 //   - the debounced callback fires from a timer (a fresh async boundary), so
 //     it must be `wrap`-captured to touch atoms in production where
 //     `clearStack()` is active;
-//   - `dirtyAtom` is a `computed`; it only recomputes while it has a live
-//     subscriber, which `startAutosave` provides for the app's lifetime.
+//   - the watched signal must stay "hot" for the app lifetime. We use a cheap
+//     monotonic revision atom instead of re-serializing the whole notebook on
+//     every keypress.
 
 import { atom, computed, wrap } from '@reatom/core'
 import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
 import { openCrossTabChannel } from '../persistence/crosstab'
-import type { NotebookJSON } from '../persistence/schema'
 import {
-  cellsAtom,
   LOCAL_NOTEBOOK_ID,
   notebookBaseUpdatedAtAtom,
   notebookSnapshot,
-  notebookTitleAtom,
   restoreNotebook,
+  storageCompatibilityAtom,
 } from './notebook'
+import { notebookRevisionAtom } from './revision'
 
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'conflict' | 'outdated'
 
 const DEBOUNCE_MS = 500
 const VISIBILITY_VISIBLE = 'visible'
@@ -36,52 +37,26 @@ export const saveStatusAtom = atom<SaveStatus>('idle', 'notebook.autosave.status
 /** Unix ms of the last successful save, or null if nothing has been saved yet. */
 export const lastSavedAtAtom = atom<number | null>(null, 'notebook.autosave.lastSavedAt')
 
-/**
- * A string that changes whenever persisted content changes. Editing a cell
- * mutates an inner atom (not the `cellsAtom` array reference), so we cannot
- * dirty-check by reference — we hash the serialized cells + title instead.
- * Cheap relative to a 500 ms debounce.
- */
-type HashCell = NotebookJSON['cells'][number]
-
-function persistedHash(cells: HashCell[], title: string): string {
-  return JSON.stringify(cells).concat('\u0000', title)
-}
-
-const dirtyAtom = computed(() => {
-  return persistedHash(
-    cellsAtom().map((cell) => ({
-      id: cell.id,
-      kind: cell.kind,
-      content: cell.code(),
-      updatedAt: cell.updatedAt(),
-    })),
-    notebookTitleAtom(),
-  )
-}, 'notebook.autosave.dirty')
-
-// The persisted-content hash of the last version this tab has accepted as its
-// baseline (boot restore, successful save, or seamless cross-tab pull). If the
-// current dirty hash differs, this tab has local changes and must not
-// auto-restore a version saved by another tab.
-const savedHashAtom = atom<string | null>(null, 'notebook.autosave.savedHash')
+// The local revision number that corresponds to the last persisted/accepted
+// baseline. If the current revision differs, this tab has unsaved local changes.
+const savedRevisionAtom = atom<number>(0, 'notebook.autosave.savedRevision')
 
 /** True when this tab has local changes relative to its accepted baseline. */
 export const hasLocalChangesAtom = computed(
-  () => savedHashAtom() !== dirtyAtom(),
+  () => notebookRevisionAtom() !== savedRevisionAtom(),
   'notebook.autosave.hasLocalChanges',
 )
 
 /** Mark the current in-memory notebook as the accepted clean baseline. */
 function acceptCurrentBaseline(updatedAt: number): void {
   notebookBaseUpdatedAtAtom.set(updatedAt)
-  savedHashAtom.set(dirtyAtom())
+  savedRevisionAtom.set(notebookRevisionAtom())
 }
 
 /** Mark a concrete persisted document as the accepted clean baseline. */
-function acceptStoredBaseline(notebook: NotebookJSON): void {
-  notebookBaseUpdatedAtAtom.set(notebook.updatedAt)
-  savedHashAtom.set(persistedHash(notebook.cells, notebook.title))
+function acceptStoredBaseline(updatedAt: number, revision: number): void {
+  notebookBaseUpdatedAtAtom.set(updatedAt)
+  savedRevisionAtom.set(revision)
 }
 
 function snapshotAfter(minUpdatedAt: number): ReturnType<typeof notebookSnapshot> {
@@ -95,13 +70,14 @@ let saveAgainAfterCurrent = false
 
 async function runConditionalSave(): Promise<void> {
   const base = notebookBaseUpdatedAtAtom()
+  const snapshotRevision = notebookRevisionAtom()
   const snapshot = snapshotAfter(base ?? 0)
   const result = await wrap(notebookStorage.putIfNewer(snapshot, base))
   if (!result.ok) {
     saveStatusAtom.set('conflict')
     return
   }
-  acceptStoredBaseline(snapshot)
+  acceptStoredBaseline(snapshot.updatedAt, snapshotRevision)
   lastSavedAtAtom.set(Date.now())
   saveStatusAtom.set('saved')
   channel?.postSaved(snapshot.id, snapshot.updatedAt)
@@ -113,6 +89,10 @@ async function runConditionalSave(): Promise<void> {
  * next edit.
  */
 export async function saveNow(): Promise<void> {
+  if (storageCompatibilityAtom() === 'newer-format') {
+    saveStatusAtom.set('outdated')
+    return
+  }
   if (saveInFlight) {
     saveAgainAfterCurrent = true
     return
@@ -125,10 +105,15 @@ export async function saveNow(): Promise<void> {
       saveAgainAfterCurrent = false
       await runConditionalSave()
     } while (saveAgainAfterCurrent && hasLocalChangesAtom() && saveStatusAtom() !== 'conflict')
-  } catch {
-    // Quota exceeded, blocked DB, private-mode restrictions — surface the
-    // failure in the indicator but never let it crash the editor.
-    saveStatusAtom.set('error')
+  } catch (error) {
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      saveStatusAtom.set('outdated')
+    } else {
+      // Quota exceeded, blocked DB, private-mode restrictions — surface the
+      // failure in the indicator but never let it crash the editor.
+      saveStatusAtom.set('error')
+    }
   } finally {
     saveInFlight = false
   }
@@ -136,29 +121,52 @@ export async function saveNow(): Promise<void> {
 
 /** Reload the latest stored notebook, discarding this tab's local version. */
 export async function reloadFromStorage(): Promise<void> {
-  const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
-  if (!stored) return
-  restoreNotebook(stored)
-  acceptStoredBaseline(stored)
-  lastSavedAtAtom.set(Date.now())
-  saveStatusAtom.set('saved')
+  try {
+    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    if (!stored) return
+    restoreNotebook(stored)
+    acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
+    lastSavedAtAtom.set(Date.now())
+    saveStatusAtom.set('saved')
+  } catch (error) {
+    // `get()` runs `applyMigrations`, so a notebook saved by a newer build
+    // surfaces here too (this is reachable from the "Reload" button and from a
+    // cross-tab pull). Block the downgrade instead of crashing on an unhandled
+    // rejection; any other storage failure (quota / blocked DB) shows 'error'.
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      saveStatusAtom.set('outdated')
+    } else {
+      saveStatusAtom.set('error')
+    }
+  }
 }
 
 /** Force-write this tab's current version, replacing whatever another tab saved. */
 export async function saveMine(): Promise<void> {
+  if (storageCompatibilityAtom() === 'newer-format') {
+    saveStatusAtom.set('outdated')
+    return
+  }
   saveStatusAtom.set('saving')
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const snapshotRevision = notebookRevisionAtom()
     const snapshot = snapshotAfter(
       Math.max(notebookBaseUpdatedAtAtom() ?? 0, stored?.updatedAt ?? 0),
     )
     await wrap(notebookStorage.put(snapshot))
-    acceptStoredBaseline(snapshot)
+    acceptStoredBaseline(snapshot.updatedAt, snapshotRevision)
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
     channel?.postSaved(snapshot.id, snapshot.updatedAt)
-  } catch {
-    saveStatusAtom.set('error')
+  } catch (error) {
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      saveStatusAtom.set('outdated')
+    } else {
+      saveStatusAtom.set('error')
+    }
   }
 }
 
@@ -171,6 +179,11 @@ export async function saveMine(): Promise<void> {
 let channel: ReturnType<typeof openCrossTabChannel> | null = null
 
 async function handleExternalSave(updatedAt: number): Promise<void> {
+  if (storageCompatibilityAtom() === 'newer-format') {
+    saveStatusAtom.set('outdated')
+    return
+  }
+
   const base = notebookBaseUpdatedAtAtom()
   if (base !== null && updatedAt <= base) return
 
@@ -187,7 +200,12 @@ async function checkStoredVersion(): Promise<void> {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
     if (!stored) return
     await handleExternalSave(stored.updatedAt)
-  } catch {
+  } catch (error) {
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      saveStatusAtom.set('outdated')
+      return
+    }
     // A focus/visibility sync failure is advisory; the normal autosave path
     // will surface storage errors if the user edits. Do not annoy the user with
     // a transient conflict/error just because a background check failed.
@@ -217,19 +235,26 @@ export function startAutosave(): () => void {
   let primed = false
 
   acceptCurrentBaseline(notebookBaseUpdatedAtAtom() ?? 0)
+  if (storageCompatibilityAtom() === 'newer-format') {
+    saveStatusAtom.set('outdated')
+  }
 
   const runSave = wrap(() => {
     timer = null
     void saveNow()
   })
 
-  const unsubscribe = dirtyAtom.subscribe(() => {
+  const unsubscribe = notebookRevisionAtom.subscribe(() => {
     // Skip the initial synchronous emit: nothing has changed yet.
     if (!primed) {
       primed = true
       return
     }
     if (timer !== null) clearTimeout(timer)
+    if (storageCompatibilityAtom() === 'newer-format') {
+      saveStatusAtom.set('outdated')
+      return
+    }
     if (!hasLocalChangesAtom()) return
     timer = setTimeout(runSave, DEBOUNCE_MS)
   })

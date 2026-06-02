@@ -56,6 +56,20 @@ describe('notebook IndexedDB storage', () => {
     expect((await get(id))?.title).toBe('other tab')
   })
 
+  test('putIfNewer rethrows newer-format storage instead of downgrading it', async () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const { openDB } = await import('idb')
+    const db = await openDB('js-notebook', 1)
+    await db.put('notebooks', {
+      ...notebook(id, FORMAT_VERSION + 1, 'future'),
+      formatVersion: FORMAT_VERSION + 1,
+    })
+    db.close()
+    await expect(putIfNewer(notebook(id, 20, 'old app'), 10)).rejects.toThrow(
+      /newer format version/,
+    )
+  })
+
   test('putIfNewer with a null baseline writes only into an empty slot', async () => {
     const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
     const mine = notebook(id, 20, 'mine')

@@ -1,4 +1,5 @@
 import { action, atom, computed } from '@reatom/core'
+import { bumpNotebookRevision } from './revision'
 
 // Notebook-level undo/redo. The stack holds the last 50 user operations over
 // the cell list — add, delete, move, change-kind, edit-source. Output and
@@ -55,6 +56,7 @@ export const undo = action(() => {
   const entry = past[past.length - 1]
   if (!entry) return
   entry.op.undo()
+  bumpNotebookRevision()
   pastAtom.set(past.slice(0, -1))
   futureAtom.set([entry.op, ...futureAtom()])
 }, 'notebook.history.undo')
@@ -64,6 +66,7 @@ export const redo = action(() => {
   const op = future[0]
   if (!op) return
   op.redo()
+  bumpNotebookRevision()
   futureAtom.set(future.slice(1))
   // Re-push without coalescing into the previous entry.
   pastAtom.set([...pastAtom(), { op, at: Date.now() }].slice(-MAX_HISTORY))

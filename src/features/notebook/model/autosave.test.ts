@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
 import type { NotebookJSON } from '../persistence/schema'
 import {
   addCell,
   cellsAtom,
   LOCAL_NOTEBOOK_ID,
   notebookBaseUpdatedAtAtom,
+  setNotebookTitle,
+  storageCompatibilityAtom,
   updateCellCode,
 } from './notebook'
 import {
@@ -45,6 +48,7 @@ describe('notebook autosave', () => {
     vi.useFakeTimers()
     saveStatusAtom.set('idle')
     lastSavedAtAtom.set(null)
+    storageCompatibilityAtom.set('ok')
   })
 
   afterEach(() => {
@@ -168,5 +172,60 @@ describe('notebook autosave', () => {
     expect(notebookBaseUpdatedAtAtom()).toBe(20)
     expect(hasLocalChangesAtom()).toBe(false)
     expect(saveStatusAtom()).toBe('saved')
+  })
+
+  test('does not write when storage contains a notebook from a newer app version', async () => {
+    storageCompatibilityAtom.set('newer-format')
+    const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+    await saveNow()
+    expect(putIfNewer).not.toHaveBeenCalled()
+    expect(saveStatusAtom()).toBe('outdated')
+  })
+
+  test('startAutosave surfaces outdated immediately and does not arm writes', async () => {
+    storageCompatibilityAtom.set('newer-format')
+    const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    expect(saveStatusAtom()).toBe('outdated')
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'local change on an outdated client')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(putIfNewer).not.toHaveBeenCalled()
+    expect(saveStatusAtom()).toBe('outdated')
+    stop()
+  })
+
+  test('reloadFromStorage goes outdated (not unhandled) when the stored notebook is too new', async () => {
+    // The "Reload" button and the cross-tab pull both call this; get() runs
+    // applyMigrations, so a newer-format record reaches here as a rejection.
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
+    await expect(reloadFromStorage()).resolves.toBeUndefined()
+    expect(storageCompatibilityAtom()).toBe('newer-format')
+    expect(saveStatusAtom()).toBe('outdated')
+  })
+
+  test('reloadFromStorage surfaces a generic storage failure as error', async () => {
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(new Error('blocked DB'))
+    await expect(reloadFromStorage()).resolves.toBeUndefined()
+    expect(saveStatusAtom()).toBe('error')
+  })
+
+  test('changing the title via setNotebookTitle triggers an autosave', async () => {
+    const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    setNotebookTitle('A brand new title')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(putIfNewer).toHaveBeenCalledTimes(1)
+    expect(saveStatusAtom()).toBe('saved')
+    stop()
+  })
+
+  test('setNotebookTitle with the same title does not arm a save', async () => {
+    const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    setNotebookTitle('Untitled notebook') // identical to the seed title
+    await vi.advanceTimersByTimeAsync(500)
+    expect(putIfNewer).not.toHaveBeenCalled()
+    stop()
   })
 })

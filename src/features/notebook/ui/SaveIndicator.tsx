@@ -17,9 +17,9 @@ function formatTime(ms: number): string {
   })
 }
 
-// Header autosave status. Mirrors the four states of `saveStatusAtom`; the
-// error state offers a manual retry (autosave otherwise only fires on the next
-// edit). Pure read from the model — no local state.
+// Header autosave status. Mirrors the save state machine from the model:
+// saving, saved, error, cross-tab conflict, and "this app is too old for the
+// stored notebook format". Pure read from the model — no local state.
 export const SaveIndicator = reatomComponent(() => {
   const status = saveStatusAtom()
   const lastSavedAt = lastSavedAtAtom()
@@ -58,6 +58,15 @@ export const SaveIndicator = reatomComponent(() => {
         <button type="button" onClick={wrap(() => void saveMine())} className="underline">
           Save mine
         </button>
+      </span>
+    )
+  }
+
+  if (status === 'outdated') {
+    return (
+      <span className="flex items-center gap-1.5 text-sm text-destructive">
+        <CircleAlert className="size-3.5" />
+        Saved in a newer app version — update to edit this notebook
       </span>
     )
   }

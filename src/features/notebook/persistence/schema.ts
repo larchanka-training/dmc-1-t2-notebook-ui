@@ -79,7 +79,7 @@ function isCellJSON(value: unknown): value is CellJSON {
 export function isNotebookJSON(value: unknown): value is NotebookJSON {
   if (!isObject(value)) return false
   return (
-    typeof value['formatVersion'] === 'number' &&
+    value['formatVersion'] === FORMAT_VERSION &&
     isUuid(value['id']) &&
     typeof value['title'] === 'string' &&
     typeof value['createdAt'] === 'number' &&

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { FORMAT_VERSION } from './schema'
-import { applyMigrations } from './migrations'
+import { applyMigrations, NewerFormatError } from './migrations'
 
 // A synthetic pre-versioning (v0) document: no `formatVersion`, legacy `code`
 // field on cells. The migration must stamp the version and rename code→content.
@@ -44,9 +44,9 @@ describe('format migrations', () => {
     expect(applyMigrations(current)).toEqual(current)
   })
 
-  test('throws on a version newer than this client understands', () => {
+  test('throws a typed error on a version newer than this client understands', () => {
     expect(() => applyMigrations({ ...v0Notebook(), formatVersion: FORMAT_VERSION + 1 })).toThrow(
-      /newer format version/,
+      NewerFormatError,
     )
   })
 

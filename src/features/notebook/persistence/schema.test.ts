@@ -41,6 +41,7 @@ describe('notebook schema validator', () => {
     expect(isNotebookJSON(noTitle)).toBe(false)
     // ISO string instead of epoch ms — the drift we are guarding against.
     expect(isNotebookJSON({ ...validNotebook(), updatedAt: '2023-11-14' })).toBe(false)
+    expect(isNotebookJSON({ ...validNotebook(), formatVersion: FORMAT_VERSION + 1 })).toBe(false)
   })
 
   test('rejects a cell with the wrong kind', () => {

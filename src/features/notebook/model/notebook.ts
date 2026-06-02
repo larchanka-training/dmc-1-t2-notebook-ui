@@ -1,9 +1,11 @@
 import { action, atom, wrap } from '@reatom/core'
 import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
 import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
+import { bumpNotebookRevision } from './revision'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
@@ -34,6 +36,17 @@ export const notebookBaseUpdatedAtAtom = atom<number | null>(null, 'notebook.bas
 // overwritten by the restored cells. Single-notebook MVP; one boot per session.
 export const notebookLoadedAtom = atom(false, 'notebook.loaded')
 
+export type StorageCompatibility = 'ok' | 'newer-format'
+
+// Storage compatibility gate. If IndexedDB contains a notebook created by a
+// newer app version, this older client must not write over it. The editor stays
+// readable with the in-memory seed, but autosave/overwrite actions are blocked
+// until the user opens the notebook in a newer build.
+export const storageCompatibilityAtom = atom<StorageCompatibility>(
+  'ok',
+  'notebook.storageCompatibility',
+)
+
 /** Serialize the current in-memory notebook (cells + metadata) to JSON. */
 export function notebookSnapshot(): NotebookJSON {
   return toJSON(cellsAtom(), {
@@ -44,12 +57,25 @@ export function notebookSnapshot(): NotebookJSON {
   })
 }
 
+// The only sanctioned way to change the notebook title. Title is persisted
+// content, so every mutation MUST bump the revision (otherwise a title-only
+// edit would not be picked up by autosave). Routing it through one action keeps
+// that guarantee in a single place instead of relying on every future caller to
+// remember the bump.
+export const setNotebookTitle = action((title: string) => {
+  if (notebookTitleAtom() === title) return
+  notebookTitleAtom.set(title)
+  bumpNotebookRevision()
+}, 'notebook.setTitle')
+
 /** Replace the in-memory notebook with a persisted document. */
 export const restoreNotebook = action((stored: NotebookJSON) => {
   notebookTitleAtom.set(stored.title)
   notebookCreatedAtAtom.set(stored.createdAt)
   notebookBaseUpdatedAtAtom.set(stored.updatedAt)
   cellsAtom.set(fromJSON(stored))
+  // One bump for the whole restore (cells + title + metadata replaced at once).
+  bumpNotebookRevision()
   clearHistory()
 }, 'notebook.restore')
 
@@ -67,6 +93,7 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
  * is not an undoable user edit.
  */
 export const loadNotebook = action(async () => {
+  storageCompatibilityAtom.set('ok')
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
     if (stored) {
@@ -76,7 +103,11 @@ export const loadNotebook = action(async () => {
       await wrap(notebookStorage.put(seed))
       notebookBaseUpdatedAtAtom.set(seed.updatedAt)
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof NewerFormatError) {
+      storageCompatibilityAtom.set('newer-format')
+      notebookBaseUpdatedAtAtom.set(null)
+    }
     // Corrupt/unreadable storage OR a failed seed write — keep the in-memory
     // seed. Never block the editor or autosave startup on storage I/O.
   } finally {
@@ -94,6 +125,7 @@ export const loadNotebook = action(async () => {
 function recordStructural(before: Cell[]): void {
   const after = cellsAtom()
   if (before === after) return
+  bumpNotebookRevision()
   recordOperation({
     undo: () => cellsAtom.set(before),
     redo: () => cellsAtom.set(after),
@@ -187,6 +219,7 @@ export const updateCellCode = action((id: string, code: string) => {
   const now = Date.now()
   cell.code.set(code)
   cell.updatedAt.set(now)
+  bumpNotebookRevision()
   // Edits coalesce per cell within the history time window, so a burst of
   // keystrokes collapses into one undo step. Restoring drives the atoms
   // directly (not via this action), so undo/redo don't re-record. The

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as notebookStorage from '../persistence/storage'
+import { NewerFormatError } from '../persistence/migrations'
 import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
   addCell,
@@ -13,6 +14,7 @@ import {
   moveCellTo,
   notebookTitleAtom,
   SEED_CODE,
+  storageCompatibilityAtom,
   updateCellCode,
 } from './notebook'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
@@ -273,6 +275,7 @@ describe('loadNotebook (boot)', () => {
   beforeEach(async () => {
     await notebookStorage.clear()
     notebookTitleAtom.set('Untitled notebook')
+    storageCompatibilityAtom.set('ok')
   })
 
   afterEach(() => {
@@ -332,5 +335,15 @@ describe('loadNotebook (boot)', () => {
     expect(cellsAtom()).toHaveLength(1)
     expect(cellsAtom()[0].code()).toBe(SEED_CODE)
     expect(canUndoAtom()).toBe(false)
+  })
+
+  test('marks storage as newer-format and keeps the seed when the stored notebook is too new', async () => {
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(
+      new NewerFormatError(FORMAT_VERSION + 1, FORMAT_VERSION),
+    )
+    await expect(loadNotebook()).resolves.toBeUndefined()
+    expect(storageCompatibilityAtom()).toBe('newer-format')
+    expect(cellsAtom()).toHaveLength(1)
+    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
   })
 })

@@ -13,6 +13,22 @@
 
 import { assertNotebookJSON, FORMAT_VERSION, type NotebookJSON } from './schema'
 
+/** The stored notebook was created by a newer app version than this build understands. */
+export class NewerFormatError extends Error {
+  readonly storedVersion: number
+  readonly supportedVersion: number
+
+  constructor(storedVersion: number, supportedVersion: number) {
+    super(
+      `Notebook was created in a newer format version (${storedVersion} > ${supportedVersion}). ` +
+        'Update the application to open it.',
+    )
+    this.name = 'NewerFormatError'
+    this.storedVersion = storedVersion
+    this.supportedVersion = supportedVersion
+  }
+}
+
 type Migration = (json: Record<string, unknown>) => Record<string, unknown>
 
 /**
@@ -61,10 +77,7 @@ export function applyMigrations(raw: unknown): NotebookJSON {
   let version = readVersion(current)
 
   if (version > FORMAT_VERSION) {
-    throw new Error(
-      `Notebook was created in a newer format version (${version} > ${FORMAT_VERSION}). ` +
-        'Update the application to open it.',
-    )
+    throw new NewerFormatError(version, FORMAT_VERSION)
   }
 
   while (version < FORMAT_VERSION) {

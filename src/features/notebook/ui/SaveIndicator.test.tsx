@@ -49,4 +49,10 @@ describe('SaveIndicator', () => {
     expect(screen.getByRole('button', { name: /reload/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /save mine/i })).toBeInTheDocument()
   })
+
+  test('shows an upgrade message for a notebook saved by a newer app version', () => {
+    seedStatus('outdated')
+    render(<SaveIndicator />)
+    expect(screen.getByText(/saved in a newer app version/i)).toBeInTheDocument()
+  })
 })

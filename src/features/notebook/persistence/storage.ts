@@ -10,7 +10,7 @@
 // notebooks and large payloads, and gives us the `updatedAt` index for free.
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import { applyMigrations } from './migrations'
+import { applyMigrations, NewerFormatError } from './migrations'
 import type { NotebookJSON } from './schema'
 
 const DB_NAME = 'js-notebook'
@@ -90,8 +90,9 @@ export type PutResult =
  * `current` is returned so the caller can resolve the conflict instead of
  * silently overwriting it. A `base` of `null` means "this tab has no known
  * baseline yet" and only writes into an empty slot. A stored record that fails
- * migration/validation is treated as absent and overwritten (best-effort
- * recovery from a corrupt slot).
+ * validation is treated as absent and overwritten (best-effort recovery from a
+ * corrupt slot), but a `NewerFormatError` is re-thrown so an older client never
+ * downgrades a notebook it cannot understand.
  */
 export async function putIfNewer(notebook: NotebookJSON, base: number | null): Promise<PutResult> {
   const db = await getDB()
@@ -103,7 +104,8 @@ export async function putIfNewer(notebook: NotebookJSON, base: number | null): P
   if (existingRaw !== undefined) {
     try {
       existing = applyMigrations(existingRaw)
-    } catch {
+    } catch (error) {
+      if (error instanceof NewerFormatError) throw error
       existing = undefined // corrupt slot — overwrite it
     }
   }
