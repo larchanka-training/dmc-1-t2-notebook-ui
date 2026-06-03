@@ -3,9 +3,10 @@
 > Архитектурный документ. Реализованная модель авторизации и хранения данных для JS Notebook (ui). Соответствует TARDIS-15.
 >
 > Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
-> Реализация завершена в PR #44 и ожидает готовности backend OTP/JWT endpoints
-> (`POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`).
-> До мержа BE-PR оба PR должны быть синхронизированы.
+> Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify
+> endpoints (`POST /auth/otp/request`, `POST /auth/otp/verify`) и backend error
+> envelope. Refresh/logout endpoints и Bearer cutover для `/auth/me` /
+> notebook endpoints остаются следующими backend-шагами.
 
 ## Содержание
 
@@ -37,6 +38,25 @@
 - Защита от XSS — `localStorage` для токенов с многослойной защитой контента.
 
 См. парный документ в API repo: [docs/auth.md][api-auth].
+
+### 1.1. Текущий статус реализации TARDIS-75
+
+На текущих feature branches реализован и синхронизирован первый контрактный
+срез OTP auth:
+
+- Backend OpenAPI содержит `POST /api/v1/auth/otp/request` и
+  `POST /api/v1/auth/otp/verify`;
+- `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
+- `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
+- shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
+- shared error parser понимает backend envelope `{ error: { code, message,
+fields } }`.
+
+Ещё не завершено:
+
+- UI screen/state миграция на двухшаговый OTP flow;
+- `POST /auth/refresh` и `POST /auth/logout` на backend;
+- Bearer-based `/auth/me` и protected notebook cutover.
 
 ---
 
@@ -71,10 +91,29 @@
 
 - На step 1 кнопка `Send code` блокируется при `invalid email`.
 - На step 2 поле — 6 раздельных input (или один с маской `------`).
-- `Resend in 45s` — UI-таймер (5 мин TTL OTP, после 45 сек разрешён повтор; запрос ограничен серверным rate limit, см. [API repo: docs/auth.md §10][api-auth]).
-- На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится, состояние `attempts++` не показываем (это серверная инфа).
-- На `401 otp_expired` — сообщение `Code expired, request a new one`, возврат на step 1.
+- `Resend in 45s` — UI-таймер (5 мин TTL OTP, после 45 сек разрешён повтор; запрос ограничен серверным rate limit, см. [API repo: docs/auth.md §11][api-auth]).
+- На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится.
+  Текущий backend первым MVP-срезом использует этот же `error.code` для
+  отсутствующего, истёкшего или уже использованного OTP.
+- На future `401 otp_expired` — сообщение `Code expired, request a new one`,
+  возврат на step 1. Если backend начнёт отдавать отдельный код, UI contract
+  и generated types обновляются в том же PR.
 - При успехе — токены кладутся в `localStorage`, `user` — в `userAtom`, navigate → `/notebooks` (или `from`-route, см. §6).
+
+**Error envelope:** backend ошибки приходят в единой форме:
+
+```json
+{
+  "error": {
+    "code": "invalid_otp",
+    "message": "Invalid or expired OTP",
+    "fields": {}
+  }
+}
+```
+
+UI не должен читать `code` / `message` из верхнего уровня ответа. Общий parser
+в `src/shared/api/errors.ts` разворачивает `error.code` в `ApiError.code`.
 
 ---
 
@@ -86,7 +125,7 @@
 | ---------------------- | ----------------------------------------------------------------------- |
 | `session.accessToken`  | JWT (HS256), TTL 15 мин. Используется в `Authorization: Bearer <...>`.  |
 | `session.refreshToken` | Opaque string, TTL 30 дней. Используется только в `POST /auth/refresh`. |
-| `session.user`         | Кэш текущего `User` (id, email, displayName).                           |
+| `session.user`         | Кэш текущего `User` (id, nullable email, nullable displayName, roles).  |
 
 Reatom-атомы (`ui/src/entities/session/model/session.ts`):
 
@@ -576,7 +615,9 @@ export const MAX_SUPPORTED_FORMAT_VERSION = 1
 
 ### 14.1. Поведение
 
-Определяется через `import.meta.env.MODE !== 'production'` (Vite). В этом режиме при `POST /auth/otp/request` ответ содержит поле `otp`.
+Определяется не frontend env-флагом, а ответом backend. В
+`dev`/`local`/`test` backend возвращает `200 { otp, expiresAt }`; в
+production-like env возвращает `204 No Content`.
 
 ### 14.2. UI
 
@@ -606,15 +647,24 @@ export const MAX_SUPPORTED_FORMAT_VERSION = 1
 
 ## 16. Migration note
 
-> **Существующий код противоречит этому документу.** OTP + JWT были в требованиях проекта с самого начала, но архитектурное решение (этот документ) не было готово к моменту, когда команда стартовала разработку. Поэтому в `ui/` сейчас:
->
-> - `POST /auth/login` с `{ email, password }` — заменяется на `POST /auth/otp/request` + `POST /auth/otp/verify`.
-> - `LoginResponse { token, user }` → `AuthResponse { accessToken, refreshToken, user }`.
-> - `tokenAtom` → пара `accessTokenAtom` + `refreshTokenAtom`.
-> - `LoginForm.tsx` — переписать как двухшаговую форму.
-> - Сгенерированные типы `ui/src/shared/api/generated/openapi-ts/auth.d.ts` — перегенерировать после обновления OpenAPI на бэке.
->
-> Миграция — отдельный тикет (после реализации серверной стороны). До миграции существующий password-flow продолжает работать как mock.
+OTP + JWT были в требованиях проекта с самого начала, но архитектурное решение
+было готово позже стартового UI mock-flow. Текущее состояние миграции:
+
+- `ui/openapi/auth.openapi.yaml` уже описывает `POST /auth/otp/request` и
+  `POST /auth/otp/verify` в соответствии с backend snapshot;
+- `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
+- shared API facade уже имеет `requestOtp(...)` и `verifyOtp(...)`;
+- `AuthResponse` остаётся facade alias на backend `OtpVerifyResponse`, чтобы
+  не расширять refactor поверх контрактной синхронизации.
+
+Осталось следующими шагами:
+
+- заменить старый UI login screen на двухшаговый email → OTP flow;
+- перевести session atoms с legacy `tokenAtom` на `accessTokenAtom` +
+  `refreshTokenAtom`, если это ещё не сделано в текущей UI branch;
+- подключить `requestOtp(...)` / `verifyOtp(...)` к форме;
+- после backend refresh/logout реализации включить полный refresh/logout
+  lifecycle.
 
 ---
 

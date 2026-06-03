@@ -23,6 +23,12 @@ describe('toApiError', () => {
     expect(err.status).toBe(404)
   })
 
+  test('legacy flat error bodies are still accepted defensively', () => {
+    const err = toApiError(400, { code: 'invalid', message: 'bad body' })
+    expect(err).toBeInstanceOf(BadRequestError)
+    expect(err.code).toBe('invalid')
+  })
+
   test('5xx falls back to generic ApiError', () => {
     const err = toApiError(503, undefined)
     expect(err.constructor).toBe(ApiError)

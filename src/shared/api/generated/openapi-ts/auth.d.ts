@@ -97,14 +97,11 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         OtpRequest: {
-            /**
-             * Format: email
-             * @example user@example.com
-             */
+            /** @example user@example.com */
             email: string;
         };
         /** @description Returned only in dev/local/test. Never present in production. */
-        OtpRequestResponse: {
+        OtpRequestDevResponse: {
             /**
              * @description One-time password value.
              * @example 123456
@@ -117,11 +114,10 @@ export interface components {
             expiresAt: number;
         };
         OtpVerifyRequest: {
-            /** Format: email */
             email: string;
             otp: string;
         };
-        AuthResponse: {
+        OtpVerifyResponse: {
             /** @description Short-lived JWT (15 min). Send as `Authorization: Bearer <token>`. */
             accessToken: string;
             /** @description Opaque token (30 days). Use only in POST /auth/refresh and POST /auth/logout. */
@@ -141,8 +137,7 @@ export interface components {
         User: {
             /** Format: uuid */
             id: string;
-            /** Format: email */
-            email: string;
+            email?: string | null;
             displayName?: string | null;
             /** @default [] */
             roles: string[];
@@ -180,8 +175,8 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
-        /** @description Rate limit exceeded */
-        TooManyRequests: {
+        /** @description Validation error */
+        ValidationError: {
             headers: {
                 [name: string]: unknown;
             };
@@ -216,7 +211,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OtpRequestResponse"];
+                    "application/json": components["schemas"]["OtpRequestDevResponse"];
                 };
             };
             /** @description No Content — OTP sent by email (production). */
@@ -227,7 +222,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            429: components["responses"]["TooManyRequests"];
+            422: components["responses"]["ValidationError"];
         };
     };
     verifyOtp: {
@@ -249,11 +244,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthResponse"];
+                    "application/json": components["schemas"]["OtpVerifyResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
         };
     };
     refreshTokens: {

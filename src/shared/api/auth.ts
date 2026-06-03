@@ -3,8 +3,8 @@ import { toApiError } from './errors'
 import type { components } from './generated/openapi-ts/auth'
 
 export type User = components['schemas']['User']
-export type OtpRequestResponse = components['schemas']['OtpRequestResponse']
-export type AuthResponse = components['schemas']['AuthResponse']
+export type OtpRequestResponse = components['schemas']['OtpRequestDevResponse']
+export type AuthResponse = components['schemas']['OtpVerifyResponse']
 export type RefreshResponse = components['schemas']['RefreshResponse']
 
 export async function requestOtp(email: string): Promise<OtpRequestResponse | null> {

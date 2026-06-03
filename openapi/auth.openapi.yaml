@@ -32,13 +32,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OtpRequestResponse'
+                $ref: '#/components/schemas/OtpRequestDevResponse'
         '204':
           description: No Content — OTP sent by email (production).
         '400':
           $ref: '#/components/responses/BadRequest'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /auth/otp/verify:
     post:
@@ -58,11 +58,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResponse'
+                $ref: '#/components/schemas/OtpVerifyResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /auth/refresh:
     post:
@@ -136,10 +138,9 @@ components:
       properties:
         email:
           type: string
-          format: email
           examples: ['user@example.com']
 
-    OtpRequestResponse:
+    OtpRequestDevResponse:
       type: object
       required: [otp, expiresAt]
       description: Returned only in dev/local/test. Never present in production.
@@ -159,13 +160,12 @@ components:
       properties:
         email:
           type: string
-          format: email
         otp:
           type: string
           minLength: 6
           maxLength: 6
 
-    AuthResponse:
+    OtpVerifyResponse:
       type: object
       required: [accessToken, refreshToken, user]
       properties:
@@ -203,14 +203,15 @@ components:
 
     User:
       type: object
-      required: [id, email]
+      required: [id]
       properties:
         id:
           type: string
           format: uuid
         email:
-          type: string
-          format: email
+          oneOf:
+            - type: string
+            - type: 'null'
         displayName:
           type: [string, 'null']
         roles:
@@ -255,8 +256,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
-    TooManyRequests:
-      description: Rate limit exceeded
+    ValidationError:
+      description: Validation error
       content:
         application/json:
           schema:

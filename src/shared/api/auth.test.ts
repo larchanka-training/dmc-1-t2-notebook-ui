@@ -51,14 +51,13 @@ describe('requestOtp', () => {
     expect(err.code).toBe('invalid_email')
   })
 
-  test('429 throws ApiError with status 429', async () => {
+  test('422 throws ApiError with validation code', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(429, {
-        error: { code: 'too_many_otp_requests', message: 'slow down', fields: {} },
-      }),
+      jsonResponse(422, { error: { code: 'validation_error', message: 'invalid body' } }),
     )
     const err = await auth.requestOtp('a@b.com').catch((e) => e)
-    expect(err.status).toBe(429)
+    expect(err.status).toBe(422)
+    expect(err.code).toBe('validation_error')
   })
 
   test('404 (undocumented) throws ApiError with status 404', async () => {
