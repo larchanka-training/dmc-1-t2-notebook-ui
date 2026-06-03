@@ -3,10 +3,11 @@
 > Архитектурный документ. Реализованная модель авторизации и хранения данных для JS Notebook (ui). Соответствует TARDIS-15.
 >
 > Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
-> Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify
-> endpoints (`POST /auth/otp/request`, `POST /auth/otp/verify`) и backend error
-> envelope. Refresh/logout endpoints и Bearer cutover для `/auth/me` /
-> notebook endpoints остаются следующими backend-шагами.
+> Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify и
+> refresh endpoints (`POST /auth/otp/request`, `POST /auth/otp/verify`,
+> `POST /auth/refresh`) и backend error envelope. Logout endpoint и Bearer
+> cutover для `/auth/me` / notebook endpoints остаются следующими
+> backend-шагами.
 
 ## Содержание
 
@@ -44,8 +45,8 @@
 На текущих feature branches реализован и синхронизирован первый контрактный
 срез OTP auth:
 
-- Backend OpenAPI содержит `POST /api/v1/auth/otp/request` и
-  `POST /api/v1/auth/otp/verify`;
+- Backend OpenAPI содержит `POST /api/v1/auth/otp/request`,
+  `POST /api/v1/auth/otp/verify` и `POST /api/v1/auth/refresh`;
 - `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
 - `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
 - shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
@@ -55,7 +56,7 @@ fields } }`.
 Ещё не завершено:
 
 - UI screen/state миграция на двухшаговый OTP flow;
-- `POST /auth/refresh` и `POST /auth/logout` на backend;
+- `POST /auth/logout` на backend;
 - Bearer-based `/auth/me` и protected notebook cutover.
 
 ---

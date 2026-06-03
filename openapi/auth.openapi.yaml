@@ -87,6 +87,8 @@ paths:
                 $ref: '#/components/schemas/RefreshResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /auth/logout:
     post:
