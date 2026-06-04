@@ -35,18 +35,21 @@ import {
   SidebarMenuItem,
 } from '@/shared/ui/sidebar'
 
+// `url` is RELATIVE (no leading slash). The real href is prefixed with the
+// app base (import.meta.env.BASE_URL — '/' normally, '/pr-<N>/' under a preview)
+// so navigation stays inside the deployed base path.
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
-const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '/' }]
+const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '' }]
 
 const navComponents: NavItem[] = [
-  { title: 'Shadcn UI', icon: LayoutGrid, url: '/components/shadcn' },
-  { title: 'Custom', icon: Puzzle, url: '/components/custom' },
+  { title: 'Shadcn UI', icon: LayoutGrid, url: 'components/shadcn' },
+  { title: 'Custom', icon: Puzzle, url: 'components/custom' },
 ]
 
-const navAuth: NavItem[] = [{ title: 'Login', icon: LogIn, url: '/login' }]
+const navAuth: NavItem[] = [{ title: 'Login', icon: LogIn, url: 'login' }]
 
-const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: '/about' }]
+const navInfo: NavItem[] = [{ title: 'About', icon: Info, url: 'about' }]
 
 // Help is an action (opens the shortcuts dialog), not a route, so it can't go
 // through NavGroup's <a>. It sits right under the Info group.
@@ -74,14 +77,17 @@ const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavI
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton isActive={pathname === item.url} render={<a href={item.url} />}>
-                <item.icon />
-                <span>{item.title}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          {items.map((item) => {
+            const href = import.meta.env.BASE_URL + item.url
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton isActive={pathname === href} render={<a href={href} />}>
+                  <item.icon />
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

@@ -1,0 +1,113 @@
+name: Preview — per-PR UI
+
+# Per-PR frontend preview (preview-v2). Builds the UI under /pr-<N>/, uploads it
+# to the shared preview S3 bucket, and posts a sticky comment with the URL. The
+# UI talks to the SHARED preview backend at /api/v1 (it doesn't get its own
+# backend — API PRs do that, in the api repo). On PR close, the slice is removed.
+#
+# Shared infra (bucket + CloudFront) lives in the monorepo's terraform
+# (terraform/preview-cloud); this workflow only syncs static files into it.
+#
+# Required repo config:
+#   secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  (the deploy-user keys)
+#   vars (optional, have defaults): AWS_REGION, PREVIEW_S3_BUCKET,
+#         PREVIEW_CLOUDFRONT_DOMAIN
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+  PREVIEW_BUCKET: ${{ vars.PREVIEW_S3_BUCKET || 'jsnotes-t2-preview-frontend' }}
+  PREVIEW_CF_DOMAIN: ${{ vars.PREVIEW_CLOUDFRONT_DOMAIN || 'd2e2ymc27fdfn5.cloudfront.net' }}
+  CLOUDFRONT_COMMENT: 'jsnotes-t2-preview frontend'
+  PR: ${{ github.event.pull_request.number }}
+
+jobs:
+  deploy:
+    name: Deploy preview
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-pnpm
+
+      - name: Build UI under /pr-${{ env.PR }}/
+        env:
+          VITE_BASE: /pr-${{ github.event.pull_request.number }}/
+          VITE_API_BASE_URL: /api/v1
+        run: pnpm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3 /pr-${{ env.PR }}/
+        run: aws s3 sync dist/ "s3://${PREVIEW_BUCKET}/pr-${PR}/" --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          set -euo pipefail
+          DIST_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='${CLOUDFRONT_COMMENT}'].Id | [0]" --output text)
+          if [ -z "${DIST_ID}" ] || [ "${DIST_ID}" = "None" ]; then
+            echo "::error::Preview CloudFront not found by comment '${CLOUDFRONT_COMMENT}'"; exit 1
+          fi
+          aws cloudfront create-invalidation --distribution-id "${DIST_ID}" --paths "/pr-${PR}/*" >/dev/null
+
+      - name: Sticky PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          URL="https://${PREVIEW_CF_DOMAIN}/pr-${PR}/"
+          BODY=$(printf '🚀 **UI preview deployed:** %s\nUpdated for %s' "${URL}" "${GITHUB_SHA}")
+          gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --edit-last --body "${BODY}" \
+            || gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --body "${BODY}"
+
+  teardown:
+    name: Teardown preview
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Remove /pr-${{ env.PR }}/ from S3
+        run: aws s3 rm "s3://${PREVIEW_BUCKET}/pr-${PR}/" --recursive
+
+      - name: Invalidate CloudFront
+        run: |
+          set -euo pipefail
+          DIST_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='${CLOUDFRONT_COMMENT}'].Id | [0]" --output text)
+          [ -n "${DIST_ID}" ] && [ "${DIST_ID}" != "None" ] && \
+            aws cloudfront create-invalidation --distribution-id "${DIST_ID}" --paths "/pr-${PR}/*" >/dev/null || true
+
+      - name: Update PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --edit-last \
+            --body "🧹 UI preview for pr-${PR} torn down." || true
