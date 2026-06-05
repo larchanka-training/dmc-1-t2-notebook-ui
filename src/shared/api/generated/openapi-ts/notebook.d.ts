@@ -43,6 +43,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Paginated wrapper returned by `GET /notebooks`. */
+        NotebookListResponse: {
+            items: components["schemas"]["NotebookListItem"][];
+            total: number;
+            limit: number;
+            offset: number;
+        };
+        /** @description Lightweight notebook row for the list endpoint (no `cells`, only their count). `createdAt`/`updatedAt` are epoch milliseconds. */
+        NotebookListItem: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            formatVersion: number;
+            createdAt: number;
+            updatedAt: number;
+            cellsCount: number;
+        };
         Notebook: {
             /** Format: uuid */
             id: string;
@@ -149,7 +166,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Notebook"][];
+                    "application/json": components["schemas"]["NotebookListResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
