@@ -4,10 +4,10 @@
 >
 > Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
 > Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify и
-> refresh endpoints (`POST /auth/otp/request`, `POST /auth/otp/verify`,
-> `POST /auth/refresh`), Bearer-based `GET /auth/me` и backend error envelope.
-> Logout endpoint и Bearer cutover для notebook endpoints остаются следующими
-> backend-шагами.
+> refresh/logout endpoints (`POST /auth/otp/request`,
+> `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`) и
+> Bearer-based `GET /auth/me`, backend error envelope. Bearer cutover для
+> notebook endpoints остаётся следующим backend-шагом.
 
 ## Содержание
 
@@ -46,7 +46,8 @@
 срез OTP auth:
 
 - Backend OpenAPI содержит `POST /api/v1/auth/otp/request`,
-  `POST /api/v1/auth/otp/verify` и `POST /api/v1/auth/refresh`;
+  `POST /api/v1/auth/otp/verify`, `POST /api/v1/auth/refresh` и
+  `POST /api/v1/auth/logout`;
 - `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
 - `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
 - shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
@@ -56,7 +57,6 @@ fields } }`.
 Ещё не завершено:
 
 - UI screen/state миграция на двухшаговый OTP flow;
-- `POST /auth/logout` на backend;
 - Bearer cutover для protected notebook endpoints.
 
 ---
@@ -664,8 +664,7 @@ OTP + JWT были в требованиях проекта с самого на
 - перевести session atoms с legacy `tokenAtom` на `accessTokenAtom` +
   `refreshTokenAtom`, если это ещё не сделано в текущей UI branch;
 - подключить `requestOtp(...)` / `verifyOtp(...)` к форме;
-- после backend refresh/logout реализации включить полный refresh/logout
-  lifecycle.
+- после backend Bearer cutover включить полный authenticated sync lifecycle.
 
 ---
 

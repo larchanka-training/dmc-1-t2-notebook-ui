@@ -108,6 +108,8 @@ paths:
       responses:
         '204':
           description: No Content — session revoked (idempotent)
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /auth/me:
     get:

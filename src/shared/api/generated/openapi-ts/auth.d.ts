@@ -298,6 +298,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            422: components["responses"]["ValidationError"];
         };
     };
     getMe: {
