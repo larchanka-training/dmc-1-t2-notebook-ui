@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { urlAtom } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { accessTokenAtom, sessionRestoredAtom, userAtom } from '@/entities/session'
+import { LOGIN_PATH } from '@/shared/lib/paths'
 
 /**
  * Wraps protected route content. Unauthenticated users are redirected to
@@ -24,7 +25,7 @@ export const AuthRouteGuard = reatomComponent(({ children }: { children: ReactNo
     // Use location.replace (same pattern as onSessionExpired in setup.ts):
     // urlAtom.set() requires an active Reatom frame which isn't available
     // inside useEffect — window.location.replace is the reliable fallback.
-    window.location.replace(`/login?from=${encodeURIComponent(pathname)}`)
+    window.location.replace(`${LOGIN_PATH}?from=${encodeURIComponent(pathname)}`)
   }, [isPendingRestore, isAuthenticated, isRestored, pathname])
 
   if (isPendingRestore || !isAuthenticated) return null

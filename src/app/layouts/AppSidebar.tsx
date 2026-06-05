@@ -24,6 +24,7 @@ import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { cn } from '@/shared/lib/cn'
+import { LOGIN_PATH } from '@/shared/lib/paths'
 import {
   Sidebar,
   SidebarContent,
@@ -93,7 +94,7 @@ const AuthSection = reatomComponent(() => {
             </>
           ) : (
             <SidebarMenuItem>
-              <SidebarMenuButton render={<a href="/login" />}>
+              <SidebarMenuButton render={<a href={LOGIN_PATH} />}>
                 <LogIn />
                 <span>Log in</span>
               </SidebarMenuButton>

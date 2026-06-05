@@ -1,6 +1,7 @@
 import { connectLogger, log, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
+import { LOGIN_PATH } from '@/shared/lib/paths'
 import { accessTokenAtom, clearSession, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
@@ -81,8 +82,8 @@ setRefreshHandlers({
   },
   onSessionExpired: () => {
     rootFrame.run(() => clearSession())
-    if (window.location.pathname !== '/login') {
-      window.location.replace('/login?reason=session_expired')
+    if (window.location.pathname !== LOGIN_PATH) {
+      window.location.replace(`${LOGIN_PATH}?reason=session_expired`)
     }
   },
 })
@@ -144,8 +145,8 @@ window.addEventListener('storage', (e: StorageEvent) => {
   if (e.key === 'session.accessToken') {
     const newToken = parsePersistRecord<string>(e.newValue)
     rootFrame.run(() => accessTokenAtom.set(newToken))
-    if (!newToken && window.location.pathname !== '/login') {
-      window.location.replace('/login')
+    if (!newToken && window.location.pathname !== LOGIN_PATH) {
+      window.location.replace(LOGIN_PATH)
     }
   }
   if (e.key === 'session.refreshToken') {

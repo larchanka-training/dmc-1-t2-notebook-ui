@@ -8,6 +8,7 @@ import {
   setSession,
   setSessionUser,
 } from '@/entities/session'
+import { appPath } from '@/shared/lib/paths'
 
 // #7 — named constant so both parseError and LoginForm reference the same value;
 // a rename is a compile error, not a silent UI regression.
@@ -30,7 +31,9 @@ export const verifyOtpAction = action(async (body: { email: string; otp: string 
   // #1 — reject protocol-relative URLs (//evil.com) which pass startsWith('/')
   // but resolve to an external origin when passed to new URL() or location.replace.
   const rawFrom = urlAtom().searchParams.get('from')
-  const from = rawFrom?.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : '/'
+  // Default to the app base (import.meta.env.BASE_URL — '/pr-<N>/' under a
+  // preview), not '/', so a login without ?from stays inside the app.
+  const from = rawFrom?.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : appPath()
   urlAtom.set((url) => new URL(from, url.origin), true)
 }, 'auth.verifyOtp').extend(
   withAsync({
