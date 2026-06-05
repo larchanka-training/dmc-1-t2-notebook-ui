@@ -6,6 +6,33 @@ See the [Reatom skill](../../.claude/skills/reatom/SKILL.md) for general framewo
 
 ---
 
+## Base path & previews (important — don't hardcode absolute paths)
+
+The app can be served under a **path prefix** — `/` normally, `/pr-<N>/` for
+per-PR previews (one CloudFront/S3 hosts every PR under its own prefix, see
+`docs/preview-v2.md` in the monorepo). To make the **same build** work under any
+prefix:
+
+- **Vite `base`** comes from `VITE_BASE` at build time (`vite.config.ts`:
+  `base: process.env.VITE_BASE ?? '/'`). It drives asset URLs and
+  `import.meta.env.BASE_URL` (`'/'` or `'/pr-42/'`, always trailing-slashed).
+- **The root route takes its path from `BASE_URL`** (`src/app/model/routes.tsx`),
+  so every nested route composes under the prefix automatically.
+
+**Convention:**
+
+- **Route definitions are RELATIVE** (no leading slash): `'login'`, `'about'`,
+  `''` for home. They nest under `rootRoute`, which carries the base.
+- **Every link / `<a href>` / programmatic URL must be base-aware** — prefix it
+  with `import.meta.env.BASE_URL`. **Never** write an absolute `/login`: it works
+  at `/` but breaks under `/pr-42/` (navigates out of the preview, active-state
+  never matches).
+
+> This bit us once: the sidebar had hardcoded `/login`, `/about` … — fixed to
+> `import.meta.env.BASE_URL + url`. Keep `NavItem.url` relative.
+
+---
+
 ## Route map
 
 | Path                 | Page component         | Source                         |
@@ -52,14 +79,18 @@ The root route is a **layout route** — it renders on any match and uses `self.
 
 ```tsx
 // src/app/model/routes.tsx
-import { Children } from 'react'
 import { reatomRoute } from '@reatom/core'
 import { AppLayout } from '../layouts/AppLayout'
 
+// '/' normally, '/pr-42/' under a preview → '' or 'pr-42'. Child routes nest
+// under this, so the whole app composes under the base path.
+const basePath = import.meta.env.BASE_URL.replace(/^\/|\/$/g, '')
+
 export const rootRoute = reatomRoute({
+  path: basePath,
   layout: true,
   render(self) {
-    return <AppLayout>{Children.toArray(self.outlet())}</AppLayout>
+    return <AppLayout>{self.outlet()}</AppLayout>
   },
 })
 ```
@@ -94,18 +125,23 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 import { urlAtom } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 
+// NavItem.url is RELATIVE ('', 'login', 'about', …). The href is base-prefixed
+// so it stays inside the deployed base path (see "Base path & previews" above).
 const NavGroup = reatomComponent(({ items }) => {
   const { pathname } = urlAtom()
   return (
     <SidebarMenu>
-      {items.map((item) => (
-        <SidebarMenuItem key={item.title}>
-          <SidebarMenuButton isActive={pathname === item.url} render={<a href={item.url} />}>
-            <item.icon />
-            <span>{item.title}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ))}
+      {items.map((item) => {
+        const href = import.meta.env.BASE_URL + item.url
+        return (
+          <SidebarMenuItem key={item.title}>
+            <SidebarMenuButton isActive={pathname === href} render={<a href={href} />}>
+              <item.icon />
+              <span>{item.title}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )
+      })}
     </SidebarMenu>
   )
 }, 'NavGroup')
@@ -161,16 +197,18 @@ export { myPageRoute } from './model/route'
 import '@/pages/my-page'
 ```
 
-**4. (Optional) Add a sidebar entry** in `src/app/layouts/AppSidebar.tsx`:
+**4. (Optional) Add a sidebar entry** in `src/app/layouts/AppSidebar.tsx` — use a
+**relative** `url` (no leading slash); the href is base-prefixed in `NavGroup`:
 
 ```tsx
 const navMain: NavItem[] = [
-  { title: 'Notebook', icon: BookText, url: '/' },
-  { title: 'My Page', icon: SomeIcon, url: '/my-page' },
+  { title: 'Notebook', icon: BookText, url: '' },
+  { title: 'My Page', icon: SomeIcon, url: 'my-page' },
 ]
 ```
 
-Active highlighting and SPA navigation work automatically — `urlAtom` handles both.
+Active highlighting and SPA navigation work automatically — `urlAtom` handles
+both. (Relative `url` is required so it works under a preview base path.)
 
 ---
 
