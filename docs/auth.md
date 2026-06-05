@@ -333,15 +333,15 @@ window.addEventListener('storage', (e) => {
 
 ## 8. Session lifecycle
 
-| Действие                  | Что происходит                                                                                     |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| Login (verify OTP)        | `setSession({ accessToken, refreshToken, user })` → запись в localStorage → navigate `/notebooks`. |
-| Каждый API-запрос         | `Authorization: Bearer <accessToken>` через client middleware.                                     |
-| 401 на запросе            | Single-flight refresh → retry (см. выше).                                                          |
-| Refresh успешный          | Обновляются оба токена в `localStorage`.                                                           |
-| Refresh неуспешный        | `clearSession()` → `localStorage.removeItem(...)` → `navigate('/login?reason=session_expired')`.   |
-| Logout (кнопка)           | `POST /auth/logout` с `refreshToken` → `clearSession()` → `navigate('/login')`.                    |
-| Logout (в другой вкладке) | `storage` event → `clearSession()` → `navigate('/login')`.                                         |
+| Действие                  | Что происходит                                                                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login (verify OTP)        | `setSession({ accessToken, refreshToken, user })` → запись в localStorage → navigate `/notebooks`.                                                                |
+| Каждый API-запрос         | `Authorization: Bearer <accessToken>` через client middleware.                                                                                                    |
+| 401 на запросе            | Single-flight refresh → retry (см. выше).                                                                                                                         |
+| Refresh успешный          | Обновляются оба токена в `localStorage`.                                                                                                                          |
+| Refresh неуспешный        | `clearSession()` → `localStorage.removeItem(...)` → `navigate('/login?reason=session_expired')`.                                                                  |
+| Logout (кнопка)           | `POST /auth/logout` с текущим или stale/rotated `refreshToken` → backend отзывает session family, если она ещё активна → `clearSession()` → `navigate('/login')`. |
+| Logout (в другой вкладке) | `storage` event → `clearSession()` → `navigate('/login')`.                                                                                                        |
 
 ---
 
