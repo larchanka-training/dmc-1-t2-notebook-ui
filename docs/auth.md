@@ -5,9 +5,11 @@
 > Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
 > Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify и
 > refresh/logout endpoints (`POST /auth/otp/request`,
-> `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`) и
-> Bearer-based `GET /auth/me`, backend error envelope. Bearer cutover для
-> notebook endpoints остаётся следующим backend-шагом.
+> `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`),
+> Bearer-based `GET /auth/me` и Bearer-protected
+> `/api/v1/notebooks[...]` endpoints (полный backend cutover завершён;
+> `notebookClient` отправляет `Authorization: Bearer <access>` на все
+> CRUD-операции). Backend error envelope — единый.
 
 ## Содержание
 
@@ -35,7 +37,9 @@
 
 - Простая авторизация по email + OTP. Никаких сторонних OAuth.
 - Полный офлайн-режим для редактирования: ноутбуки живут в IndexedDB.
-- Sync с бэком — после авторизации. В PR #29 backend принимает placeholder identity; в real-auth режиме sync идёт с `Authorization: Bearer <access>`.
+- Sync с бэком — после авторизации. После TARDIS-75 cutover все
+  `/api/v1/notebooks[...]` endpoints требуют `Authorization: Bearer <access>`;
+  placeholder `X-User-Id` на backend больше не работает на этих роутах.
 - Защита от XSS — `localStorage` для токенов с многослойной защитой контента.
 
 См. парный документ в API repo: [docs/auth.md][api-auth].
@@ -48,16 +52,24 @@
 - Backend OpenAPI содержит `POST /api/v1/auth/otp/request`,
   `POST /api/v1/auth/otp/verify`, `POST /api/v1/auth/refresh` и
   `POST /api/v1/auth/logout`;
+- Backend `/api/v1/notebooks[...]` endpoints перешли на Bearer JWT
+  (TARDIS-75 cutover); `get_current_user` на backend дополнительно
+  сверяет, что сессия не отозвана/не истекла — поэтому access-token,
+  выпущенный до logout, перестаёт открывать notebook CRUD сразу, а не
+  через 15 минут до своего `exp`;
 - `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
 - `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
 - shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
+- `notebookClient` отправляет `Authorization: Bearer <access>` на все
+  CRUD-операции;
 - shared error parser понимает backend envelope `{ error: { code, message,
 fields } }`.
 
 Ещё не завершено:
 
 - UI screen/state миграция на двухшаговый OTP flow;
-- Bearer cutover для protected notebook endpoints.
+- backend rate limiting / OTP attempt counter / cleanup jobs;
+- production OTP email delivery.
 
 ---
 
@@ -664,7 +676,9 @@ OTP + JWT были в требованиях проекта с самого на
 - перевести session atoms с legacy `tokenAtom` на `accessTokenAtom` +
   `refreshTokenAtom`, если это ещё не сделано в текущей UI branch;
 - подключить `requestOtp(...)` / `verifyOtp(...)` к форме;
-- после backend Bearer cutover включить полный authenticated sync lifecycle.
+- backend Bearer cutover для `/api/v1/notebooks[...]` **завершён**;
+  включить полный authenticated sync lifecycle с Bearer headers на
+  `notebookClient`.
 
 ---
 
