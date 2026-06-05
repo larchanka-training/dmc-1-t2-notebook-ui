@@ -12,6 +12,7 @@ import {
   loginOtpAtom,
   loginStepAtom,
   resendCountdownAtom,
+  sendCodeAction,
   tickCountdownAction,
 } from '../model/loginForm'
 import { DevOtpBanner } from './DevOtpBanner'
@@ -28,14 +29,20 @@ export const LoginForm = reatomComponent(() => {
   const sendError = requestOtpAction.error()?.message ?? null
   const verifyError = verifyOtpAction.error()?.message ?? null
 
+  // wrap() must be called at render time, where reatomComponent provides the
+  // Reatom context to capture. Calling it inside a useEffect/setInterval (a
+  // passive effect, no active stack) throws `missing async stack`. We capture
+  // the bound callbacks here and only invoke them from the effects below.
+  const resetToStep1 = wrap(() => {
+    loginStepAtom.set(1)
+    loginOtpAtom.set('')
+  })
+  const tick = wrap(tickCountdownAction)
+
   // otp_expired → go back to step 1 so user can request a fresh code.
   useEffect(() => {
-    if (verifyError === OTP_EXPIRED_CODE) {
-      wrap(() => {
-        loginStepAtom.set(1)
-        loginOtpAtom.set('')
-      })()
-    }
+    if (verifyError === OTP_EXPIRED_CODE) resetToStep1()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifyError])
 
   // #4 — countdown depends only on step, not on countdown itself.
@@ -43,25 +50,18 @@ export const LoginForm = reatomComponent(() => {
   // (cleanup + re-create on every tick), doubling up under React StrictMode.
   useEffect(() => {
     if (step !== 2) return
-    const id = window.setInterval(wrap(tickCountdownAction), 1000)
+    const id = window.setInterval(tick, 1000)
     return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
-
-  async function sendCode(emailToSend: string) {
-    try {
-      const data = await requestOtpAction(emailToSend)
-      devOtpDataAtom.set(data)
-      loginOtpAtom.set('')
-      resendCountdownAtom.set(45)
-      loginStepAtom.set(2)
-    } catch {
-      // Error displayed via requestOtpAction.error().
-    }
-  }
 
   const onSendCode = wrap(async (e: FormEvent) => {
     e.preventDefault()
-    await sendCode(email)
+    try {
+      await sendCodeAction(email)
+    } catch {
+      // Error displayed via requestOtpAction.error().
+    }
   })
 
   const onVerify = wrap(async (e: FormEvent) => {
@@ -74,7 +74,11 @@ export const LoginForm = reatomComponent(() => {
   })
 
   const onResend = wrap(async () => {
-    await sendCode(email)
+    try {
+      await sendCodeAction(email)
+    } catch {
+      // Error displayed via requestOtpAction.error().
+    }
   })
 
   // #5 — clear stale verifyOtpAction.error when going back to step 1 so it
