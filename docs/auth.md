@@ -5,8 +5,8 @@
 > Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
 > Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify и
 > refresh endpoints (`POST /auth/otp/request`, `POST /auth/otp/verify`,
-> `POST /auth/refresh`) и backend error envelope. Logout endpoint и Bearer
-> cutover для `/auth/me` / notebook endpoints остаются следующими
+> `POST /auth/refresh`), Bearer-based `GET /auth/me` и backend error envelope.
+> Logout endpoint и Bearer cutover для notebook endpoints остаются следующими
 > backend-шагами.
 
 ## Содержание
@@ -57,7 +57,7 @@ fields } }`.
 
 - UI screen/state миграция на двухшаговый OTP flow;
 - `POST /auth/logout` на backend;
-- Bearer-based `/auth/me` и protected notebook cutover.
+- Bearer cutover для protected notebook endpoints.
 
 ---
 
