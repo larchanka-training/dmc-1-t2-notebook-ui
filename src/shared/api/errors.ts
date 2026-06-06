@@ -31,17 +31,28 @@ export class NotFoundError extends ApiError {
   }
 }
 
-type ErrorBody = { code?: string; message?: string } | undefined
+// Backend returns errors as { error: { code, message, fields } } — see api/app/core/errors.py
+type ErrorBody =
+  | { error: { code?: string; message?: string } }
+  | { code?: string; message?: string }
+  | undefined
+
+function unwrapError(body: ErrorBody): { code?: string; message?: string } | undefined {
+  if (!body) return undefined
+  if ('error' in body) return body.error
+  return body
+}
 
 export function toApiError(status: number, body: ErrorBody): ApiError {
+  const error = unwrapError(body)
   switch (status) {
     case 400:
-      return new BadRequestError(body?.code, body?.message)
+      return new BadRequestError(error?.code, error?.message)
     case 401:
-      return new UnauthorizedError(body?.code, body?.message)
+      return new UnauthorizedError(error?.code, error?.message)
     case 404:
-      return new NotFoundError(body?.code, body?.message)
+      return new NotFoundError(error?.code, error?.message)
     default:
-      return new ApiError(status, body?.code, body?.message)
+      return new ApiError(status, error?.code, error?.message)
   }
 }

@@ -13,7 +13,7 @@ import { newId } from '@/shared/lib/id'
 export const notebookListResource = computed(
   async () => await wrap(notebookApi.list()),
   'notebook.list',
-).extend(withAsyncData({ initState: [] as notebookApi.Notebook[] }))
+).extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
 
 notebookListResource.data.extend(withRollback())
 
@@ -21,11 +21,14 @@ export const createNotebookAction = action(async (title: string) => {
   const trimmed = title.trim()
   if (!trimmed) return null
 
-  const optimistic: notebookApi.Notebook = {
+  const now = Date.now()
+  const optimistic: notebookApi.NotebookListItem = {
     id: `tmp-${newId()}`,
     title: trimmed,
-    createdAt: new Date().toISOString(),
-    cells: [],
+    formatVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+    cellsCount: 0,
   }
   notebookListResource.data.set((items) => [...items, optimistic])
 

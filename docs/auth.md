@@ -1,12 +1,15 @@
 # Authentication & Persistence — Frontend
 
-> Архитектурный документ. Целевая модель авторизации и хранения данных для JS Notebook (ui). Соответствует требованиям TARDIS-15.
+> Архитектурный документ. Реализованная модель авторизации и хранения данных для JS Notebook (ui). Соответствует TARDIS-15.
 >
-> Документ разделяет **текущее MVP-состояние PR #29** и **целевую**
-> OTP/JWT-модель. Backend PR #29 даёт placeholder auth:
-> `GET /api/v1/auth/me`, dev/test/local `X-User-Id` и `DEV_USER` fallback.
-> Реальная OTP/JWT-авторизация и замена текущего UI login-flow выполняются
-> отдельной задачей.
+> Frontend реализует двухшаговый email+OTP flow с JWT access/refresh токенами.
+> Реализация PR #44 синхронизирована с backend TARDIS-75 OTP request/verify и
+> refresh/logout endpoints (`POST /auth/otp/request`,
+> `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`),
+> Bearer-based `GET /auth/me` и Bearer-protected
+> `/api/v1/notebooks[...]` endpoints (полный backend cutover завершён;
+> `notebookClient` отправляет `Authorization: Bearer <access>` на все
+> CRUD-операции). Backend error envelope — единый.
 
 ## Содержание
 
@@ -34,10 +37,39 @@
 
 - Простая авторизация по email + OTP. Никаких сторонних OAuth.
 - Полный офлайн-режим для редактирования: ноутбуки живут в IndexedDB.
-- Sync с бэком — после авторизации. В PR #29 backend принимает placeholder identity; в real-auth режиме sync идёт с `Authorization: Bearer <access>`.
+- Sync с бэком — после авторизации. После TARDIS-75 cutover все
+  `/api/v1/notebooks[...]` endpoints требуют `Authorization: Bearer <access>`;
+  placeholder `X-User-Id` на backend больше не работает на этих роутах.
 - Защита от XSS — `localStorage` для токенов с многослойной защитой контента.
 
 См. парный документ в API repo: [docs/auth.md][api-auth].
+
+### 1.1. Текущий статус реализации TARDIS-75
+
+На текущих feature branches реализован и синхронизирован первый контрактный
+срез OTP auth:
+
+- Backend OpenAPI содержит `POST /api/v1/auth/otp/request`,
+  `POST /api/v1/auth/otp/verify`, `POST /api/v1/auth/refresh` и
+  `POST /api/v1/auth/logout`;
+- Backend `/api/v1/notebooks[...]` endpoints перешли на Bearer JWT
+  (TARDIS-75 cutover); `get_current_user` на backend дополнительно
+  сверяет, что сессия не отозвана/не истекла и принадлежит пользователю
+  из `sub` — поэтому access-token, выпущенный до logout, перестаёт
+  открывать notebook CRUD сразу, а не через 15 минут до своего `exp`;
+- `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
+- `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
+- shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
+- `notebookClient` отправляет `Authorization: Bearer <access>` на все
+  CRUD-операции;
+- shared error parser понимает backend envelope `{ error: { code, message,
+fields } }`.
+
+Ещё не завершено:
+
+- UI screen/state миграция на двухшаговый OTP flow;
+- backend rate limiting / OTP attempt counter / cleanup jobs;
+- production OTP email delivery.
 
 ---
 
@@ -72,10 +104,29 @@
 
 - На step 1 кнопка `Send code` блокируется при `invalid email`.
 - На step 2 поле — 6 раздельных input (или один с маской `------`).
-- `Resend in 45s` — UI-таймер (5 мин TTL OTP, после 45 сек разрешён повтор; запрос ограничен серверным rate limit, см. [API repo: docs/auth.md §10][api-auth]).
-- На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится, состояние `attempts++` не показываем (это серверная инфа).
-- На `401 otp_expired` — сообщение `Code expired, request a new one`, возврат на step 1.
+- `Resend in 45s` — UI-таймер (5 мин TTL OTP, после 45 сек разрешён повтор; запрос ограничен серверным rate limit, см. [API repo: docs/auth.md §11][api-auth]).
+- На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится.
+  Текущий backend первым MVP-срезом использует этот же `error.code` для
+  отсутствующего, истёкшего или уже использованного OTP.
+- На future `401 otp_expired` — сообщение `Code expired, request a new one`,
+  возврат на step 1. Если backend начнёт отдавать отдельный код, UI contract
+  и generated types обновляются в том же PR.
 - При успехе — токены кладутся в `localStorage`, `user` — в `userAtom`, navigate → `/notebooks` (или `from`-route, см. §6).
+
+**Error envelope:** backend ошибки приходят в единой форме:
+
+```json
+{
+  "error": {
+    "code": "invalid_otp",
+    "message": "Invalid or expired OTP",
+    "fields": {}
+  }
+}
+```
+
+UI не должен читать `code` / `message` из верхнего уровня ответа. Общий parser
+в `src/shared/api/errors.ts` разворачивает `error.code` в `ApiError.code`.
 
 ---
 
@@ -87,23 +138,30 @@
 | ---------------------- | ----------------------------------------------------------------------- |
 | `session.accessToken`  | JWT (HS256), TTL 15 мин. Используется в `Authorization: Bearer <...>`.  |
 | `session.refreshToken` | Opaque string, TTL 30 дней. Используется только в `POST /auth/refresh`. |
-| `session.user`         | Кэш текущего `User` (id, email, displayName).                           |
+| `session.user`         | Кэш текущего `User` (id, nullable email, nullable displayName, roles).  |
 
-Reatom-атомы (расширение текущего `ui/src/entities/session/model/session.ts`):
+Reatom-атомы (`ui/src/entities/session/model/session.ts`):
 
 ```ts
 export const accessTokenAtom = atom<string | null>(null, 'session.accessToken').extend(
-  withLocalStorage('session.accessToken'),
+  withLocalStorage({ key: 'session.accessToken', subscribe: false }),
 )
 
 export const refreshTokenAtom = atom<string | null>(null, 'session.refreshToken').extend(
-  withLocalStorage('session.refreshToken'),
+  withLocalStorage({ key: 'session.refreshToken', subscribe: false }),
 )
 
 export const userAtom = atom<User | null>(null, 'session.user').extend(
-  withLocalStorage('session.user'),
+  withLocalStorage({ key: 'session.user', subscribe: false }),
 )
+
+// Становится true после первого завершения loadCurrentUserAction (успех или ошибка).
+// AuthRouteGuard ждёт этого флага перед редиректом, чтобы не выбрасывать пользователя
+// при корректных токенах, когда user ещё не загружен из /auth/me.
+export const sessionRestoredAtom = atom(false, 'session.restored')
 ```
+
+> `subscribe: false` — `withLocalStorage` не регистрирует storage-listener сам; кросс-табовая синхронизация выполняется вручную в `setup.ts` (см. §7).
 
 ### 3.2. Почему localStorage, а не cookie
 
@@ -241,7 +299,15 @@ async function refreshOnce(): Promise<void> {
 | `/`                                           | redirect → `/login`             | redirect → `/notebooks` |
 | `/notebooks`, `/notebooks/:id`, `/about`, ... | redirect → `/login?from=<path>` | OK                      |
 
-«Авторизован» = `accessTokenAtom() !== null` **и** `userAtom() !== null` (последнее проверяется через `loadCurrentUserAction` при первой загрузке).
+«Авторизован» = `accessTokenAtom() !== null` **и** `userAtom() !== null`.
+
+При первой загрузке `setup.ts` запускает `loadCurrentUserAction`, который:
+
+1. Если токен есть — вызывает `GET /auth/me` и заполняет `userAtom`.
+2. При `401` — чистит сессию (`clearSession()`).
+3. В любом случае — устанавливает `sessionRestoredAtom = true`.
+
+`AuthRouteGuard` ждёт `sessionRestoredAtom`, чтобы не редиректить пользователя с валидным токеном, у которого `session.user` отсутствовал в `localStorage` (eviction, миграция).
 
 ### 6.2. Гостевого режима нет
 
@@ -249,7 +315,11 @@ async function refreshOnce(): Promise<void> {
 
 ### 6.3. Реализация
 
-`AuthRouteGuard` — компонент-обёртка вокруг `<Outlet />` в `ui/src/app/model/routes.tsx`. Проверяет `accessTokenAtom`, делает redirect через `<Navigate />` с сохранением `from` в state.
+`AuthRouteGuard` (`ui/src/app/ui/AuthRouteGuard.tsx`) — `reatomComponent`-обёртка вокруг защищённого контента. Логика:
+
+- `sessionRestoredAtom = false` + токен есть, но `userAtom = null` → показывает `null` (skeleton), ждёт restore.
+- `sessionRestoredAtom = true` + не авторизован → `window.location.replace('/login?from=<path>')`.
+- Авторизован → рендерит `children`.
 
 ---
 
@@ -275,15 +345,15 @@ window.addEventListener('storage', (e) => {
 
 ## 8. Session lifecycle
 
-| Действие                  | Что происходит                                                                                     |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| Login (verify OTP)        | `setSession({ accessToken, refreshToken, user })` → запись в localStorage → navigate `/notebooks`. |
-| Каждый API-запрос         | `Authorization: Bearer <accessToken>` через client middleware.                                     |
-| 401 на запросе            | Single-flight refresh → retry (см. выше).                                                          |
-| Refresh успешный          | Обновляются оба токена в `localStorage`.                                                           |
-| Refresh неуспешный        | `clearSession()` → `localStorage.removeItem(...)` → `navigate('/login?reason=session_expired')`.   |
-| Logout (кнопка)           | `POST /auth/logout` с `refreshToken` → `clearSession()` → `navigate('/login')`.                    |
-| Logout (в другой вкладке) | `storage` event → `clearSession()` → `navigate('/login')`.                                         |
+| Действие                  | Что происходит                                                                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login (verify OTP)        | `setSession({ accessToken, refreshToken, user })` → запись в localStorage → navigate `/notebooks`.                                                                |
+| Каждый API-запрос         | `Authorization: Bearer <accessToken>` через client middleware.                                                                                                    |
+| 401 на запросе            | Single-flight refresh → retry (см. выше).                                                                                                                         |
+| Refresh успешный          | Обновляются оба токена в `localStorage`.                                                                                                                          |
+| Refresh неуспешный        | `clearSession()` → `localStorage.removeItem(...)` → `navigate('/login?reason=session_expired')`.                                                                  |
+| Logout (кнопка)           | `POST /auth/logout` с текущим или stale/rotated `refreshToken` → backend отзывает session family, если она ещё активна → `clearSession()` → `navigate('/login')`. |
+| Logout (в другой вкладке) | `storage` event → `clearSession()` → `navigate('/login')`.                                                                                                        |
 
 ---
 
@@ -558,7 +628,9 @@ export const MAX_SUPPORTED_FORMAT_VERSION = 1
 
 ### 14.1. Поведение
 
-Определяется через `import.meta.env.MODE !== 'production'` (Vite). В этом режиме при `POST /auth/otp/request` ответ содержит поле `otp`.
+Определяется не frontend env-флагом, а ответом backend. В
+`dev`/`local`/`test` backend возвращает `200 { otp, expiresAt }`; в
+production-like env возвращает `204 No Content`.
 
 ### 14.2. UI
 
@@ -588,15 +660,25 @@ export const MAX_SUPPORTED_FORMAT_VERSION = 1
 
 ## 16. Migration note
 
-> **Существующий код противоречит этому документу.** OTP + JWT были в требованиях проекта с самого начала, но архитектурное решение (этот документ) не было готово к моменту, когда команда стартовала разработку. Поэтому в `ui/` сейчас:
->
-> - `POST /auth/login` с `{ email, password }` — заменяется на `POST /auth/otp/request` + `POST /auth/otp/verify`.
-> - `LoginResponse { token, user }` → `AuthResponse { accessToken, refreshToken, user }`.
-> - `tokenAtom` → пара `accessTokenAtom` + `refreshTokenAtom`.
-> - `LoginForm.tsx` — переписать как двухшаговую форму.
-> - Сгенерированные типы `ui/src/shared/api/generated/openapi-ts/auth.d.ts` — перегенерировать после обновления OpenAPI на бэке.
->
-> Миграция — отдельный тикет (после реализации серверной стороны). До миграции существующий password-flow продолжает работать как mock.
+OTP + JWT были в требованиях проекта с самого начала, но архитектурное решение
+было готово позже стартового UI mock-flow. Текущее состояние миграции:
+
+- `ui/openapi/auth.openapi.yaml` уже описывает `POST /auth/otp/request` и
+  `POST /auth/otp/verify` в соответствии с backend snapshot;
+- `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
+- shared API facade уже имеет `requestOtp(...)` и `verifyOtp(...)`;
+- `AuthResponse` остаётся facade alias на backend `OtpVerifyResponse`, чтобы
+  не расширять refactor поверх контрактной синхронизации.
+
+Осталось следующими шагами:
+
+- заменить старый UI login screen на двухшаговый email → OTP flow;
+- перевести session atoms с legacy `tokenAtom` на `accessTokenAtom` +
+  `refreshTokenAtom`, если это ещё не сделано в текущей UI branch;
+- подключить `requestOtp(...)` / `verifyOtp(...)` к форме;
+- backend Bearer cutover для `/api/v1/notebooks[...]` **завершён**;
+  включить полный authenticated sync lifecycle с Bearer headers на
+  `notebookClient`.
 
 ---
 

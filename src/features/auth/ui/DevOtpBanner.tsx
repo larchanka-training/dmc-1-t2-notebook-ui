@@ -1,0 +1,58 @@
+import { useEffect, useRef, useState } from 'react'
+import { Copy, Wrench } from 'lucide-react'
+import type { auth as authApi } from '@/shared/api'
+
+type Props = authApi.OtpRequestResponse
+
+export function DevOtpBanner({ otp, expiresAt }: Props) {
+  const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const expiresStr =
+    new Date(expiresAt).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false }) + ' UTC'
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
+    },
+    [],
+  )
+
+  const copy = () => {
+    navigator.clipboard.writeText(otp).then(
+      () => {
+        if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
+        setCopied(true)
+        resetTimerRef.current = setTimeout(() => {
+          setCopied(false)
+          resetTimerRef.current = null
+        }, 2000)
+      },
+      () => {
+        // Clipboard API unavailable (non-HTTPS or permission denied) — fail silently.
+      },
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3 text-sm space-y-1">
+      <div className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-300">
+        <Wrench className="size-3.5" />
+        DEV MODE
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-amber-900 dark:text-amber-200">
+          Your OTP: <span className="font-mono font-bold tracking-widest">{otp}</span>
+        </span>
+        <button
+          type="button"
+          onClick={copy}
+          className="text-xs text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1"
+        >
+          <Copy className="size-3" />
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <p className="text-xs text-amber-700 dark:text-amber-400">Expires at {expiresStr}</p>
+    </div>
+  )
+}

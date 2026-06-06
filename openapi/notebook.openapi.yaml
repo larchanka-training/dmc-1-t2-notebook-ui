@@ -26,9 +26,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Notebook'
+                $ref: '#/components/schemas/NotebookListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -98,6 +96,43 @@ components:
         format: uuid
 
   schemas:
+    NotebookListResponse:
+      type: object
+      description: Paginated wrapper returned by `GET /notebooks`.
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotebookListItem'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    NotebookListItem:
+      type: object
+      description: >-
+        Lightweight notebook row for the list endpoint (no `cells`, only their
+        count). `createdAt`/`updatedAt` are epoch milliseconds.
+      required: [id, title, formatVersion, createdAt, updatedAt, cellsCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        formatVersion:
+          type: integer
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+        cellsCount:
+          type: integer
+
     Notebook:
       type: object
       required: [id, title, createdAt, cells]

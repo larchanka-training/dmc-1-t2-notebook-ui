@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { ApiError, BadRequestError, NotFoundError, UnauthorizedError, toApiError } from './errors'
 
 describe('toApiError', () => {
-  test('400 → BadRequestError', () => {
-    const err = toApiError(400, { code: 'invalid', message: 'bad body' })
+  test('400 → BadRequestError with code and message from envelope', () => {
+    const err = toApiError(400, { error: { code: 'invalid', message: 'bad body' } })
     expect(err).toBeInstanceOf(BadRequestError)
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(400)
@@ -12,15 +12,21 @@ describe('toApiError', () => {
   })
 
   test('401 → UnauthorizedError', () => {
-    const err = toApiError(401, { code: 'unauthenticated', message: 'no token' })
+    const err = toApiError(401, { error: { code: 'unauthenticated', message: 'no token' } })
     expect(err).toBeInstanceOf(UnauthorizedError)
     expect(err.status).toBe(401)
   })
 
   test('404 → NotFoundError', () => {
-    const err = toApiError(404, { code: 'not_found', message: 'gone' })
+    const err = toApiError(404, { error: { code: 'not_found', message: 'gone' } })
     expect(err).toBeInstanceOf(NotFoundError)
     expect(err.status).toBe(404)
+  })
+
+  test('legacy flat error bodies are still accepted defensively', () => {
+    const err = toApiError(400, { code: 'invalid', message: 'bad body' })
+    expect(err).toBeInstanceOf(BadRequestError)
+    expect(err.code).toBe('invalid')
   })
 
   test('5xx falls back to generic ApiError', () => {
