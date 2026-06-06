@@ -54,9 +54,9 @@
   `POST /api/v1/auth/logout`;
 - Backend `/api/v1/notebooks[...]` endpoints перешли на Bearer JWT
   (TARDIS-75 cutover); `get_current_user` на backend дополнительно
-  сверяет, что сессия не отозвана/не истекла — поэтому access-token,
-  выпущенный до logout, перестаёт открывать notebook CRUD сразу, а не
-  через 15 минут до своего `exp`;
+  сверяет, что сессия не отозвана/не истекла и принадлежит пользователю
+  из `sub` — поэтому access-token, выпущенный до logout, перестаёт
+  открывать notebook CRUD сразу, а не через 15 минут до своего `exp`;
 - `ui/openapi/auth.openapi.yaml` hand-port’нут из backend snapshot;
 - `ui/src/shared/api/generated/openapi-ts/auth.d.ts` перегенерирован;
 - shared API facade вызывает `requestOtp(...)` / `verifyOtp(...)`;
