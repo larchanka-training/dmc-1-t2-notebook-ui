@@ -24,3 +24,10 @@ export const timeoutMsAtom = atom<number>(DEFAULT_TIMEOUT_MS, 'notebook.settings
  * default to keep short scratch cells compact; toggled from the toolbar.
  */
 export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbers')
+
+/**
+ * Whether the notebook outline pane is visible. Toggled from the global
+ * topbar's outline button (`aria-pressed` mirrors this). On by default; the
+ * outline still self-hides when there are < 2 headings to navigate.
+ */
+export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outlineVisible')

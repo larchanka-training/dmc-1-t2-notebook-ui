@@ -323,6 +323,11 @@ export function NotebookCell({
               // the destination cell — or the document-level command-mode
               // shortcuts — own the focus, not this textarea. A plain Enter
               // (no modifier) falls through and inserts a newline as usual.
+              // Mod+Shift+Enter is the global "Run All" hotkey — let it bubble
+              // to the document handler instead of running just this cell.
+              if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+                return
+              }
               if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
                 e.preventDefault()
                 e.currentTarget.blur()

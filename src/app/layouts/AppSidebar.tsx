@@ -6,6 +6,7 @@ import {
   LayoutGrid,
   Puzzle,
   Info,
+  MoreHorizontal,
   NotebookPen,
   Plus,
   Search,
@@ -20,11 +21,26 @@ import { userAtom } from '@/entities/session'
 import { themeModeAtom, type ThemeMode } from '@/entities/theme'
 import { createNotebookAction, notebookListResource, shortcutsOpenAtom } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
+import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { cn } from '@/shared/lib/cn'
 import { LOGIN_PATH } from '@/shared/lib/paths'
+
+// Up to two initials for the identity-menu avatar: first letters of the first
+// two name words, else the first two characters of the label.
+function initialsOf(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return label.slice(0, 2).toUpperCase()
+}
 import {
   Sidebar,
   SidebarContent,
@@ -73,34 +89,56 @@ const HelpButton = reatomComponent(() => {
 
 const AuthSection = reatomComponent(() => {
   const user = userAtom()
-  return (
-    <SidebarGroup>
-      <SidebarGroupLabel>Account</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {user ? (
-            <>
-              <SidebarMenuItem>
-                <div className="px-2 py-1 text-xs text-muted-foreground truncate">
-                  {user.displayName ?? user.email}
-                </div>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={wrap(async () => logoutAction())}>
-                  <LogOut />
-                  <span>Log out</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </>
-          ) : (
+
+  if (!user) {
+    return (
+      <SidebarGroup>
+        <SidebarGroupLabel>Account</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton render={<a href={LOGIN_PATH} />}>
                 <LogIn />
                 <span>Log in</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-          )}
-        </SidebarMenu>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    )
+  }
+
+  const label = user.displayName ?? user.email ?? 'Account'
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>Account</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Account menu"
+                className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent"
+              >
+                <Avatar size="sm">
+                  <AvatarFallback>{initialsOf(label)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <span className="block truncate text-sm font-medium">{label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
+                </div>
+                <MoreHorizontal className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-(--anchor-width)">
+            <DropdownMenuItem onClick={wrap(async () => logoutAction())}>
+              <LogOut className="size-4" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </SidebarGroupContent>
     </SidebarGroup>
   )
@@ -217,9 +255,16 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="px-4 py-3 border-b">
-        <div className="flex items-center gap-2">
-          <BookText className="size-5 text-primary" />
-          <span className="font-semibold text-base tracking-tight">JS Notebook</span>
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary font-mono text-base font-semibold text-primary-foreground shadow-sm">
+            JS
+          </span>
+          <div className="min-w-0 leading-tight">
+            <span className="block truncate text-base font-semibold tracking-tight">
+              JS Notebook
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">Personal workspace</span>
+          </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
