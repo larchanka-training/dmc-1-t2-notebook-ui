@@ -2,6 +2,7 @@ import { reatomComponent } from '@reatom/react'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { cn } from '@/shared/lib/cn'
 import { cellsAtom } from '../model/notebook'
+import { outlineVisibleAtom } from '../model/notebookSettings'
 
 interface OutlineEntry {
   cellId: string
@@ -19,6 +20,10 @@ function scrollToCell(cellId: string) {
 
 export const NotebookOutline = reatomComponent(() => {
   const cells = cellsAtom()
+
+  // Hidden when the user collapses it from the topbar's outline toggle.
+  // (Responsive drawer behaviour + active-section highlight arrive in T3.)
+  if (!outlineVisibleAtom()) return null
 
   const entries: OutlineEntry[] = []
   for (const cell of cells) {

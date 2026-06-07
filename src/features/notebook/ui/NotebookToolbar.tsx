@@ -42,24 +42,6 @@ export const NotebookToolbar = reatomComponent(() => {
         />
         <TooltipContent>Toggle line numbers</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
-              disabled={isBusy}
-              onClick={wrap(() => runAll())}
-            >
-              <PlayCircle className="size-4" />
-              Run All
-            </Button>
-          }
-        />
-        <TooltipContent>Run every code cell in order; render all text cells</TooltipContent>
-      </Tooltip>
-
       {canResume && (
         <Tooltip>
           <TooltipTrigger
@@ -112,6 +94,18 @@ export const NotebookToolbar = reatomComponent(() => {
           }
         />
         <TooltipContent>Reset execution counter and clear shared scope</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button size="sm" className="gap-1.5" disabled={isBusy} onClick={wrap(() => runAll())}>
+              <PlayCircle className="size-4" />
+              Run All
+            </Button>
+          }
+        />
+        <TooltipContent>Run every code cell in order; render all text cells</TooltipContent>
       </Tooltip>
     </div>
   )

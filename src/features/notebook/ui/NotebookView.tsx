@@ -26,8 +26,6 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
-import { NotebookToolbar } from './NotebookToolbar'
-import { SaveIndicator } from './SaveIndicator'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
@@ -236,18 +234,15 @@ export const NotebookView = reatomComponent(() => {
     <div className="flex flex-1 min-h-0">
       <main className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          <header className="mb-8 flex items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
-              <div className="mt-1 h-5">
-                <SaveIndicator />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <SearchBar />
-              <NotebookToolbar />
-            </div>
+          {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
+              now live in the global AppTopbar. The breadcrumb + editable
+              doc-title that replace this static heading land in T4. SearchBar
+              stays mounted here (toggled by the topbar button / ⌘F); it moves
+              to a floating overlay in T6. */}
+          <header className="mb-8">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
           </header>
+          <SearchBar />
 
           {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
