@@ -3,16 +3,19 @@ name: reatom
 description: >
   In this project Reatom (`@reatom/core` + `@reatom/react`) is the
   default for state management, routing, and forms. Load this skill
-  whenever a feature, component, page, or PR needs shared/local state,
-  derived values, async data, side effects, or event orchestration —
-  reach for atoms/computed/actions instead of `useState`,
-  `useReducer`, `useEffect`-fetch, Zustand, Redux, or similar; when
-  defining or changing routes — reach for `reatomRoute` / `urlAtom`
-  instead of `react-router-dom`; and when building any form — reach
-  for `reatomForm` / `reatomField` instead of ad-hoc form state.
-  Treat this as a directive, not a reference catalog: if you catch
-  yourself writing `useState`, a react-router `<Route>`, or a
-  hand-rolled form in this repo, stop and load this skill first.
+  whenever a task concerns state, derived values, async data, side
+  effects, event orchestration, routing, or forms in this repo — the
+  trigger is the subject matter, not the verb, so READ-ONLY work
+  counts: analyzing, reviewing, explaining, or auditing such code, not
+  only writing or refactoring it. Load it before you read or explain
+  that code, so your account matches Reatom's model
+  (atoms/computed/actions, `reatomRoute` / `urlAtom`, `reatomForm` /
+  `reatomField`) instead of generic React. As a writing directive,
+  prefer those over `useState` / `useReducer` / `useEffect`-fetch /
+  Zustand / Redux, react-router `<Route>`, and hand-rolled form state.
+  If you catch yourself writing — or explaining as idiomatic — a
+  `useState`, a react-router `<Route>`, or a hand-rolled form here,
+  stop and load this skill first.
 ---
 
 # Reatom full framework documentation summary
