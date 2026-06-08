@@ -41,7 +41,10 @@ export function eventToBindingKey(event: KeyboardEvent): string {
   if (event.metaKey || event.ctrlKey) parts.push('Mod')
   if (event.altKey) parts.push('Alt')
 
-  let key = event.key
+  // A synthetic keydown (e.g. one dispatched by a focus-management library when
+  // a dialog opens) can arrive without a `key`. Coalesce to '' so we return a
+  // harmless non-matching binding string instead of throwing on `key.length`.
+  let key = event.key ?? ''
   const isSingleChar = key.length === 1
   const isLetter = isSingleChar && /[a-z]/i.test(key)
   if (event.shiftKey && (!isSingleChar || isLetter)) parts.push('Shift')

@@ -44,6 +44,14 @@ describe('eventToBindingKey', () => {
       'Alt-Enter',
     )
   })
+
+  test('does not throw on a synthetic event with no key (focus-trap dispatch)', () => {
+    // A focus-management library (e.g. the dialog opened by `?`) can dispatch a
+    // keydown with no `key`. The dispatcher must not crash on `key.length`.
+    const event = new KeyboardEvent('keydown')
+    Object.defineProperty(event, 'key', { value: undefined })
+    expect(() => eventToBindingKey(event)).not.toThrow()
+  })
 })
 
 describe('isEditableTarget', () => {

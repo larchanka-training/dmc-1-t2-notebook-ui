@@ -1,14 +1,23 @@
 # Design system
 
-Tokens for the Notion + Observable hybrid direction. Light theme only for now.
+Tokens for the Notion + Observable hybrid direction, in the `new-design-v2`
+oklch palette. Light and dark themes both ship.
+
+> **Values are oklch, defined in `src/app/styles/index.css` (source of truth).**
+> The hex columns in the tables below are approximate sRGB renderings of the
+> oklch values, kept for quick visual reference only — when they disagree with
+> `index.css`, the CSS wins. TARDIS-74 ported the `new-design-v2` palette onto
+> the **existing** shadcn token names, so no component changed.
 
 ## Implementation note
 
-The shadcn token set (`--background`, `--foreground`, `--card`, `--primary`, `--muted`, …) is defined in `src/app/styles/index.css` under `:root`, mapped to Tailwind v4 utilities through an `@theme inline { --color-* : var(--*) }` block. Legacy tokens (`--text`, `--bg`, `--accent`, `--code-bg`) are still defined for the older demo pages but **alias the shadcn tokens** — no new code should consume them.
+The shadcn token set (`--background`, `--foreground`, `--card`, `--primary`, `--muted`, …) is defined in `src/app/styles/index.css` under `:root` (light) and `.dark` (dark), as **oklch** values, mapped to Tailwind v4 utilities through an `@theme inline { --color-* : var(--*) }` block. Legacy tokens (`--text`, `--bg`, `--accent`, `--code-bg`) are still defined for the older demo pages but **alias the shadcn tokens** — no new code should consume them.
+
+Beyond the colour tokens, `index.css` also defines a **scale** layer consumed by the new-design-v2 shell and cells: a radius scale (`--radius` 5px base → `--radius-item` / `--radius-cell` / `--radius-card` / `--radius-modal`), layout widths (`--sidebar-width`, `--outline-width`, `--editor-width`), a popover shadow (`--shadow-pop`), and syntax-highlight tokens (`--syn-key` / `--syn-str` / `--syn-num` / `--syn-com` / `--syn-fn`).
 
 ## Palette (light)
 
-Warm paper background, Notion-grey text, blue primary, Observable-green for run/success.
+Warm paper background, Notion-grey text, blue primary, Observable-green for run/success. Hex values are approximate (see the note above; oklch in `index.css` is authoritative).
 
 | Token (shadcn)             | Hex       | Used for                                           |
 | -------------------------- | --------- | -------------------------------------------------- |
@@ -75,19 +84,19 @@ Body line-height `1.65` is the Notion "breathing room" target. Content max width
 ## Spacing & radius
 
 - Spacing scale: Tailwind defaults (`4 8 12 16 24 32 48`). No new spacing tokens.
-- Cell-to-cell vertical gap: **24px** (`gap-6`).
+- Cell-to-cell vertical gap: **12px** (`gap-3`) — tightened from 24px in new-design-v2 so the gutter still fits between cells.
 - Cell internal padding: **16px** (`p-4`).
-- Border radii: cells / inputs `rounded-md` (6px), cards `rounded-lg` (8px), sidebar items `rounded-sm` (4px), modals `rounded-xl` (12px).
+- Border radii come from the `--radius` scale (5px base) in `index.css`: items / inputs `--radius-item` (4px), cells `--radius-cell` (5px), cards `--radius-card` (7px), modals `--radius-modal` (10px). The old hard-coded `rounded-md/lg/xl` mapping is superseded by these vars.
 
 ## Elevation
 
-Minimal. Cards and cells use border only — **no shadow**. The only shadow is for floating menus / popovers / tooltips:
+Minimal. Cards and cells use border only — **no shadow**. Floating surfaces (search overlay, drawers, insert pills, menus / popovers / tooltips) use the `--shadow-pop` token, which is theme-aware (softer in light, deeper in dark):
 
 ```
-shadow-[0_4px_12px_rgb(15_15_15/0.08)]
+shadow-[var(--shadow-pop)]
 ```
 
-Use the shadcn primitive's default (`Popover`, `DropdownMenu`, `Tooltip` already set sensible shadows — don't override unless required).
+The shadcn primitives (`Popover`, `DropdownMenu`, `Tooltip`) keep their own sensible defaults — don't override unless required.
 
 ## Motion
 
@@ -98,7 +107,9 @@ Use the shadcn primitive's default (`Popover`, `DropdownMenu`, `Tooltip` already
 
 ## Dark theme
 
-Tokens live under `.dark { … }` in `index.css`. The selector hooks into Tailwind v4 via `@custom-variant dark (&:where(.dark, .dark *))` so any `dark:bg-card` style works. The toggle is `themeAtom` in `src/entities/theme/` (`withLocalStorage('theme')` + `withChangeHook` to toggle the `<html>` class). The initial value is re-applied imperatively in `app/model/setup.ts` — change-hooks don't fire on init.
+Tokens live under `.dark { … }` in `index.css` as oklch values. The selector hooks into Tailwind v4 via `@custom-variant dark (&:where(.dark, .dark *))` so any `dark:bg-card` style works. Theme selection is a **3-way** control: `themeModeAtom` (`light` / `dark` / `system`, default `system`, persisted via `withLocalStorage`) resolves to `resolvedThemeAtom`, which toggles the `<html>` class; the sidebar footer renders a Light / System / Dark `radiogroup`. The initial value is applied imperatively in `app/model/setup.ts` (change-hooks don't fire on init), and `system` follows `prefers-color-scheme` live.
+
+Approximate renderings (oklch in `index.css` is authoritative):
 
 | Token          | Light     | Dark      |
 | -------------- | --------- | --------- |
@@ -109,8 +120,6 @@ Tokens live under `.dark { … }` in `index.css`. The selector hooks into Tailwi
 | `--border`     | `#E9E9E7` | `#373737` |
 | `--primary`    | `#0B6BCB` | `#5294E2` |
 | `--sidebar`    | `#F7F7F5` | `#181818` |
-
-Manual toggle only — `prefers-color-scheme` is not honored. A 3-state toggle (light / dark / system) is an open follow-up.
 
 ## Open token decisions
 

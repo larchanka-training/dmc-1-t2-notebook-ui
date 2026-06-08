@@ -176,6 +176,52 @@ cells are no longer a `<textarea>`, markdown is no longer CommonMark-only, and
 - **Notebook search** — `model/search.ts` + `SearchBar` in the header (`Cmd/Ctrl+F`): case-insensitive or regex search over every cell `source`, an `n/m` counter, `Enter`/`Shift+Enter` navigation, scroll-to-match. Matches inside code cells are highlighted via a CodeMirror decoration field; the subscription is isolated in `CodeCellEditor` so typing in the search box doesn't re-render whole cells.
 - **Theme toggle is now 3-way** — `themeModeAtom` (`light`/`dark`/`system`, default `system`, persisted) resolves to `resolvedThemeAtom`; the sidebar footer renders a `radiogroup` of Light/System/Dark instead of the old `Switch`.
 
+## Round 5 additions — TARDIS-74 new-design-v2 redesign
+
+This round restyles the shell and cells to the `new-design-v2` prototype. It is
+a visual/layout pass — the data model, runtime and hotkey behaviour are
+unchanged (only additive: a Run All hotkey and search case-sensitivity).
+
+- **Design tokens** — the `new-design-v2` oklch palette now backs the existing
+  shadcn token names (`--foreground`, `--card`, …); no token was renamed, so
+  components were untouched. Added scale vars (`--radius-cell`, `--sidebar-width`,
+  `--outline-width`, `--editor-width`, `--shadow-pop`, `--syn-*`). See
+  [design-system.md](./design-system.md).
+- **Global topbar** — `AppTopbar` (in `AppLayout`) holds the notebook-wide
+  controls: sidebar toggle (`⌘\`), save indicator, search button (`⌘F`),
+  outline toggle, and the kernel toolbar (restart, Run All — also `⌘⇧Enter`).
+  These moved out of `NotebookView`'s in-content header.
+- **Sidebar restyle + identity menu** — JS badge + "Personal workspace"
+  subtitle; the footer user row is a `DropdownMenu` (account + logout). The
+  3-way theme control stays.
+- **Responsive drawers** — below `1280px` the sidebar and outline become
+  `Sheet` drawers (scrim + slide-in) instead of disappearing; a topbar button
+  toggles the outline. The outline tracks the active section while scrolling.
+- **Editor header** — the static `<h1>JS Notebook</h1>` is now a breadcrumb
+  (`notebook.js · N cells · JavaScript/TS`, N reactive) plus a contenteditable
+  document title (`NotebookHeader`), writing through `setNotebookTitle`.
+- **Cell restyle** — cells express their state through `data-focus` /
+  `data-state` attributes driving a left mode-bar + ring (the CSS state machine
+  in `index.css`): command = blue bar + blue ring, edit/running = green bar,
+  error = red ring. The code header is a filled bar with a divider; the
+  markdown header is a bare label row. Code output is a flat **footer** split
+  from the editor by a top rule (rounding only on the cell), with an
+  `Output [N]` label; an error renders raw in red without the label. The
+  toolbar buttons are always-visible icons revealed on hover/focus (no `⋯`
+  overflow menu). The cell-to-cell gap tightened to `gap-3` (12px).
+- **Add-cell inserter** — the between-cells strip and the end-of-notebook
+  affordance expose direct **Code** / **Text** pills (the `DropdownMenu` type
+  picker from Round 2/5-pre is gone).
+- **Search overlay** — `SearchBar` is a floating overlay centred at the top
+  (opened by the topbar button or `⌘F`), with an `Aa` case-sensitivity toggle
+  beside the `.*` regex toggle. Markdown matches are highlighted in the edit
+  textarea via a backdrop layer (`MarkdownSearchHighlight`); code matches keep
+  the CodeMirror decoration.
+
+The full per-shortcut reference now lives in
+[notebook/shortcuts.md](../notebook/shortcuts.md), kept in sync with the in-app
+`ShortcutsHelp` cheat-sheet.
+
 ## Open layout decisions
 
 - ~~**Markdown cell support timing.**~~ **Resolved (Round 2/3).** Markdown cells exist (`Cell.kind`, edit/preview, GFM/LaTeX in Round 4); the outline and "+ Add cell text" picker are wired.

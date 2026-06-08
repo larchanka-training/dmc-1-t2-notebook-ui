@@ -25,6 +25,7 @@ const GROUPS: ShortcutGroup[] = [
       { keys: `${shiftKeyLabel} Enter`, desc: 'Run cell, go to next' },
       { keys: `${modKeyLabel} Enter`, desc: 'Run cell, stay' },
       { keys: `${altKeyLabel} Enter`, desc: 'Run cell, insert below' },
+      { keys: `${modKeyLabel} E`, desc: 'Markdown: preview / edit' },
       { keys: 'Esc', desc: 'Leave editor (command mode)' },
     ],
   },
@@ -41,9 +42,11 @@ const GROUPS: ShortcutGroup[] = [
   {
     title: 'Global',
     items: [
+      { keys: `${modKeyLabel} ${shiftKeyLabel} Enter`, desc: 'Run all cells' },
       { keys: `${modKeyLabel} Z`, desc: 'Undo' },
       { keys: `${modKeyLabel} ${shiftKeyLabel} Z`, desc: 'Redo' },
       { keys: `${modKeyLabel} F`, desc: 'Search notebook' },
+      { keys: `${modKeyLabel} \\`, desc: 'Toggle sidebar' },
       { keys: '?', desc: 'This help' },
     ],
   },
