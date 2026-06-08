@@ -3,7 +3,7 @@ import type { paths as AuthPaths } from './generated/openapi-ts/auth'
 import type { paths as LlmPaths } from './generated/openapi-ts/llm'
 import type { paths as NotebookPaths } from './generated/openapi-ts/notebook'
 
-const rawBaseUrl = import.meta.env['VITE_API_BASE_URL'] ?? '/api'
+const rawBaseUrl = import.meta.env['VITE_API_BASE_URL'] ?? '/api/v1'
 
 // `openapi-fetch` builds a `Request` whose URL constructor refuses relative paths
 // in Node/jsdom. In a browser-like environment we anchor the path to the current
