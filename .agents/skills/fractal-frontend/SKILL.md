@@ -1,10 +1,18 @@
 ---
 name: fractal-frontend
 description: >
-  Fractal frontend architecture skill. Use when organizing project structure
-  with layers, deciding where code belongs, defining public APIs and import
-  boundaries, working with fractal nesting, resolving cross-feature
-  communication, or deciding whether code should be promoted between layers.
+  This UI uses a fractal, feature-first architecture (layers app → pages →
+  widgets → features → entities → shared, strict top-down imports, no
+  cross-feature dependencies). Load this skill whenever a task concerns project
+  structure: which layer or feature code belongs in, public APIs and import
+  boundaries (`index.ts` barrels), fractal nesting, cross-feature
+  communication, or promoting code between layers — the trigger is the subject
+  matter, not the verb, so READ-ONLY work counts: analyzing, reviewing,
+  explaining, or auditing how the codebase is organized or how modules depend
+  on each other, not only adding or moving code. Load it before you place new
+  code, or before you describe where existing code lives and why, so your
+  account matches the fractal model instead of generic React/folder
+  assumptions.
 ---
 
 # Fractal Frontend
