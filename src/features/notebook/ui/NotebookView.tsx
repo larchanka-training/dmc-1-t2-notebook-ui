@@ -42,8 +42,10 @@ import {
   enterEdit,
   focusCell,
 } from '../model/cellMode'
-import { lineNumbersAtom } from '../model/notebookSettings'
+import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
+import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
+import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
 // Run a cell, then focus the next one in edit mode — creating a trailing code
@@ -200,6 +202,14 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
 
+  // Whether the outline pane actually occupies space right now: only on wide
+  // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
+  // the user hasn't collapsed it, and when there are ≥ 2 headings to show. When
+  // it does NOT, the editor column reclaims the outline's width — matching the
+  // prototype's `.editor-wrap[data-outline="off"] .editor-col` widening.
+  const isNarrow = useIsMobile()
+  const outlineTakesSpace = !isNarrow && outlineVisibleAtom() && hasOutlineAtom()
+
   // Jupyter-style command-mode shortcuts (A/B/D D/M/Y/arrows/Enter).
   useCommandModeHotkeys()
 
@@ -241,7 +251,16 @@ export const NotebookView = reatomComponent(() => {
     // for the whole scroll. min-h-full keeps a short notebook filling the area.
     <div className="flex min-h-full">
       <main className="flex-1">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">
+        <div
+          className="mx-auto w-full px-6 py-8"
+          style={{
+            // editor-width when the outline is visible; reclaim its width + gap
+            // when it is hidden, so cells grow to fill the freed space.
+            maxWidth: outlineTakesSpace
+              ? 'var(--editor-width)'
+              : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
+          }}
+        >
           {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
               live in the global AppTopbar. SearchBar stays mounted here
               (toggled by the topbar button / ⌘F). */}

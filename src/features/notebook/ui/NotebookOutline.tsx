@@ -5,17 +5,8 @@ import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Sheet, SheetContent, SheetTitle } from '@/shared/ui/sheet'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { cn } from '@/shared/lib/cn'
-import { cellsAtom } from '../model/notebook'
 import { outlineVisibleAtom, outlineDrawerOpenAtom } from '../model/notebookSettings'
-
-interface OutlineEntry {
-  cellId: string
-  level: number
-  text: string
-  key: string
-}
-
-const HEADING_REGEX = /^(#{1,6})\s+(.+?)\s*$/gm
+import { hasOutlineAtom, outlineEntriesAtom, type OutlineEntry } from '../model/outline'
 
 function scrollToCell(cellId: string) {
   const el = document.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`)
@@ -65,25 +56,6 @@ function useActiveCellId(entries: OutlineEntry[]): string | null {
   return activeCellId
 }
 
-function collectEntries(cells: ReturnType<typeof cellsAtom>): OutlineEntry[] {
-  const entries: OutlineEntry[] = []
-  for (const cell of cells) {
-    if (cell.kind !== 'markdown') continue
-    const text = cell.code()
-    let match: RegExpExecArray | null
-    HEADING_REGEX.lastIndex = 0
-    while ((match = HEADING_REGEX.exec(text))) {
-      entries.push({
-        cellId: cell.id,
-        level: match[1].length,
-        text: match[2],
-        key: `${cell.id}:${match.index}`,
-      })
-    }
-  }
-  return entries
-}
-
 // Presentational list of headings, shared by the wide sticky column and the
 // narrow drawer. `onNavigate` lets the drawer close itself after a jump.
 const OutlineList = reatomComponent<{
@@ -129,15 +101,12 @@ const OutlineList = reatomComponent<{
 }, 'OutlineList')
 
 export const NotebookOutline = reatomComponent(() => {
-  const cells = cellsAtom()
   const isNarrow = useIsMobile()
   const visible = outlineVisibleAtom()
   const drawerOpen = outlineDrawerOpenAtom()
 
-  const entries = collectEntries(cells)
-  // Earns its space only when there's actually something to navigate. A single
-  // heading is its own context — the outline doesn't help.
-  const hasOutline = entries.length >= 2
+  const entries = outlineEntriesAtom()
+  const hasOutline = hasOutlineAtom()
 
   // Narrow layout (≤1280px): a floating drawer over a scrim, driven by the
   // topbar toggle. Stays mounted so it can animate; renders nothing when there

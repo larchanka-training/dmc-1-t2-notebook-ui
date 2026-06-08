@@ -255,8 +255,12 @@ const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
 
 const NotebooksGroup = reatomComponent(() => {
   const user = userAtom()
+  const { pathname } = urlAtom()
   const items = notebookListResource.data()
   const createError = createNotebookAction.error()?.message
+  // The local notebook opens at the notebook route — the same empty-path href
+  // as the "Notebook" item in Workspace (BASE_URL + '').
+  const notebookHref = import.meta.env.BASE_URL
   // The currently open notebook lives in local storage (LOCAL_NOTEBOOK_ID),
   // separate from the backend list. Surface it as a synthetic top entry with a
   // live title so it shows up and stays highlighted while editing. Full
@@ -307,7 +311,11 @@ const NotebooksGroup = reatomComponent(() => {
           <SidebarMenu>
             {currentMatchesFilter ? (
               <SidebarMenuItem className="group/nb">
-                <SidebarMenuButton isActive className={cn(NAV_ACTIVE, 'pr-8')}>
+                <SidebarMenuButton
+                  isActive={pathname === notebookHref}
+                  className={cn(NAV_ACTIVE, 'pr-8')}
+                  render={<a href={notebookHref} />}
+                >
                   <span className="truncate">{currentTitle || NEW_NOTEBOOK_TITLE}</span>
                 </SidebarMenuButton>
                 <NotebookRowMenu

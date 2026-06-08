@@ -95,6 +95,14 @@ afterEach(() => {
   injectedCells.length = 0
   vi.unstubAllGlobals()
   setViewportWidth(1024)
+  // outlineVisibleAtom now persists via withLocalStorage, so a test that flips
+  // it (e.g. to false) would otherwise leak that value into later tests in this
+  // module-singleton suite. Reset both layout atoms and the stored value.
+  act(() => {
+    outlineVisibleAtom.set(true)
+    outlineDrawerOpenAtom.set(false)
+  })
+  localStorage.clear()
 })
 
 describe('NotebookOutline — responsive (T3)', () => {

@@ -50,6 +50,9 @@ importers:
       '@jitl/quickjs-wasmfile-release-sync':
         specifier: ^0.32.0
         version: 0.32.0
+      '@lezer/highlight':
+        specifier: 1.2.3
+        version: 1.2.3
       '@reatom/core':
         specifier: ^1001.1.0
         version: 1001.1.0

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view'
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  highlightActiveLine,
+  keymap,
+  lineNumbers,
+} from '@codemirror/view'
 import {
   Annotation,
   Compartment,
@@ -10,12 +17,7 @@ import {
   StateField,
 } from '@codemirror/state'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
-import {
-  bracketMatching,
-  defaultHighlightStyle,
-  indentOnInput,
-  syntaxHighlighting,
-} from '@codemirror/language'
+import { bracketMatching, indentOnInput } from '@codemirror/language'
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
 import { javascript } from '@codemirror/lang-javascript'
 import type { Theme } from '@/entities/theme'
@@ -205,7 +207,11 @@ export function CodeEditor({
           // re-enter onChange and wipe the notebook redo branch.
           indentOnInput(),
           bracketMatching(),
-          syntaxHighlighting(defaultHighlightStyle),
+          highlightActiveLine(),
+          // Syntax highlight style is theme-owned (themeComp below): light gets
+          // defaultHighlightStyle, dark gets bespin. Keeping it here too would
+          // leave BOTH highlighters active in dark — their classes combine and
+          // default wins by CSS order (the #708/#00f bug). One at a time only.
           javascript({ typescript: true }),
           autocompletion(),
           searchHighlightField,
