@@ -9,6 +9,8 @@ import {
   Type,
   Eye,
   Pencil,
+  Bot,
+  Cloud,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
@@ -17,6 +19,11 @@ import { MarkdownSearchHighlight } from './MarkdownSearchHighlight'
 // Toolbar icon button (new-design-v2 REC.toolBtn): square, muted, hover-filled.
 const TOOL_BTN =
   'grid size-7 place-items-center rounded-[6px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
+
+// Agent toolbar button (new-design-v2 REC.toolBtnAgent): square, primary-tinted
+// to set the AI actions apart from the neutral cell tools.
+const AGENT_BTN =
+  'grid size-7 place-items-center rounded-[6px] text-primary transition-colors hover:bg-[color-mix(in_oklch,var(--primary)_14%,transparent)] hover:text-primary'
 
 // Run button (new-design-v2 cell-runbtn): square with a soft success tint that
 // deepens on hover; the Stop variant uses the destructive tint.
@@ -116,6 +123,15 @@ export function NotebookCell({
   // An error result is shown raw (red trace) without the "Output" label — the
   // error message is self-describing, the label would be noise (new-design-v2).
   const outputHasError = output.some((item) => item.type === 'error')
+  // Agent actions come in two tiers (ai-architecture.md §2): in-browser (T1)
+  // and cloud (T2). The verb differs by kind — a markdown prompt GENERATES
+  // code, a code cell asks for an IMPROVE diff. Labels mirror new-design-v2.
+  const agentInBrowserLabel = isCode
+    ? 'Improve with in-browser agent (suggest a diff)'
+    : 'Generate code · in-browser agent'
+  const agentCloudLabel = isCode
+    ? 'Improve with cloud agent (suggest a diff)'
+    : 'Generate code · cloud agent'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -235,6 +251,33 @@ export function NotebookCell({
           {/* Cell toolbar: all actions are visible buttons revealed on cell
               hover/focus (new-design-v2 — no "⋯" overflow menu). */}
           <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-within:opacity-100">
+            {/* Agent actions (new-design-v2): two explicit tiers per
+                ai-architecture.md §2 — in-browser (T1) and cloud (T2). The label
+                differs by kind (generate vs improve-diff). Presentational only:
+                the buttons click but do nothing until the LLM epic (07) wires
+                them; no handler, no fetch, no new dependency. */}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button type="button" aria-label={agentInBrowserLabel} className={AGENT_BTN}>
+                    <Bot className="size-[15px]" />
+                  </button>
+                }
+              />
+              <TooltipContent>{agentInBrowserLabel}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button type="button" aria-label={agentCloudLabel} className={AGENT_BTN}>
+                    <Cloud className="size-[15px]" />
+                  </button>
+                }
+              />
+              <TooltipContent>{agentCloudLabel}</TooltipContent>
+            </Tooltip>
+
             {isMarkdown && onViewModeChange ? (
               <Tooltip>
                 <TooltipTrigger

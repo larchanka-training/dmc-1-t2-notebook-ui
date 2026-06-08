@@ -294,3 +294,45 @@ code {
   border-style: dashed;
   border-color: color-mix(in oklch, var(--muted-foreground) 40%, var(--border));
 }
+
+/* ------------------------------------------------------------------ */
+/* LLM agent chrome (new-design-v2) — PRESENTATIONAL ONLY. These rings  */
+/* and the streaming caret are the visual slots the LLM epic (07) will  */
+/* drive; nothing here is wired to real generation yet (TARDIS-74 T8).  */
+/* ------------------------------------------------------------------ */
+/* generating: the agent is streaming code into the cell. */
+.cell.generating {
+  border-color: color-mix(in oklch, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent);
+}
+/* proposal: the agent offers a diff/draft awaiting accept or reject. */
+.cell.proposal {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent);
+}
+/* Streaming caret shown at the end of the text the agent is typing. */
+.notebook-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: var(--primary);
+  animation: notebook-caret-blink 1s steps(2) infinite;
+}
+@keyframes notebook-caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notebook-caret {
+    animation: none;
+  }
+}

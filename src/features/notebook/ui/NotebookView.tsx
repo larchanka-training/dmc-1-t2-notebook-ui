@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Code2, Type } from 'lucide-react'
+import { Code2, Sparkles, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import {
@@ -182,6 +182,15 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
         </button>
         <button type="button" onClick={onAddText} className={pill}>
           <Type className="size-[13px]" /> Text
+        </button>
+        {/* Ask agent (new-design-v2): drafts a cell from a prompt. Presentational
+            slot for the LLM epic (07) — clicks but does nothing yet (no `ai`
+            cell kind, no handler). Primary-tinted to read as an AI action. */}
+        <button
+          type="button"
+          className={cn(pill, 'text-primary hover:border-primary hover:text-primary')}
+        >
+          <Sparkles className="size-[13px]" /> Ask agent
         </button>
       </span>
     </div>
