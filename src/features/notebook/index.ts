@@ -3,6 +3,7 @@ export { NotebookCell } from './ui/NotebookCell'
 export { NotebookToolbar } from './ui/NotebookToolbar'
 export { SaveIndicator } from './ui/SaveIndicator'
 export { ShortcutsHelp, shortcutsOpenAtom } from './ui/ShortcutsHelp'
+export { RenameNotebookDialog } from './ui/RenameNotebookDialog'
 export {
   cellsAtom,
   addCell,
@@ -13,11 +14,13 @@ export {
   changeCellKind,
   updateCellCode,
   setNotebookTitle,
+  notebookTitleAtom,
   loadNotebook,
   notebookLoadedAtom,
   notebookBaseUpdatedAtAtom,
   storageCompatibilityAtom,
   restoreNotebook,
+  LOCAL_NOTEBOOK_ID,
   SEED_CODE,
 } from './model/notebook'
 export {
@@ -58,7 +61,9 @@ export {
   lineNumbersAtom,
   outlineVisibleAtom,
   outlineDrawerOpenAtom,
+  renameTargetAtom,
 } from './model/notebookSettings'
+export type { RenameTarget } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'
 export {

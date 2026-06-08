@@ -86,7 +86,7 @@ export const NotebookToolbar = reatomComponent(() => {
             <Button
               size="sm"
               className={cn(
-                'h-[34px] gap-1.5 px-[13px] text-sm font-semibold',
+                'h-[34px] gap-1.5 rounded-[var(--radius-item)] px-[13px] text-sm font-semibold',
                 isBusy && 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
               )}
               aria-label={isBusy ? 'Stop' : 'Run all'}

@@ -79,14 +79,15 @@ function renderOutline() {
   )
 }
 
-let scrollIntoViewSpy: ReturnType<typeof vi.fn>
+let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   observers = []
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
-  // scrollToCell calls el.scrollIntoView without optional chaining; jsdom omits it.
-  scrollIntoViewSpy = vi.fn()
-  Element.prototype.scrollIntoView = scrollIntoViewSpy
+  // scrollToCell calls el.scrollIntoView without optional chaining; jsdom omits
+  // it, so seed a no-op before spying (spyOn needs an existing method).
+  Element.prototype.scrollIntoView = () => {}
+  scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
 })
 
 afterEach(() => {

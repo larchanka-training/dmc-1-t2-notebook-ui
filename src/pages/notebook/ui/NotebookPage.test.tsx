@@ -17,14 +17,16 @@ describe('NotebookPage (boot gate)', () => {
     // context.reset() in the shared setup resets notebookLoadedAtom to false.
     expect(notebookLoadedAtom()).toBe(false)
     renderPage()
-    // Editor header is not on screen yet — only the skeleton placeholder.
-    expect(screen.queryByText('JS Notebook')).not.toBeInTheDocument()
+    // Editor header is not on screen yet — only the skeleton placeholder. The
+    // header's breadcrumb marker (`notebook.js`) is a reliable presence probe.
+    expect(screen.queryByText('notebook.js')).not.toBeInTheDocument()
 
     await act(async () => {
       await loadNotebook()
     })
 
     // Load settled → gate opens, NotebookView (with its header) renders.
-    expect(screen.getByText('JS Notebook')).toBeInTheDocument()
+    expect(screen.getByText('notebook.js')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /notebook title/i })).toBeInTheDocument()
   })
 })

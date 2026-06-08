@@ -1,25 +1,35 @@
 import { useState } from 'react'
 import {
   BookText,
+  Copy,
   LogIn,
   LogOut,
   LayoutGrid,
   Puzzle,
   Info,
+  MoreHorizontal,
   MoreVertical,
-  NotebookPen,
+  Pencil,
   Plus,
   Search,
   Moon,
   Sun,
   Monitor,
+  Trash2,
   CircleHelp,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { userAtom } from '@/entities/session'
 import { themeModeAtom, type ThemeMode } from '@/entities/theme'
-import { createNotebookAction, notebookListResource, shortcutsOpenAtom } from '@/features/notebook'
+import {
+  createNotebookAction,
+  notebookListResource,
+  notebookTitleAtom,
+  renameTargetAtom,
+  LOCAL_NOTEBOOK_ID,
+  shortcutsOpenAtom,
+} from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
 import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
@@ -27,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
@@ -97,8 +108,12 @@ const AuthSection = reatomComponent(() => {
             aria-label="Account menu"
             className="flex w-full items-center gap-2.5 rounded-[var(--radius-item)] p-1.5 text-left transition-colors hover:bg-sidebar-accent"
           >
-            <Avatar size="sm">
-              <AvatarFallback>{initialsOf(label)}</AvatarFallback>
+            {/* new-design-v2 identity avatar: primary→violet gradient with
+                white initials, not the default grey fallback. */}
+            <Avatar className="size-[33px]">
+              <AvatarFallback className="bg-[linear-gradient(135deg,var(--primary),color-mix(in_oklch,var(--primary)_55%,#6d28d9))] text-[13px] font-semibold text-white">
+                {initialsOf(label)}
+              </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1 leading-tight">
               <span className="block truncate text-sm font-medium">{label}</span>
@@ -195,6 +210,44 @@ const InfoGroup = reatomComponent(() => {
   )
 }, 'InfoGroup')
 
+// Per-row "…" menu (new-design-v2): Rename / Duplicate / Delete. Only Rename is
+// wired, and only for the current notebook (focuses the editor's title field);
+// Duplicate/Delete and any action on backend rows are presentational until the
+// notebook-management epic (04). Revealed on row hover / when the menu is open.
+function NotebookRowMenu({ onRename }: { onRename?: () => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Notebook actions"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-[5px] text-muted-foreground opacity-0 transition-[opacity,background,color] hover:bg-[color-mix(in_oklch,var(--foreground)_9%,transparent)] hover:text-foreground group-hover/nb:opacity-100 aria-expanded:opacity-100"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-36">
+        <DropdownMenuItem onClick={onRename}>
+          <Pencil className="size-4" />
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuItem>
+          <Copy className="size-4" />
+          Duplicate
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive">
+          <Trash2 className="size-4" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 // Default title for the quick "+" create (new-design-v2 uses "Untitled
 // notebook"). Opening/renaming/switching notebooks is epic 04 — out of scope
 // here; the list stays presentational.
@@ -203,8 +256,12 @@ const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
 const NotebooksGroup = reatomComponent(() => {
   const user = userAtom()
   const items = notebookListResource.data()
-  const isLoading = !notebookListResource.ready()
   const createError = createNotebookAction.error()?.message
+  // The currently open notebook lives in local storage (LOCAL_NOTEBOOK_ID),
+  // separate from the backend list. Surface it as a synthetic top entry with a
+  // live title so it shows up and stays highlighted while editing. Full
+  // open/switch across the backend list is epic 04.
+  const currentTitle = notebookTitleAtom()
   const [filter, setFilter] = useState('')
 
   if (!user) return null
@@ -214,9 +271,12 @@ const NotebooksGroup = reatomComponent(() => {
   })
 
   const filterText = filter.trim().toLowerCase()
+  // Never list the local notebook twice if it ever appears in the backend feed.
+  const backendItems = items.filter((nb) => nb.id !== LOCAL_NOTEBOOK_ID)
   const filtered = filterText
-    ? items.filter((nb) => nb.title.toLowerCase().includes(filterText))
-    : items
+    ? backendItems.filter((nb) => nb.title.toLowerCase().includes(filterText))
+    : backendItems
+  const currentMatchesFilter = !filterText || currentTitle.toLowerCase().includes(filterText)
 
   return (
     <SidebarGroup>
@@ -245,18 +305,32 @@ const NotebooksGroup = reatomComponent(() => {
 
         <ScrollArea className="max-h-72">
           <SidebarMenu>
+            {currentMatchesFilter ? (
+              <SidebarMenuItem className="group/nb">
+                <SidebarMenuButton isActive className={cn(NAV_ACTIVE, 'pr-8')}>
+                  <span className="truncate">{currentTitle || NEW_NOTEBOOK_TITLE}</span>
+                </SidebarMenuButton>
+                <NotebookRowMenu
+                  onRename={wrap(() =>
+                    renameTargetAtom.set({
+                      id: LOCAL_NOTEBOOK_ID,
+                      title: currentTitle || NEW_NOTEBOOK_TITLE,
+                    }),
+                  )}
+                />
+              </SidebarMenuItem>
+            ) : null}
             {filtered.map((nb) => (
-              <SidebarMenuItem key={nb.id}>
-                <SidebarMenuButton>
-                  <NotebookPen />
+              <SidebarMenuItem key={nb.id} className="group/nb">
+                <SidebarMenuButton className="pr-8">
                   <span className="truncate">{nb.title}</span>
                 </SidebarMenuButton>
+                <NotebookRowMenu
+                  onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title: nb.title }))}
+                />
               </SidebarMenuItem>
             ))}
-            {!isLoading && items.length === 0 ? (
-              <li className="px-2 text-xs text-muted-foreground">No notebooks yet.</li>
-            ) : null}
-            {filterText && filtered.length === 0 ? (
+            {filterText && !currentMatchesFilter && filtered.length === 0 ? (
               <li className="px-2 text-xs text-muted-foreground">No matches.</li>
             ) : null}
           </SidebarMenu>

@@ -40,3 +40,17 @@ export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outline
  * topbar button drives whichever one applies at the current width.
  */
 export const outlineDrawerOpenAtom = atom<boolean>(false, 'notebook.settings.outlineDrawerOpen')
+
+/**
+ * The notebook targeted by the sidebar "Rename" action, or null when the rename
+ * dialog is closed. Decoupled from the open editor so any listed notebook can
+ * be renamed, not just the current one (new-design-v2 renames from a modal).
+ * `id === LOCAL_NOTEBOOK_ID` means the open local notebook (rename persists via
+ * setNotebookTitle); other ids are backend rows whose rename is presentational
+ * until the notebook-management epic adds a PATCH endpoint.
+ */
+export interface RenameTarget {
+  id: string
+  title: string
+}
+export const renameTargetAtom = atom<RenameTarget | null>(null, 'notebook.settings.renameTarget')
