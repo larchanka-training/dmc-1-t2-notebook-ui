@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { readPersistRecord } from '@/shared/lib/persist'
 import { authClient, setAuthTokenGetter, setRefreshHandlers } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -132,6 +133,60 @@ describe('refresh middleware', () => {
 
     expect(data).toEqual(stubUser)
     expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Regression for the spurious-logout bug (login-flow-issue.md): the refresh
+// token must be sourced from localStorage, not a cold Reatom atom. The old wiring
+// (`getRefreshToken: () => refreshTokenAtom()`) returned null in the detached
+// async continuation after `await fetch`, so the refresh request never fired and
+// the user was logged out despite a live token in storage. Here the atom is never
+// touched — the token exists only in localStorage — proving the source is storage.
+describe('refresh token sourced from localStorage', () => {
+  const REFRESH_KEY = 'session.refreshToken'
+
+  beforeEach(() => {
+    setAuthTokenGetter(() => 'initial-access')
+    // Wire the getter to the SAME production source as setup.ts: localStorage,
+    // read via the shared persist helper — not refreshTokenAtom().
+    setRefreshHandlers({
+      getRefreshToken: () => readPersistRecord<string>(REFRESH_KEY),
+      onTokensRefreshed: onTokensRefreshed as (a: string, r: string) => void,
+      onSessionExpired: onSessionExpired as () => void,
+    })
+  })
+
+  afterEach(() => {
+    localStorage.removeItem(REFRESH_KEY)
+  })
+
+  test('on 401: sends POST /auth/refresh with the localStorage token', async () => {
+    // Seed the persist record exactly as withLocalStorage writes it ({ data }),
+    // with no atom read/subscription anywhere in the flow.
+    localStorage.setItem(REFRESH_KEY, JSON.stringify({ data: 'persisted-refresh' }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh call
+      .mockResolvedValueOnce(jsonResponse(200, stubUser)) // retry
+
+    const { data } = await authClient.GET('/auth/me')
+
+    const refreshCall = fetchMock.mock.calls.find((args) =>
+      String(args[0] instanceof Request ? args[0].url : args[0]).includes('/auth/refresh'),
+    )
+    expect(refreshCall).toBeDefined()
+    expect(JSON.parse(String(refreshCall![1]?.body))).toEqual({ refreshToken: 'persisted-refresh' })
+    expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(data).toEqual(stubUser)
+  })
+
+  test('on 401 with empty localStorage: no refresh fetch, session expired', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: '' }))
+
+    await authClient.GET('/auth/me')
+
+    expect(onSessionExpired).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

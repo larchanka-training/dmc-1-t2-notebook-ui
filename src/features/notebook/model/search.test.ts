@@ -3,6 +3,7 @@ import { addCell, cellsAtom, updateCellCode } from './notebook'
 import {
   activeMatchAtom,
   activeMatchIndexAtom,
+  caseSensitiveAtom,
   closeSearch,
   matchCountLabelAtom,
   nextMatch,
@@ -24,6 +25,26 @@ describe('notebook search', () => {
     // "total" in cell A once, "TOTAL" + "total" in cell B
     expect(matches).toHaveLength(3)
     expect(matches.every((m) => m.length === 5)).toBe(true)
+  })
+
+  test('case-sensitive mode matches only the exact casing', () => {
+    const [seed] = cellsAtom()
+    updateCellCode(seed.id, 'const total = TOTAL + Total')
+    caseSensitiveAtom.set(true)
+    setSearchQuery('total')
+    // Only the lowercase "total" matches; "TOTAL" and "Total" are excluded.
+    expect(searchMatchesAtom()).toHaveLength(1)
+  })
+
+  test('case-sensitive toggle widens results back when turned off', () => {
+    const [seed] = cellsAtom()
+    updateCellCode(seed.id, 'total TOTAL Total')
+    caseSensitiveAtom.set(true)
+    setSearchQuery('total')
+    expect(searchMatchesAtom()).toHaveLength(1)
+    // Flip it off → the default case-insensitive search sees all three.
+    caseSensitiveAtom.set(false)
+    expect(searchMatchesAtom()).toHaveLength(3)
   })
 
   test('reports a 1-based counter label', () => {

@@ -1,6 +1,9 @@
 import * as React from 'react'
 
-const MOBILE_BREAKPOINT = 768
+// new-design-v2 collapses the sidebar and outline into floating drawers below
+// this width (was 768). The sidebar primitive switches to its Sheet drawer at
+// the same breakpoint, so the whole shell stays in sync.
+const MOBILE_BREAKPOINT = 1280
 
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(() => window.innerWidth < MOBILE_BREAKPOINT)

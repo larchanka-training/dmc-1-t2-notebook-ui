@@ -9,8 +9,6 @@
 // Consecutive stdout/stderr items are merged into a single block (so a run of
 // console.log lines reads as one log), but a result / error / html / image in
 // between splits the stream — the on-screen order matches execution order.
-import { Alert, AlertDescription } from '@/shared/ui/alert'
-import { Card } from '@/shared/ui/card'
 import { cn } from '@/shared/lib/cn'
 import type { OutputItem, SerializedValue } from '../runtime/types'
 import { OutputFrame } from './OutputFrame'
@@ -46,8 +44,10 @@ function toSegments(items: OutputItem[]): Segment[] {
 export function OutputView({ items }: OutputViewProps) {
   if (items.length === 0) return null
 
+  // Rendered inside the cell footer (see NotebookCell): segments stack as one
+  // flat block, separated by hairlines rather than each being its own card.
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col divide-y divide-border/60">
       {toSegments(items).map((seg, i) =>
         seg.kind === 'stream' ? (
           <StreamBlock key={i} items={seg.items} />
@@ -61,21 +61,13 @@ export function OutputView({ items }: OutputViewProps) {
 
 function StreamBlock({ items }: { items: StreamItem[] }) {
   return (
-    <Card
-      size="sm"
-      className="gap-0 py-3 ring-0 border-0 bg-secondary font-mono text-sm whitespace-pre-wrap"
-    >
-      <div className="px-4 space-y-0.5">
-        {items.map((it, i) => (
-          <div
-            key={i}
-            className={cn(it.type === 'stdout' ? 'text-foreground' : 'text-destructive')}
-          >
-            {it.text}
-          </div>
-        ))}
-      </div>
-    </Card>
+    <div className="space-y-0.5 px-4 py-2 font-mono text-sm whitespace-pre-wrap">
+      {items.map((it, i) => (
+        <div key={i} className={cn(it.type === 'stdout' ? 'text-foreground' : 'text-destructive')}>
+          {it.text}
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -83,12 +75,9 @@ function SingleItem({ item }: { item: OutputItem }) {
   switch (item.type) {
     case 'result':
       return (
-        <Card
-          size="sm"
-          className="gap-0 py-3 ring-0 border-0 bg-muted/40 font-mono text-sm whitespace-pre-wrap"
-        >
-          <div className="px-4 text-muted-foreground">⟹ {formatValue(item.value)}</div>
-        </Card>
+        <div className="px-4 py-2 font-mono text-sm whitespace-pre-wrap text-muted-foreground">
+          ⟹ {formatValue(item.value)}
+        </div>
       )
     case 'html':
       return <OutputFrame html={item.html} />
@@ -101,13 +90,13 @@ function SingleItem({ item }: { item: OutputItem }) {
         />
       )
     case 'error':
+      // Flat red block (new-design-v2): a destructive-tinted footer slice, not a
+      // bordered/rounded card. The enclosing cell footer owns the rounding.
       return (
-        <Alert variant="destructive" className="font-mono">
-          <AlertDescription className="whitespace-pre-wrap">
-            <span className="font-semibold">{item.name}</span>: {item.message}
-            {item.stack ? `\n${item.stack}` : null}
-          </AlertDescription>
-        </Alert>
+        <div className="px-4 py-3 font-mono text-sm whitespace-pre-wrap bg-[color-mix(in_oklch,var(--destructive)_9%,var(--card))] text-destructive">
+          <span className="font-semibold">{item.name}</span>: {item.message}
+          {item.stack ? `\n${item.stack}` : null}
+        </div>
       )
     default:
       return null

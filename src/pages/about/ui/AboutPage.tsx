@@ -1,5 +1,35 @@
-import { BookText, Code2, Layers, Rocket, Users } from 'lucide-react'
-import { Separator } from '@/shared/ui/separator'
+import { KeyRound, Play, Save, Sparkles, Type } from 'lucide-react'
+
+// Real, shipped features only. AI generation is intentionally NOT here — it is
+// surfaced separately as "In progress" (epic 07). Autosave is local-only
+// (IndexedDB); cross-session sync (epic 04/05) does not exist yet, so it is not
+// claimed here.
+const FEATURES = [
+  {
+    icon: Play,
+    title: 'Runs in the browser',
+    description:
+      'Every code cell executes client-side via QuickJS/WASM. No server round-trip — output appears inline under each cell.',
+  },
+  {
+    icon: Type,
+    title: 'Rich Markdown & outline',
+    description:
+      'Headings, tables and highlighted code blocks render live, with an auto-generated outline of your document.',
+  },
+  {
+    icon: Save,
+    title: 'Autosaved locally',
+    description:
+      'Notebooks autosave to your browser (IndexedDB) as you type. Reopen the app and pick up exactly where you left off.',
+  },
+  {
+    icon: KeyRound,
+    title: 'Passwordless sign-in',
+    description:
+      'Sign in with a one-time code sent to your email — no passwords to remember, reset or leak.',
+  },
+] as const
 
 function FeatureCard({
   icon: Icon,
@@ -11,124 +41,76 @@ function FeatureCard({
   description: string
 }) {
   return (
-    <div className="flex gap-4 p-4 rounded-xl border bg-card">
-      <div className="shrink-0 flex items-center justify-center size-10 rounded-lg bg-primary/10">
-        <Icon className="size-5 text-primary" />
+    <div className="rounded-[var(--radius-card)] border border-border bg-card p-[18px]">
+      <div className="mb-3 grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
+        <Icon className="size-[18px]" />
       </div>
-      <div>
-        <p className="font-medium text-sm">{title}</p>
-        <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-      </div>
+      <h3 className="mb-1 text-[15px] font-semibold">{title}</h3>
+      <p className="text-[13.5px] leading-relaxed text-muted-foreground">{description}</p>
     </div>
   )
 }
 
 export default function AboutPage() {
   return (
-    <div className="p-8 max-w-2xl space-y-10">
+    <div className="mx-auto max-w-[720px] px-6 pt-12 pb-24 sm:px-10">
       {/* hero */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10">
-            <BookText className="size-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">JS Notebook</h1>
-            <p className="text-sm text-muted-foreground">
-              Interactive JavaScript environment in the browser
-            </p>
-          </div>
-        </div>
-        <p className="text-muted-foreground leading-relaxed">
-          JS Notebook is a browser-based interactive coding environment — similar in concept to{' '}
-          <span className="text-foreground font-medium">Jupyter Notebook</span>, but built for{' '}
-          <span className="text-foreground font-medium">JavaScript</span> instead of Python. Write
-          code in cells, run them instantly, and see output inline — no server, no setup.
-        </p>
+      <h1 className="mb-1.5 text-[34px] font-semibold tracking-tight">JS Notebook</h1>
+      <p className="mb-9 text-[17px] leading-relaxed text-muted-foreground">
+        A browser-native, Jupyter-style notebook for JavaScript &amp; TypeScript. Write code in
+        cells, run them instantly, and see output inline — no server, no setup.
+      </p>
+
+      {/* feature grid 2×2 */}
+      <div className="grid gap-3.5 sm:grid-cols-2">
+        {FEATURES.map((f) => (
+          <FeatureCard key={f.title} icon={f.icon} title={f.title} description={f.description} />
+        ))}
       </div>
 
-      <Separator />
-
-      {/* course info */}
-      <div className="space-y-4">
-        <h2 className="text-base font-semibold">About This Course</h2>
-        <div className="rounded-xl border bg-card p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-            <div>
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Group</p>
-              <p className="font-semibold text-base">TARDIS T2</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Project</p>
-              <p className="font-semibold text-base">JS Notebook</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Type</p>
-              <p className="font-medium">Training Course</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Stack</p>
-              <p className="font-medium">React · TypeScript · Vite</p>
-            </div>
+      {/* AI — explicitly in progress (epic 07), not shipped */}
+      <div className="mt-3.5 flex items-start gap-3.5 rounded-[var(--radius-card)] border border-dashed border-border bg-card p-[18px]">
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <Sparkles className="size-[18px]" />
+        </div>
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <h3 className="text-[15px] font-semibold">AI code generation</h3>
+            <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
+              In progress
+            </span>
           </div>
+          <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+            Describe a cell in plain language and get runnable code generated right below it.
+            Landing in a coming release.
+          </p>
         </div>
       </div>
 
-      <Separator />
+      {/* how it works */}
+      <h2 className="mt-9 mb-2.5 text-[22px] font-semibold tracking-tight">How it works</h2>
+      <p className="text-[16px] leading-relaxed text-foreground/90">
+        A notebook is an ordered list of cells. Code cells run JS/TS and show their output inline;
+        text cells render Markdown. Reorder by dragging the gutter handle, insert between any two
+        cells, and navigate large notebooks with the outline.
+      </p>
 
-      {/* features */}
-      <div className="space-y-4">
-        <h2 className="text-base font-semibold">What's Inside</h2>
-        <div className="flex flex-col gap-3">
-          <FeatureCard
-            icon={Code2}
-            title="Interactive JS Cells"
-            description="Write and run JavaScript directly in the browser. console.log output and return values are captured and displayed inline."
-          />
-          <FeatureCard
-            icon={Layers}
-            title="Component Showcase"
-            description="Live gallery of shadcn/ui components and custom-built components used throughout the project."
-          />
-          <FeatureCard
-            icon={Users}
-            title="Auth Example"
-            description="A login page demonstrating form layout and shadcn input components — ready to wire up to a real backend."
-          />
-          <FeatureCard
-            icon={Rocket}
-            title="Modern Tooling"
-            description="Built with Vite, Tailwind CSS v4, shadcn/ui, and Reatom — the same stack used in production apps today."
-          />
-        </div>
-      </div>
+      {/* keyboard first */}
+      <h2 className="mt-9 mb-2.5 text-[22px] font-semibold tracking-tight">Keyboard first</h2>
+      <p className="text-[16px] leading-relaxed text-foreground/90">
+        Command mode for structural moves — add, delete and reorder cells — and edit mode for
+        typing. Press{' '}
+        <code className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[0.86em]">
+          ?
+        </code>{' '}
+        anywhere for the full shortcut sheet.
+      </p>
 
-      <Separator />
-
-      {/* vs jupyter */}
-      <div className="space-y-4">
-        <h2 className="text-base font-semibold">JS Notebook vs Jupyter</h2>
-        <div className="rounded-xl border overflow-hidden text-sm">
-          <div className="grid grid-cols-3 bg-muted/50 px-4 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-            <span>Feature</span>
-            <span>Jupyter</span>
-            <span>JS Notebook</span>
-          </div>
-          {[
-            ['Language', 'Python', 'JavaScript'],
-            ['Runtime', 'Server (kernel)', 'Browser (native)'],
-            ['Setup', 'Python + pip install', 'None — open the app'],
-            ['Async support', 'Partial', 'Full (async/await)'],
-            ['UI framework', 'Classic / Lab', 'React + shadcn/ui'],
-          ].map(([feature, jupyter, js]) => (
-            <div key={feature} className="grid grid-cols-3 px-4 py-2.5 border-t even:bg-muted/20">
-              <span className="text-muted-foreground">{feature}</span>
-              <span>{jupyter}</span>
-              <span className="text-primary font-medium">{js}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* project meta */}
+      <p className="mt-12 border-t border-border pt-6 text-[13px] text-muted-foreground">
+        A training project — group <span className="font-medium text-foreground">TARDIS T2</span>.
+        Built with React, TypeScript and Vite.
+      </p>
     </div>
   )
 }

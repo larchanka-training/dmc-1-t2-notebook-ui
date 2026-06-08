@@ -6,22 +6,31 @@ import {
   ChevronUp,
   ChevronDown,
   Loader2,
-  MoreHorizontal,
   Type,
   Eye,
   Pencil,
+  Bot,
+  Cloud,
 } from 'lucide-react'
-import { Button } from '@/shared/ui/button'
-import { Card } from '@/shared/ui/card'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/shared/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { MarkdownSearchHighlight } from './MarkdownSearchHighlight'
+
+// Toolbar icon button (new-design-v2 REC.toolBtn): square, muted, hover-filled.
+const TOOL_BTN =
+  'grid size-7 place-items-center rounded-[6px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
+
+// Agent toolbar button (new-design-v2 REC.toolBtnAgent): square, primary-tinted
+// to set the AI actions apart from the neutral cell tools.
+const AGENT_BTN =
+  'grid size-7 place-items-center rounded-[6px] text-primary transition-colors hover:bg-[color-mix(in_oklch,var(--primary)_14%,transparent)] hover:text-primary'
+
+// Run button (new-design-v2 cell-runbtn): square with a soft success tint that
+// deepens on hover; the Stop variant uses the destructive tint.
+const RUN_BTN =
+  'grid size-[26px] place-items-center rounded-[6px] border border-transparent text-success bg-[color-mix(in_oklch,var(--success)_12%,transparent)] transition-[background,transform] hover:bg-[color-mix(in_oklch,var(--success)_22%,transparent)] active:scale-[0.94] disabled:pointer-events-none'
+const RUN_BTN_STOP =
+  'grid size-[26px] place-items-center rounded-[6px] border border-transparent text-destructive bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] transition-[background,transform] hover:bg-[color-mix(in_oklch,var(--destructive)_22%,transparent)] active:scale-[0.94]'
 import { modKeyLabel } from '@/shared/lib/platform'
 import type { Theme } from '@/entities/theme'
 import type { CellKind, CellStatus, CellViewMode } from '../domain/cell'
@@ -111,6 +120,18 @@ export function NotebookCell({
   // cell that the user halted is not mistaken for a clean run or a crash.
   const isHalted = status === 'interrupted' || status === 'timeout'
   const isSkipped = status === 'skipped'
+  // An error result is shown raw (red trace) without the "Output" label — the
+  // error message is self-describing, the label would be noise (new-design-v2).
+  const outputHasError = output.some((item) => item.type === 'error')
+  // Agent actions come in two tiers (ai-architecture.md §2): in-browser (T1)
+  // and cloud (T2). The verb differs by kind — a markdown prompt GENERATES
+  // code, a code cell asks for an IMPROVE diff. Labels mirror new-design-v2.
+  const agentInBrowserLabel = isCode
+    ? 'Improve with in-browser agent (suggest a diff)'
+    : 'Generate code · in-browser agent'
+  const agentCloudLabel = isCode
+    ? 'Improve with cloud agent (suggest a diff)'
+    : 'Generate code · cloud agent'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -142,38 +163,53 @@ export function NotebookCell({
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
+  // data-focus / data-state drive the cell rings + left mode bar (see the cell
+  // state machine in index.css). focus = the modal state of the *active* cell;
+  // state = the execution lifecycle. Kept as attributes (not Tailwind classes)
+  // so the CSS owns the colour logic in one place.
+  const dataFocus = active ? mode : 'none'
+  const dataState = isRunning
+    ? 'running'
+    : isError
+      ? 'error'
+      : isHalted
+        ? 'halted'
+        : isSkipped
+          ? 'skipped'
+          : 'idle'
+
   return (
     <div className="group/cell flex flex-col gap-2">
-      <Card
-        size="sm"
+      <article
+        data-focus={dataFocus}
+        data-state={dataState}
         className={cn(
-          'relative gap-0 py-0 ring-0 border border-border overflow-visible transition-shadow',
-          // A focused cell gets a coloured left bar: blue in command mode,
-          // green in edit mode — the Jupyter convention, so "which cell is
-          // active and in which mode" is visible at a glance.
-          'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:rounded-l-xl before:transition-colors',
-          active && mode === 'command' && 'before:bg-primary ring-1 ring-primary/40',
-          active && mode === 'edit' && 'before:bg-success ring-1 ring-success/40',
-          isError && 'border-destructive',
-          isHalted && 'border-amber-500/60',
-          isSkipped && 'border-dashed border-muted-foreground/40',
-          isRunning && 'before:bg-primary',
+          'cell relative overflow-visible rounded-[var(--radius-cell)] border border-border bg-card',
+          'transition-[border-color,box-shadow]',
         )}
       >
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/40 rounded-t-xl">
+        <div
+          className={cn(
+            'flex min-h-[32px] items-center gap-2.5 rounded-t-[var(--radius-cell)] py-[5px] pl-3 pr-1.5',
+            // Code header: filled bar with a divider. Markdown header (new-design-v2):
+            // a bare label row — no background tint and no bottom rule.
+            isCode
+              ? 'border-b border-border bg-[color-mix(in_oklch,var(--muted)_45%,var(--card))]'
+              : 'border-b border-transparent',
+          )}
+        >
           {isCode && isRunning && onStop ? (
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    size="icon"
-                    variant="ghost"
+                  <button
+                    type="button"
                     aria-label="Stop cell"
-                    className="size-7 text-destructive hover:bg-destructive/10"
+                    className={RUN_BTN_STOP}
                     onClick={onStop}
                   >
-                    <Square className="size-4 fill-current" />
-                  </Button>
+                    <Square className="size-[15px] fill-current" />
+                  </button>
                 }
               />
               <TooltipContent>Stop cell</TooltipContent>
@@ -182,51 +218,82 @@ export function NotebookCell({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    size="icon"
-                    variant="ghost"
+                  <button
+                    type="button"
                     aria-label="Run cell"
-                    className="size-7 text-success hover:bg-success/10"
+                    className={RUN_BTN}
                     disabled={isRunning}
                     onClick={onRun}
                   >
                     {isRunning ? (
-                      <Loader2 className="size-4 animate-spin" />
+                      <Loader2 className="size-[15px] animate-spin" />
                     ) : (
-                      <Play className="size-4" />
+                      <Play className="size-[15px]" />
                     )}
-                  </Button>
+                  </button>
                 }
               />
               <TooltipContent>Run cell ({modKeyLabel}+Enter)</TooltipContent>
             </Tooltip>
           ) : (
-            <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground select-none">
+            <span className="flex items-center gap-[7px] text-[12.5px] font-medium text-muted-foreground select-none">
               <Type className="size-3.5" />
               Text
-            </div>
+            </span>
           )}
 
           {isCode ? (
-            <span className="text-xs text-muted-foreground font-mono select-none">
-              [{executionCount ?? ' '}]
+            <span className="font-mono text-[12px] text-muted-foreground select-none">
+              [{isRunning ? '*' : (executionCount ?? ' ')}]
             </span>
           ) : null}
 
-          <div className="ml-auto flex items-center gap-1">
+          {/* Cell toolbar: all actions are visible buttons revealed on cell
+              hover/focus (new-design-v2 — no "⋯" overflow menu). */}
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-within:opacity-100">
+            {/* Agent actions (new-design-v2): two explicit tiers per
+                ai-architecture.md §2 — in-browser (T1) and cloud (T2). The label
+                differs by kind (generate vs improve-diff). Presentational only:
+                the buttons click but do nothing until the LLM epic (07) wires
+                them; no handler, no fetch, no new dependency. */}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button type="button" aria-label={agentInBrowserLabel} className={AGENT_BTN}>
+                    <Bot className="size-[15px]" />
+                  </button>
+                }
+              />
+              <TooltipContent>{agentInBrowserLabel}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button type="button" aria-label={agentCloudLabel} className={AGENT_BTN}>
+                    <Cloud className="size-[15px]" />
+                  </button>
+                }
+              />
+              <TooltipContent>{agentCloudLabel}</TooltipContent>
+            </Tooltip>
+
             {isMarkdown && onViewModeChange ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <Button
-                      size="icon"
-                      variant="ghost"
+                    <button
+                      type="button"
                       aria-label={showPreview ? 'Edit cell' : 'Preview cell'}
-                      className="size-7"
+                      className={TOOL_BTN}
                       onClick={() => onViewModeChange(showPreview ? 'edit' : 'preview')}
                     >
-                      {showPreview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
-                    </Button>
+                      {showPreview ? (
+                        <Pencil className="size-[15px]" />
+                      ) : (
+                        <Eye className="size-[15px]" />
+                      )}
+                    </button>
                   }
                 />
                 <TooltipContent>
@@ -235,42 +302,61 @@ export function NotebookCell({
               </Tooltip>
             ) : null}
 
-            <div className="opacity-0 group-hover/cell:opacity-100 focus-within:opacity-100 transition-opacity">
-              {(onMoveUp || onMoveDown || onDelete) && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="Cell options"
-                        className="size-7"
-                      >
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end">
-                    {onMoveUp && (
-                      <DropdownMenuItem onClick={onMoveUp} disabled={isFirst}>
-                        <ChevronUp className="size-4" /> Move up
-                      </DropdownMenuItem>
-                    )}
-                    {onMoveDown && (
-                      <DropdownMenuItem onClick={onMoveDown} disabled={isLast}>
-                        <ChevronDown className="size-4" /> Move down
-                      </DropdownMenuItem>
-                    )}
-                    {onDelete && (onMoveUp || onMoveDown) ? <DropdownMenuSeparator /> : null}
-                    {onDelete && (
-                      <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                        <Trash2 className="size-4" /> Delete
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
+            {onMoveUp ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Move cell up"
+                      className={TOOL_BTN}
+                      disabled={isFirst}
+                      onClick={onMoveUp}
+                    >
+                      <ChevronUp className="size-[15px]" />
+                    </button>
+                  }
+                />
+                <TooltipContent>Move up</TooltipContent>
+              </Tooltip>
+            ) : null}
+
+            {onMoveDown ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Move cell down"
+                      className={TOOL_BTN}
+                      disabled={isLast}
+                      onClick={onMoveDown}
+                    >
+                      <ChevronDown className="size-[15px]" />
+                    </button>
+                  }
+                />
+                <TooltipContent>Move down</TooltipContent>
+              </Tooltip>
+            ) : null}
+
+            {onDelete ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Delete cell"
+                      className={cn(TOOL_BTN, 'hover:bg-destructive/10 hover:text-destructive')}
+                      onClick={onDelete}
+                    >
+                      <Trash2 className="size-[15px]" />
+                    </button>
+                  }
+                />
+                <TooltipContent>Delete</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
 
@@ -278,7 +364,7 @@ export function NotebookCell({
           <button
             type="button"
             onClick={enterEditMode}
-            className="text-left w-full p-4 cursor-text rounded-b-xl text-foreground font-sans text-base leading-relaxed focus:bg-muted/30 outline-none"
+            className="text-left w-full p-4 cursor-text text-foreground font-sans text-base leading-relaxed focus:bg-muted/30 outline-none"
             title="Click to edit"
           >
             <MarkdownView source={code} />
@@ -299,56 +385,85 @@ export function NotebookCell({
             onExitToCommand={onExitToCommand}
           />
         ) : (
-          <textarea
-            ref={textareaRef}
-            value={code}
-            readOnly={readOnly}
-            spellCheck
-            rows={1}
-            placeholder="Markdown — supports `# headings` for the outline"
-            onChange={(e) => {
-              onCodeChange?.(e.target.value)
-              autoResize(e.target)
-            }}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
-                e.preventDefault()
-                onViewModeChange?.('preview')
-                return
-              }
-              // Enter combos mirror the code editor's run keymap, but a
-              // markdown cell is RENDERED, not executed: we switch it to
-              // preview instead of calling the kernel (runAndAdvance /
-              // runAndInsertBelow skip the run for markdown). Blur first so
-              // the destination cell — or the document-level command-mode
-              // shortcuts — own the focus, not this textarea. A plain Enter
-              // (no modifier) falls through and inserts a newline as usual.
-              if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                e.currentTarget.blur()
-                onViewModeChange?.('preview')
-                if (e.shiftKey) onRunAndAdvance?.()
-                else if (e.altKey) onRunAndInsertBelow?.()
-                // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
-                else onExitToCommand?.()
-                return
-              }
-              // Esc leaves edit mode for command mode. Blur FIRST (like the
-              // CodeEditor keymap): otherwise focus stays in the textarea and
-              // the document-level command-mode shortcuts get typed as text.
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                e.currentTarget.blur()
-                onExitToCommand?.()
-              }
-            }}
-            onInput={(e) => autoResize(e.currentTarget)}
-            className="w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors rounded-b-xl focus:bg-muted/30 font-sans text-base leading-relaxed"
-          />
+          <div className="relative">
+            {/* Search-match backdrop sits behind the textarea (which is
+                transparent-bg) so matches in markdown source are highlighted
+                too, not only in code cells. */}
+            {cellId ? <MarkdownSearchHighlight cellId={cellId} source={code} /> : null}
+            <textarea
+              ref={textareaRef}
+              value={code}
+              readOnly={readOnly}
+              spellCheck
+              rows={1}
+              placeholder="Markdown — supports `# headings` for the outline"
+              // Mirror the code editor: focusing the textarea puts the cell in
+              // edit mode, so the green left mode-bar shows for markdown too
+              // (not just code). A plain mouse click that lands here would not
+              // otherwise flip the mode.
+              onFocus={onFocus}
+              onChange={(e) => {
+                onCodeChange?.(e.target.value)
+                autoResize(e.target)
+              }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+                  e.preventDefault()
+                  onViewModeChange?.('preview')
+                  return
+                }
+                // Enter combos mirror the code editor's run keymap, but a
+                // markdown cell is RENDERED, not executed: we switch it to
+                // preview instead of calling the kernel (runAndAdvance /
+                // runAndInsertBelow skip the run for markdown). Blur first so
+                // the destination cell — or the document-level command-mode
+                // shortcuts — own the focus, not this textarea. A plain Enter
+                // (no modifier) falls through and inserts a newline as usual.
+                // Mod+Shift+Enter is the global "Run All" hotkey — let it bubble
+                // to the document handler instead of running just this cell.
+                if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+                  return
+                }
+                if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                  onViewModeChange?.('preview')
+                  if (e.shiftKey) onRunAndAdvance?.()
+                  else if (e.altKey) onRunAndInsertBelow?.()
+                  // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
+                  else onExitToCommand?.()
+                  return
+                }
+                // Esc leaves edit mode for command mode. Blur FIRST (like the
+                // CodeEditor keymap): otherwise focus stays in the textarea and
+                // the document-level command-mode shortcuts get typed as text.
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                  onExitToCommand?.()
+                }
+              }}
+              onInput={(e) => autoResize(e.currentTarget)}
+              className="relative w-full resize-none bg-transparent text-foreground outline-none p-4 min-h-[60px] transition-colors focus:bg-muted/30 font-sans text-base leading-relaxed"
+            />
+          </div>
         )}
-      </Card>
 
-      {isCode && output.length > 0 && <OutputView items={output} />}
+        {/* Execution result: a cell FOOTER (not a detached card) — split from
+            the editor by a plain top rule. Only the cell itself is rounded; the
+            footer's top edge is a straight line (new-design-v2). A clean run
+            gets an "Output [N]" label; an error is shown raw, without it. */}
+        {isCode && output.length > 0 ? (
+          <div className="overflow-hidden rounded-b-[var(--radius-cell)] border-t border-border">
+            {outputHasError ? null : (
+              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground select-none">
+                Output [{isRunning ? '*' : (executionCount ?? ' ')}]
+              </div>
+            )}
+            <OutputView items={output} />
+          </div>
+        ) : null}
+      </article>
     </div>
   )
 }

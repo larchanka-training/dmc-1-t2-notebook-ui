@@ -18,9 +18,11 @@ describe('SearchBar', () => {
   test('Cmd+F opens the search bar', async () => {
     const user = userEvent.setup()
     renderView()
-    expect(screen.queryByPlaceholderText(/search notebook/i)).toBeNull()
+    // The overlay stays mounted (so it can fade out); closed = aria-hidden.
+    expect(screen.getByRole('search', { hidden: true })).toHaveAttribute('aria-hidden', 'true')
     await user.keyboard('{Meta>}f{/Meta}')
-    expect(screen.getByPlaceholderText(/search notebook/i)).toBeInTheDocument()
+    expect(screen.getByRole('search')).toHaveAttribute('aria-hidden', 'false')
+    expect(screen.getByPlaceholderText(/find in notebook/i)).toBeInTheDocument()
   })
 
   test('opening with an existing match does not crash (no missing-async-stack)', async () => {
@@ -32,7 +34,7 @@ describe('SearchBar', () => {
     const [seed] = cellsAtom()
     await act(async () => updateCellCode(seed.id, 'console'))
     await user.keyboard('{Control>}f{/Control}')
-    const input = screen.getByPlaceholderText(/search notebook/i)
+    const input = screen.getByPlaceholderText(/find in notebook/i)
     // Set the query atomically rather than char-by-char: this test asserts the
     // component survives opening with a live match (the old missing-async-stack
     // crash), not the typing path — which is covered by the counter test below.
@@ -60,7 +62,7 @@ describe('SearchBar', () => {
     const [seed] = cellsAtom()
     await act(async () => updateCellCode(seed.id, 'q q'))
     await act(async () => searchOpenAtom.set(true))
-    const input = screen.getByPlaceholderText(/search notebook/i)
+    const input = screen.getByPlaceholderText(/find in notebook/i)
     await act(async () => setSearchQuery('q'))
     expect(screen.getByText('1/2')).toBeInTheDocument()
     // Navigation still goes through the real keyboard path (the input's
@@ -69,6 +71,7 @@ describe('SearchBar', () => {
     await user.keyboard('{Enter}')
     expect(screen.getByText('2/2')).toBeInTheDocument()
     await user.keyboard('{Escape}')
-    expect(screen.queryByPlaceholderText(/search notebook/i)).toBeNull()
+    // Closed again: still mounted but hidden (fade-out), query cleared.
+    expect(screen.getByRole('search', { hidden: true })).toHaveAttribute('aria-hidden', 'true')
   })
 })

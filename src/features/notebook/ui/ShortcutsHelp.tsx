@@ -25,6 +25,7 @@ const GROUPS: ShortcutGroup[] = [
       { keys: `${shiftKeyLabel} Enter`, desc: 'Run cell, go to next' },
       { keys: `${modKeyLabel} Enter`, desc: 'Run cell, stay' },
       { keys: `${altKeyLabel} Enter`, desc: 'Run cell, insert below' },
+      { keys: `${modKeyLabel} E`, desc: 'Markdown: preview / edit' },
       { keys: 'Esc', desc: 'Leave editor (command mode)' },
     ],
   },
@@ -41,9 +42,11 @@ const GROUPS: ShortcutGroup[] = [
   {
     title: 'Global',
     items: [
+      { keys: `${modKeyLabel} ${shiftKeyLabel} Enter`, desc: 'Run all cells' },
       { keys: `${modKeyLabel} Z`, desc: 'Undo' },
       { keys: `${modKeyLabel} ${shiftKeyLabel} Z`, desc: 'Redo' },
       { keys: `${modKeyLabel} F`, desc: 'Search notebook' },
+      { keys: `${modKeyLabel} \\`, desc: 'Toggle sidebar' },
       { keys: '?', desc: 'This help' },
     ],
   },
@@ -71,7 +74,7 @@ export const ShortcutsHelp = reatomComponent(() => {
         <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title} className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-warning">
                 {group.title}
               </h3>
               <ul className="space-y-1.5">

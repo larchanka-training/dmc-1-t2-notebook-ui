@@ -1,13 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { ChevronDown, ChevronUp, Regex, X } from 'lucide-react'
+import { CaseSensitive, ChevronDown, ChevronUp, Regex, Search, X } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { cn } from '@/shared/lib/cn'
 import { useHotkeys } from '@/shared/lib/hotkeys'
 import {
   activeMatchAtom,
+  caseSensitiveAtom,
   closeSearch,
   matchCountLabelAtom,
   nextMatch,
@@ -22,6 +23,10 @@ import {
 // Takes the id as an argument — it must NOT read Reatom atoms, because it runs
 // from a useEffect, which is outside the Reatom stack; reading an atom there
 // throws `missing async stack` under clearStack().
+// Active look for the Aa / regex toggles (new-design-v2 search opt): a soft
+// primary tint + primary text, NOT the near-invisible shadcn `accent`.
+const TOGGLE_ACTIVE = 'bg-[color-mix(in_oklch,var(--primary)_16%,transparent)] text-primary'
+
 function scrollCellIntoView(cellId: string): void {
   const el = document.querySelector(`[data-cell-id="${cellId}"]`)
   // scrollIntoView is absent in JSDOM and may be missing on non-element nodes.
@@ -35,6 +40,9 @@ function scrollCellIntoView(cellId: string): void {
  */
 export const SearchBar = reatomComponent(() => {
   const open = searchOpenAtom()
+  // Overlay stays mounted so it can fade/slide out on close; we focus the
+  // input via the container ref (the Input primitive doesn't forward a ref).
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   // Cmd/Ctrl+F opens search (and steals the key from the browser find).
   useHotkeys({ 'Mod-f': wrap(() => searchOpenAtom.set(true)) })
@@ -48,18 +56,31 @@ export const SearchBar = reatomComponent(() => {
     if (activeCellId) scrollCellIntoView(activeCellId)
   }, [activeCellId])
 
-  if (!open) return null
+  // Focus the field when the overlay opens (replaces autoFocus, which only
+  // fires on mount and the overlay no longer unmounts).
+  useEffect(() => {
+    if (open) overlayRef.current?.querySelector('input')?.focus()
+  }, [open])
 
   const onNext = wrap(() => nextMatch())
   const onPrev = wrap(() => prevMatch())
 
   return (
-    <div className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 shadow-sm">
+    <div
+      ref={overlayRef}
+      role="search"
+      aria-hidden={!open}
+      className={cn(
+        'fixed left-1/2 top-3 z-50 flex w-[min(520px,80vw)] -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-border bg-card py-1.5 pl-3 pr-2 shadow-[var(--shadow-pop)] transition-[opacity,transform] duration-150 ease-out',
+        open ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-2 opacity-0',
+      )}
+    >
+      <Search className="size-4 shrink-0 text-muted-foreground" />
       <Input
-        autoFocus
+        tabIndex={open ? undefined : -1}
         value={searchQueryAtom()}
-        placeholder="Search notebook…"
-        className="h-7 w-48 border-0 bg-transparent px-1 text-sm focus-visible:ring-0"
+        placeholder="Find in notebook…"
+        className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
         onChange={wrap((e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value))}
         onKeyDown={wrap((e: React.KeyboardEvent) => {
           if (e.key === 'Enter') {
@@ -79,9 +100,19 @@ export const SearchBar = reatomComponent(() => {
       <Button
         size="icon"
         variant="ghost"
+        aria-label="Match case"
+        aria-pressed={caseSensitiveAtom()}
+        className={cn('size-6', caseSensitiveAtom() && TOGGLE_ACTIVE)}
+        onClick={wrap(() => caseSensitiveAtom.set((v) => !v))}
+      >
+        <CaseSensitive className="size-4" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
         aria-label="Toggle regex"
         aria-pressed={useRegexAtom()}
-        className={cn('size-6', useRegexAtom() && 'bg-accent text-accent-foreground')}
+        className={cn('size-6', useRegexAtom() && TOGGLE_ACTIVE)}
         onClick={wrap(() => useRegexAtom.set((v) => !v))}
       >
         <Regex className="size-3.5" />

@@ -8,7 +8,7 @@
 // The numeric bounds live in the neutral `runtime/limits` module (shared
 // with the worker/kernel, which must not import this Reatom-flavored file).
 
-import { atom } from '@reatom/core'
+import { atom, withLocalStorage } from '@reatom/core'
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS } from '../runtime/limits'
 
 export { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS }
@@ -22,5 +22,41 @@ export const timeoutMsAtom = atom<number>(DEFAULT_TIMEOUT_MS, 'notebook.settings
 /**
  * Whether code cells show line numbers in the CodeMirror gutter. Off by
  * default to keep short scratch cells compact; toggled from the toolbar.
+ * Persisted so the choice survives reloads (read reactively from components,
+ * so plain withLocalStorage works — same pattern as themeModeAtom).
  */
-export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbers')
+export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbers').extend(
+  withLocalStorage('notebook.settings.lineNumbers'),
+)
+
+/**
+ * Whether the notebook outline pane is visible on wide (>1280px) layouts,
+ * where it is an inline sticky column. Toggled from the global topbar's
+ * outline button (`aria-pressed` mirrors this). On by default; the outline
+ * still self-hides when there are < 2 headings to navigate.
+ */
+export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outlineVisible').extend(
+  withLocalStorage('notebook.settings.outlineVisible'),
+)
+
+/**
+ * Whether the outline floating drawer is open on narrow (≤1280px) layouts.
+ * Separate from `outlineVisibleAtom`: the wide column is "shown by default,
+ * hideable", while the narrow drawer is "closed by default, openable". The same
+ * topbar button drives whichever one applies at the current width.
+ */
+export const outlineDrawerOpenAtom = atom<boolean>(false, 'notebook.settings.outlineDrawerOpen')
+
+/**
+ * The notebook targeted by the sidebar "Rename" action, or null when the rename
+ * dialog is closed. Decoupled from the open editor so any listed notebook can
+ * be renamed, not just the current one (new-design-v2 renames from a modal).
+ * `id === LOCAL_NOTEBOOK_ID` means the open local notebook (rename persists via
+ * setNotebookTitle); other ids are backend rows whose rename is presentational
+ * until the notebook-management epic adds a PATCH endpoint.
+ */
+export interface RenameTarget {
+  id: string
+  title: string
+}
+export const renameTargetAtom = atom<RenameTarget | null>(null, 'notebook.settings.renameTarget')

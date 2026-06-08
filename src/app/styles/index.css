@@ -10,50 +10,68 @@
 /* ------------------------------------------------------------------ */
 
 :root {
-  --background: #fbfbfa;
-  --foreground: #1f1f1e;
+  --background: oklch(0.987 0.006 83);
+  --foreground: oklch(0.265 0.012 60);
 
-  --card: #ffffff;
-  --card-foreground: #1f1f1e;
+  --card: oklch(0.998 0.003 90);
+  --card-foreground: oklch(0.265 0.012 60);
 
-  --popover: #ffffff;
-  --popover-foreground: #1f1f1e;
+  --popover: oklch(0.998 0.003 90);
+  --popover-foreground: oklch(0.265 0.012 60);
 
-  --primary: #0b6bcb;
-  --primary-foreground: #ffffff;
+  --primary: oklch(0.52 0.16 258);
+  --primary-foreground: oklch(0.99 0.01 258);
 
-  --secondary: #f1f1ee;
-  --secondary-foreground: #1f1f1e;
+  --secondary: oklch(0.962 0.008 80);
+  --secondary-foreground: oklch(0.265 0.012 60);
 
-  --muted: #f7f7f5;
-  --muted-foreground: #787774;
+  --muted: oklch(0.962 0.008 80);
+  --muted-foreground: oklch(0.52 0.012 62);
 
-  --accent: #f1f1ee;
-  --accent-foreground: #1f1f1e;
+  --accent: oklch(0.962 0.008 80);
+  --accent-foreground: oklch(0.265 0.012 60);
 
-  --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
+  --destructive: oklch(0.55 0.19 27);
+  --destructive-foreground: oklch(0.98 0.01 27);
 
-  --success: #0f7b6c;
-  --success-foreground: #ffffff;
+  --success: oklch(0.6 0.13 150);
+  --success-foreground: oklch(0.98 0.02 150);
 
-  --warning: #d9730d;
-  --warning-foreground: #ffffff;
+  --warning: oklch(0.7 0.13 70);
+  --warning-foreground: oklch(0.265 0.012 60);
 
-  --border: #e9e9e7;
-  --input: #e9e9e7;
-  --ring: #0b6bcb;
+  --border: oklch(0.908 0.011 78);
+  --input: oklch(0.908 0.011 78);
+  --ring: oklch(0.52 0.16 258);
 
-  --radius: 0.5rem;
+  --radius: 5px;
+  --radius-base: var(--radius);
+  --radius-item: calc(var(--radius) - 1px);
+  --radius-cell: var(--radius);
+  --radius-card: calc(var(--radius) + 2px);
+  --radius-modal: calc(var(--radius) + 5px);
 
-  --sidebar: #f7f7f5;
-  --sidebar-foreground: #1f1f1e;
-  --sidebar-primary: #0b6bcb;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1f1ee;
-  --sidebar-accent-foreground: #1f1f1e;
-  --sidebar-border: #e9e9e7;
-  --sidebar-ring: #0b6bcb;
+  --sidebar: oklch(0.974 0.008 82);
+  --sidebar-foreground: oklch(0.265 0.012 60);
+  --sidebar-primary: oklch(0.52 0.16 258);
+  --sidebar-primary-foreground: oklch(0.99 0.01 258);
+  --sidebar-accent: oklch(0.962 0.008 80);
+  --sidebar-accent-foreground: oklch(0.265 0.012 60);
+  --sidebar-border: oklch(0.908 0.011 78);
+  --sidebar-ring: oklch(0.52 0.16 258);
+
+  /* Layout scale (new-design-v2) — consumed by topbar/drawers (T2/T3). */
+  --editor-width: 800px;
+  --sidebar-width: 264px;
+  --outline-width: 264px;
+  --shadow-pop: 0 4px 12px rgb(15 15 15 / 0.08), 0 1px 2px rgb(15 15 15 / 0.06);
+
+  /* Syntax-highlight tokens (new-design-v2) — consumed by cell restyle (T5). */
+  --syn-key: oklch(0.52 0.16 295);
+  --syn-str: oklch(0.52 0.12 150);
+  --syn-num: oklch(0.55 0.14 40);
+  --syn-com: oklch(0.62 0.02 60);
+  --syn-fn: oklch(0.52 0.13 250);
 
   --font-sans: 'Geist Variable', system-ui, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
@@ -70,48 +88,56 @@
 }
 
 .dark {
-  --background: #191919;
-  --foreground: #e3e3e1;
+  --background: oklch(0.195 0.008 70);
+  --foreground: oklch(0.92 0.006 85);
 
-  --card: #202020;
-  --card-foreground: #e3e3e1;
+  --card: oklch(0.225 0.008 70);
+  --card-foreground: oklch(0.92 0.006 85);
 
-  --popover: #2a2a2a;
-  --popover-foreground: #e3e3e1;
+  --popover: oklch(0.225 0.008 70);
+  --popover-foreground: oklch(0.92 0.006 85);
 
-  --primary: #5294e2;
-  --primary-foreground: #0d1320;
+  --primary: oklch(0.7 0.14 258);
+  --primary-foreground: oklch(0.18 0.04 258);
 
-  --secondary: #272727;
-  --secondary-foreground: #e3e3e1;
+  --secondary: oklch(0.265 0.008 70);
+  --secondary-foreground: oklch(0.92 0.006 85);
 
-  --muted: #202020;
-  --muted-foreground: #9b9a97;
+  --muted: oklch(0.265 0.008 70);
+  --muted-foreground: oklch(0.66 0.009 75);
 
-  --accent: #2f2f2f;
-  --accent-foreground: #e3e3e1;
+  --accent: oklch(0.265 0.008 70);
+  --accent-foreground: oklch(0.92 0.006 85);
 
-  --destructive: #f87171;
-  --destructive-foreground: #1a0707;
+  --destructive: oklch(0.68 0.16 25);
+  --destructive-foreground: oklch(0.16 0.03 25);
 
-  --success: #5db58a;
-  --success-foreground: #0a1d14;
+  --success: oklch(0.74 0.14 158);
+  --success-foreground: oklch(0.16 0.03 158);
 
-  --warning: #e0a662;
-  --warning-foreground: #2a1707;
+  --warning: oklch(0.78 0.13 72);
+  --warning-foreground: oklch(0.2 0.03 72);
 
-  --border: #373737;
-  --input: #373737;
-  --ring: #5294e2;
+  --border: oklch(0.315 0.008 70);
+  --input: oklch(0.315 0.008 70);
+  --ring: oklch(0.7 0.14 258);
 
-  --sidebar: #181818;
-  --sidebar-foreground: #e3e3e1;
-  --sidebar-primary: #5294e2;
-  --sidebar-primary-foreground: #0d1320;
-  --sidebar-accent: #2a2a2a;
-  --sidebar-accent-foreground: #e3e3e1;
-  --sidebar-border: #2f2f2f;
-  --sidebar-ring: #5294e2;
+  --sidebar: oklch(0.17 0.008 70);
+  --sidebar-foreground: oklch(0.92 0.006 85);
+  --sidebar-primary: oklch(0.7 0.14 258);
+  --sidebar-primary-foreground: oklch(0.18 0.04 258);
+  --sidebar-accent: oklch(0.265 0.008 70);
+  --sidebar-accent-foreground: oklch(0.92 0.006 85);
+  --sidebar-border: oklch(0.315 0.008 70);
+  --sidebar-ring: oklch(0.7 0.14 258);
+
+  --shadow-pop: 0 6px 18px rgb(0 0 0 / 0.45), 0 1px 2px rgb(0 0 0 / 0.4);
+
+  --syn-key: oklch(0.74 0.13 300);
+  --syn-str: oklch(0.74 0.12 150);
+  --syn-num: oklch(0.76 0.12 50);
+  --syn-com: oklch(0.55 0.02 70);
+  --syn-fn: oklch(0.72 0.11 240);
 
   color-scheme: dark;
 }
@@ -178,6 +204,31 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Scrollbars (new-design-v2) — thin, token-coloured. A transparent    */
+/* 3px border + background-clip:padding-box insets the thumb so it      */
+/* reads as a slim rounded bar; the track stays invisible.              */
+/* ------------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+/* ------------------------------------------------------------------ */
 /* Legacy tokens — still consumed by the shadcn-demo / about pages.   */
 /* Do not introduce new usage. New code uses the shadcn tokens above. */
 /* ------------------------------------------------------------------ */
@@ -207,4 +258,106 @@ code {
   line-height: 1.55;
   padding: 0.125em 0.375em;
   background: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cell state machine (new-design-v2) — data-attr driven rings + the   */
+/* left ::before mode bar. The base look (border, radius, bg) is set    */
+/* with Tailwind utilities in NotebookCell; these rules add only the    */
+/* state rings + mode bar, which utilities can't express cleanly.       */
+/*                                                                      */
+/* Two distinct focus looks, by design:                                 */
+/*   command — blue ring + a heavier blue border, NO left bar;          */
+/*   edit    — green ring + the green left mode bar (::before);         */
+/*   error   — red ring + red border (data-state).                      */
+/* ------------------------------------------------------------------ */
+/* Left mode bar: sits INSIDE the border (left:0, top/bottom:0) and above the   */
+/* header/footer (z-index) so neither the ring nor the tinted border hides it. */
+/* command = blue (--primary, like the active sidebar item);                    */
+/* edit/running = green (--success, like the run buttons).                      */
+.cell::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: var(--radius-cell) 0 0 var(--radius-cell);
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 2;
+}
+.cell[data-focus='command']::before {
+  background: var(--primary);
+}
+.cell[data-focus='edit']::before {
+  background: var(--success);
+}
+.cell[data-state='running']::before {
+  background: var(--success);
+}
+.cell[data-focus='command'] {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 18%, transparent);
+  border-color: color-mix(in oklch, var(--primary) 60%, var(--border));
+}
+.cell[data-focus='edit'] {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--success) 16%, transparent);
+  border-color: color-mix(in oklch, var(--success) 50%, var(--border));
+}
+.cell[data-state='running'] {
+  border-color: color-mix(in oklch, var(--success) 50%, var(--border));
+}
+.cell[data-state='error'] {
+  border-color: color-mix(in oklch, var(--destructive) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--destructive) 14%, transparent);
+}
+.cell[data-state='halted'] {
+  border-color: color-mix(in oklch, var(--warning) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--warning) 14%, transparent);
+}
+.cell[data-state='skipped'] {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--muted-foreground) 40%, var(--border));
+}
+
+/* ------------------------------------------------------------------ */
+/* LLM agent chrome (new-design-v2) — PRESENTATIONAL ONLY. These rings  */
+/* and the streaming caret are the visual slots the LLM epic (07) will  */
+/* drive; nothing here is wired to real generation yet (TARDIS-74 T8).  */
+/* ------------------------------------------------------------------ */
+/* generating: the agent is streaming code into the cell. */
+.cell.generating {
+  border-color: color-mix(in oklch, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent);
+}
+/* proposal: the agent offers a diff/draft awaiting accept or reject. */
+.cell.proposal {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent);
+}
+/* Streaming caret shown at the end of the text the agent is typing. */
+.notebook-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: var(--primary);
+  animation: notebook-caret-blink 1s steps(2) infinite;
+}
+@keyframes notebook-caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notebook-caret {
+    animation: none;
+  }
 }

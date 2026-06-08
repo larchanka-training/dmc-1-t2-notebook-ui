@@ -4,6 +4,27 @@ import type { auth as authApi } from '@/shared/api'
 
 type Props = authApi.OtpRequestResponse
 
+// Legacy copy path for non-secure contexts. The async Clipboard API
+// (navigator.clipboard) only exists over HTTPS/localhost; dev runs on bare
+// http://notebook.com, where it is undefined. Falls back to a throwaway
+// textarea + execCommand('copy'). Returns whether the copy succeeded.
+function legacyCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 export function DevOtpBanner({ otp, expiresAt }: Props) {
   const [copied, setCopied] = useState(false)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -17,20 +38,26 @@ export function DevOtpBanner({ otp, expiresAt }: Props) {
     [],
   )
 
+  const markCopied = () => {
+    if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
+    setCopied(true)
+    resetTimerRef.current = setTimeout(() => {
+      setCopied(false)
+      resetTimerRef.current = null
+    }, 2000)
+  }
+
   const copy = () => {
-    navigator.clipboard.writeText(otp).then(
-      () => {
-        if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current)
-        setCopied(true)
-        resetTimerRef.current = setTimeout(() => {
-          setCopied(false)
-          resetTimerRef.current = null
-        }, 2000)
-      },
-      () => {
-        // Clipboard API unavailable (non-HTTPS or permission denied) — fail silently.
-      },
-    )
+    // Guard navigator.clipboard: it is undefined outside a secure context, so a
+    // bare `.writeText` throws a TypeError before any promise. Use it when
+    // available, otherwise fall back to the legacy execCommand path.
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(otp).then(markCopied, () => {
+        if (legacyCopy(otp)) markCopied()
+      })
+      return
+    }
+    if (legacyCopy(otp)) markCopied()
   }
 
   return (

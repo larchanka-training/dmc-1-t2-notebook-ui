@@ -16,23 +16,27 @@ export interface SearchMatch {
 export const searchOpenAtom = atom(false, 'notebook.search.open')
 export const searchQueryAtom = atom('', 'notebook.search.query')
 export const useRegexAtom = atom(false, 'notebook.search.useRegex')
+// Case-sensitivity toggle (the `Aa` button). Off by default → the historical
+// case-insensitive behaviour; on → the matcher drops the `i` flag.
+export const caseSensitiveAtom = atom(false, 'notebook.search.caseSensitive')
 export const activeMatchIndexAtom = atom(0, 'notebook.search.activeIndex')
 
-// Build a global matcher from the query. Plain queries are case-insensitive
-// substring search; regex mode compiles the query (invalid regex → no matches
-// rather than a thrown error, so typing a half-written pattern is harmless).
-function buildMatcher(query: string, useRegex: boolean): RegExp | null {
+// Build a global matcher from the query. Plain queries do a literal substring
+// search; regex mode compiles the query (invalid regex → no matches rather than
+// a thrown error, so typing a half-written pattern is harmless). The `i` flag
+// is dropped when case-sensitive search is on.
+function buildMatcher(query: string, useRegex: boolean, caseSensitive: boolean): RegExp | null {
   if (query.length === 0) return null
   try {
     const source = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return new RegExp(source, 'gi')
+    return new RegExp(source, caseSensitive ? 'g' : 'gi')
   } catch {
     return null
   }
 }
 
 export const searchMatchesAtom = computed<SearchMatch[]>(() => {
-  const matcher = buildMatcher(searchQueryAtom(), useRegexAtom())
+  const matcher = buildMatcher(searchQueryAtom(), useRegexAtom(), caseSensitiveAtom())
   if (!matcher) return []
   const matches: SearchMatch[] = []
   for (const cell of cellsAtom()) {

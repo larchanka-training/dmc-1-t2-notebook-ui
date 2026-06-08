@@ -9,7 +9,12 @@ import {
   saveStatusAtom,
 } from '../model/autosave'
 
-function formatTime(ms: number): string {
+// "just now" while the save is fresh (a couple of minutes), then a clock time —
+// mirrors new-design-v2's sync indicator.
+const JUST_NOW_MS = 2 * 60 * 1000
+
+function formatSavedAt(ms: number): string {
+  if (Date.now() - ms < JUST_NOW_MS) return 'just now'
   return new Date(ms).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
@@ -73,9 +78,9 @@ export const SaveIndicator = reatomComponent(() => {
 
   if (status === 'saved' && lastSavedAt !== null) {
     return (
-      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-sm text-success">
         <Check className="size-3.5" />
-        Saved · {formatTime(lastSavedAt)}
+        Saved · {formatSavedAt(lastSavedAt)}
       </span>
     )
   }

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Code2, Plus, Type } from 'lucide-react'
+import { Code2, Sparkles, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import {
@@ -17,17 +17,10 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { resolvedThemeAtom } from '@/entities/theme'
-import { Button } from '@/shared/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/shared/ui/dropdown-menu'
+import { cn } from '@/shared/lib/cn'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
-import { NotebookToolbar } from './NotebookToolbar'
-import { SaveIndicator } from './SaveIndicator'
+import { NotebookHeader } from './NotebookHeader'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
@@ -49,8 +42,10 @@ import {
   enterEdit,
   focusCell,
 } from '../model/cellMode'
-import { lineNumbersAtom } from '../model/notebookSettings'
+import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
+import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
+import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
 // Run a cell, then focus the next one in edit mode — creating a trailing code
@@ -147,57 +142,73 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
     addCell(afterId, 'markdown')
   })
 
+  // "Add cell" pill (new-design-v2 insert-strip): a rounded chip with an icon.
+  const pill =
+    'inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[11.5px] font-medium text-foreground shadow-[var(--shadow-pop)] transition-colors hover:border-primary hover:text-primary'
+
   if (variant === 'end') {
+    // Full-width dashed "Add cell" affordance at the end of the notebook.
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="outline" size="sm" className="self-center text-muted-foreground">
-              <Plus className="size-3.5" /> Add cell
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="center">
-          <DropdownMenuItem onClick={onAddCode}>
-            <Code2 className="size-4" /> Code
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onAddText}>
-            <Type className="size-4" /> Text
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onAddCode}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed shadow-none',
+          )}
+        >
+          <Code2 className="size-3.5" /> Code
+        </button>
+        <button
+          type="button"
+          onClick={onAddText}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed shadow-none',
+          )}
+        >
+          <Type className="size-3.5" /> Text
+        </button>
+      </div>
     )
   }
+  // Between-cells gutter: a hairline that lights up on hover, revealing the
+  // insert pills centred over it.
   return (
-    <div className="group/inserter relative h-2 -my-3 flex items-center justify-center">
-      <div className="absolute inset-x-0 h-px bg-transparent group-hover/inserter:bg-border transition-colors" />
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className="relative z-10 h-6 px-2 text-xs opacity-0 group-hover/inserter:opacity-100 transition-opacity"
-            >
-              <Plus className="size-3" /> Add cell
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="center">
-          <DropdownMenuItem onClick={onAddCode}>
-            <Code2 className="size-4" /> Code
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onAddText}>
-            <Type className="size-4" /> Text
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <div className="group/inserter relative -my-2 flex h-[10px] items-center justify-center">
+      <span className="absolute inset-x-0 h-px bg-primary opacity-0 transition-opacity group-hover/inserter:opacity-50" />
+      <span className="relative z-[1] flex gap-1.5 opacity-0 transition-opacity group-hover/inserter:opacity-100">
+        <button type="button" onClick={onAddCode} className={pill}>
+          <Code2 className="size-[13px]" /> Code
+        </button>
+        <button type="button" onClick={onAddText} className={pill}>
+          <Type className="size-[13px]" /> Text
+        </button>
+        {/* Ask agent (new-design-v2): drafts a cell from a prompt. Presentational
+            slot for the LLM epic (07) — clicks but does nothing yet (no `ai`
+            cell kind, no handler). Primary-tinted to read as an AI action. */}
+        <button
+          type="button"
+          className={cn(pill, 'text-primary hover:border-primary hover:text-primary')}
+        >
+          <Sparkles className="size-[13px]" /> Ask agent
+        </button>
+      </span>
     </div>
   )
 }, 'CellInserter')
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
+
+  // Whether the outline pane actually occupies space right now: only on wide
+  // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
+  // the user hasn't collapsed it, and when there are ≥ 2 headings to show. When
+  // it does NOT, the editor column reclaims the outline's width — matching the
+  // prototype's `.editor-wrap[data-outline="off"] .editor-col` widening.
+  const isNarrow = useIsMobile()
+  const outlineTakesSpace = !isNarrow && outlineVisibleAtom() && hasOutlineAtom()
 
   // Jupyter-style command-mode shortcuts (A/B/D D/M/Y/arrows/Enter).
   useCommandModeHotkeys()
@@ -233,21 +244,28 @@ export const NotebookView = reatomComponent(() => {
   }, [])
 
   return (
-    <div className="flex flex-1 min-h-0">
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          <header className="mb-8 flex items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">JS Notebook</h1>
-              <div className="mt-1 h-5">
-                <SaveIndicator />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <SearchBar />
-              <NotebookToolbar />
-            </div>
-          </header>
+    // No own scroll port here: the shell's content area (AppLayout) scrolls, so
+    // <main> and the sticky outline share one scroll context. The row must size
+    // to its content height (NOT flex-1, which would cap it at one viewport and
+    // make the sticky outline detach halfway down) so the outline stays pinned
+    // for the whole scroll. min-h-full keeps a short notebook filling the area.
+    <div className="flex min-h-full">
+      <main className="flex-1">
+        <div
+          className="mx-auto w-full px-6 py-8"
+          style={{
+            // editor-width when the outline is visible; reclaim its width + gap
+            // when it is hidden, so cells grow to fill the freed space.
+            maxWidth: outlineTakesSpace
+              ? 'var(--editor-width)'
+              : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
+          }}
+        >
+          {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
+              live in the global AppTopbar. SearchBar stays mounted here
+              (toggled by the topbar button / ⌘F). */}
+          <NotebookHeader />
+          <SearchBar />
 
           {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
@@ -259,9 +277,9 @@ export const NotebookView = reatomComponent(() => {
             autoScroll={{ threshold: { x: 0, y: 0.15 } }}
           >
             <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3">
                 {cells.map((cell, idx) => (
-                  <div key={cell.id} className="flex flex-col gap-6">
+                  <div key={cell.id} className="flex flex-col gap-3">
                     <SortableCell id={cell.id}>
                       <NotebookRow
                         cell={cell}
