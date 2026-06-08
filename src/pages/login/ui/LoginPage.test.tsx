@@ -68,7 +68,9 @@ describe('LoginPage', () => {
     })
     render(<LoginPage />)
     expect(replaceSpy).not.toHaveBeenCalled()
-    // LoginForm renders "Sign in to your account" on step 1
-    expect(screen.getByText('Sign in to your account')).toBeInTheDocument()
+    // LoginForm renders the passwordless lede on step 1
+    expect(
+      screen.getByText("Passwordless. Enter your email and we'll send a one-time code."),
+    ).toBeInTheDocument()
   })
 })

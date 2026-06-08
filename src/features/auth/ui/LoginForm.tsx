@@ -1,5 +1,5 @@
 import { useEffect, type FormEvent } from 'react'
-import { BookText, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
@@ -16,6 +16,7 @@ import {
   tickCountdownAction,
 } from '../model/loginForm'
 import { DevOtpBanner } from './DevOtpBanner'
+import { OtpInput } from './OtpInput'
 
 export const LoginForm = reatomComponent(() => {
   const step = loginStepAtom()
@@ -99,19 +100,21 @@ export const LoginForm = reatomComponent(() => {
   }
 
   return (
-    <div className="w-full max-w-sm space-y-6">
-      <div className="flex flex-col items-center gap-2 text-center">
-        <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10">
-          <BookText className="size-6 text-primary" />
+    <div className="w-full max-w-[400px] space-y-6">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="grid size-11 place-items-center rounded-xl bg-primary font-mono text-[22px] font-semibold text-primary-foreground shadow-[var(--shadow-pop)]">
+          JS
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">JS Notebook</h1>
-        <p className="text-sm text-muted-foreground">
-          {step === 1 ? 'Sign in to your account' : `Code sent to ${email}`}
+        <h1 className="text-[26px] font-semibold tracking-tight">Sign in to JS Notebook</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {step === 1
+            ? "Passwordless. Enter your email and we'll send a one-time code."
+            : 'Enter the one-time code we just sent.'}
         </p>
       </div>
 
       {step === 1 ? (
-        <form onSubmit={onSendCode} className="border rounded-xl p-6 space-y-4 bg-card shadow-sm">
+        <form onSubmit={onSendCode} className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="email">
               Email
@@ -125,6 +128,7 @@ export const LoginForm = reatomComponent(() => {
               value={email}
               onChange={wrap((e) => loginEmailAtom.set(e.target.value))}
               disabled={isSending}
+              className="h-[38px]"
             />
           </div>
 
@@ -134,7 +138,11 @@ export const LoginForm = reatomComponent(() => {
             </p>
           ) : null}
 
-          <Button className="w-full" type="submit" disabled={isSending || !email}>
+          <Button
+            className="h-11 w-full font-semibold"
+            type="submit"
+            disabled={isSending || !email}
+          >
             {isSending ? <Loader2 className="size-3.5 animate-spin" /> : null}
             {isSending ? 'Sending…' : 'Send code'}
           </Button>
@@ -148,41 +156,37 @@ export const LoginForm = reatomComponent(() => {
             <DevOtpBanner otp={devData.otp} expiresAt={devData.expiresAt} />
           ) : null}
 
-          <form onSubmit={onVerify} className="border rounded-xl p-6 space-y-4 bg-card shadow-sm">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="otp">
-                One-time code
-              </label>
-              <Input
-                id="otp"
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                pattern="\d{6}"
-                autoComplete="one-time-code"
-                placeholder="000000"
-                className="tracking-[0.5em] text-center font-mono text-lg"
+          <form onSubmit={onVerify} className="space-y-4">
+            <div className="space-y-2.5">
+              <span className="block text-center text-sm font-medium">Enter the 6-digit code</span>
+              <OtpInput
                 value={otp}
-                onChange={wrap((e) => loginOtpAtom.set(e.target.value.replace(/\D/g, '')))}
+                onChange={wrap((next) => loginOtpAtom.set(next))}
                 disabled={isVerifying}
+                invalid={Boolean(verifyError) && verifyError !== OTP_EXPIRED_CODE}
                 autoFocus
               />
             </div>
 
             {verifyError && verifyError !== OTP_EXPIRED_CODE ? (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive text-center">
                 {verifyError}
               </p>
             ) : null}
 
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1" disabled={isVerifying || otp.length !== 6}>
+              <Button
+                type="submit"
+                className="h-11 flex-1 font-semibold"
+                disabled={isVerifying || otp.length !== 6}
+              >
                 {isVerifying ? <Loader2 className="size-3.5 animate-spin" /> : null}
                 {isVerifying ? 'Verifying…' : 'Verify'}
               </Button>
               <Button
                 type="button"
                 variant="outline"
+                className="h-11 font-semibold"
                 disabled={isSending || countdown > 0}
                 onClick={onResend}
               >
@@ -200,6 +204,10 @@ export const LoginForm = reatomComponent(() => {
           </button>
         </div>
       )}
+
+      <p className="text-center text-xs text-muted-foreground">
+        By continuing you agree to the Terms &amp; Privacy.
+      </p>
     </div>
   )
 }, 'LoginForm')

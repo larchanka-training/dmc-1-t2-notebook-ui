@@ -2,6 +2,7 @@ import { connectLogger, log, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
 import { LOGIN_PATH } from '@/shared/lib/paths'
+import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
 import { accessTokenAtom, clearSession, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
@@ -33,29 +34,14 @@ globalThis.LOG = log
 // eagerly initialise atoms from localStorage in action bodies — withInit fires
 // as a withMiddleware hook, which only runs during a reactive computation, not
 // during a plain action-body read at startup. We therefore seed atoms directly
-// from localStorage before any action runs.
-function readPersistRecord<T>(key: string): T | null {
-  if (typeof localStorage === 'undefined') return null
-  try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return null
-    const rec = JSON.parse(raw) as { data?: T | null; to?: number }
-    // Respect the Reatom TTL field so expired entries are treated as absent.
-    if (typeof rec.to === 'number' && rec.to < Date.now()) {
-      localStorage.removeItem(key)
-      return null
-    }
-    return rec.data ?? null
-  } catch {
-    return null
-  }
-}
+// from localStorage (via the shared persist helpers) before any action runs.
+const REFRESH_TOKEN_KEY = 'session.refreshToken'
 
 type SessionUser = NonNullable<ReturnType<typeof userAtom>>
 
 rootFrame.run(() => {
   const token = readPersistRecord<string>('session.accessToken')
-  const refresh = readPersistRecord<string>('session.refreshToken')
+  const refresh = readPersistRecord<string>(REFRESH_TOKEN_KEY)
   const user = readPersistRecord<SessionUser>('session.user')
   if (token !== null) accessTokenAtom.set(token)
   if (refresh !== null) refreshTokenAtom.set(refresh)
@@ -73,8 +59,17 @@ setAuthTokenGetter(() => accessTokenAtom())
 // Wire the refresh token handlers so the 401 middleware can silently rotate
 // tokens and retry failed requests without involving UI code.
 setRefreshHandlers({
-  getRefreshToken: () => refreshTokenAtom(),
+  // Read the opaque refresh token straight from localStorage rather than via
+  // refreshTokenAtom(). The 401 interceptor calls this from a detached async
+  // continuation after `await fetch`, where the Reatom frame is off the stack
+  // and a cold-atom read returns its init value (null) — so the live token in
+  // storage would be missed and the user spuriously logged out. The token is
+  // opaque (no reactivity needed), so the atom is not the source of truth here.
+  // See .agents/issues/TARDIS-74/login-flow-issue.md.
+  getRefreshToken: () => readPersistRecord<string>(REFRESH_TOKEN_KEY),
   onTokensRefreshed: (accessToken, refreshToken) => {
+    // Persist + update atoms in a guaranteed Reatom frame so the rotated
+    // refresh token is in localStorage before the retried request reads it.
     rootFrame.run(() => {
       accessTokenAtom.set(accessToken)
       refreshTokenAtom.set(refreshToken)
@@ -132,15 +127,6 @@ rootFrame.run(async () => {
 
 // withLocalStorage(subscribe:false) does not register storage event listeners,
 // so we sync atoms manually here for cross-tab consistency.
-function parsePersistRecord<T>(raw: string | null): T | null {
-  if (!raw) return null
-  try {
-    return (JSON.parse(raw) as { data?: T | null }).data ?? null
-  } catch {
-    return null
-  }
-}
-
 window.addEventListener('storage', (e: StorageEvent) => {
   if (e.key === 'session.accessToken') {
     const newToken = parsePersistRecord<string>(e.newValue)
