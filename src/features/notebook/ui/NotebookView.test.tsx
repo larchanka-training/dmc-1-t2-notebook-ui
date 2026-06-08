@@ -22,10 +22,11 @@ function getCodeEditors() {
 }
 
 async function addCodeCell(user: UserEvent) {
-  const triggers = screen.getAllByRole('button', { name: /add cell/i })
-  await user.click(triggers[triggers.length - 1])
-  const codeItem = await screen.findByRole('menuitem', { name: /code/i })
-  await user.click(codeItem)
+  // The inserter renders direct "Code" / "Text" pills (no overflow menu). The
+  // end-of-notebook strip is always present; click its "Code" pill (the last
+  // one, since between-cell gutters also expose a "Code" pill).
+  const codeButtons = screen.getAllByRole('button', { name: /^code$/i })
+  await user.click(codeButtons[codeButtons.length - 1])
 }
 
 describe('NotebookView (RTL integration)', () => {

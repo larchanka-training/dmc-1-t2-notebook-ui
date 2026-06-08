@@ -17,10 +17,12 @@ const baseTheme = EditorView.theme({
     fontFamily: 'var(--font-mono)',
     padding: '1rem',
   },
+  // Line-number gutter (shown only when line numbers are on): a hairline
+  // divider on the right separates it from the editor, matching new-design-v2.
   '.cm-gutters': {
     backgroundColor: 'transparent',
-    color: 'var(--muted-foreground)',
-    border: 'none',
+    color: 'color-mix(in oklch, var(--muted-foreground) 70%, transparent)',
+    borderRight: '1px solid color-mix(in oklch, var(--border) 70%, transparent)',
   },
   '.cm-activeLine': { backgroundColor: 'transparent' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },

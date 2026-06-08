@@ -234,3 +234,63 @@ code {
   padding: 0.125em 0.375em;
   background: var(--muted);
 }
+
+/* ------------------------------------------------------------------ */
+/* Cell state machine (new-design-v2) — data-attr driven rings + the   */
+/* left ::before mode bar. The base look (border, radius, bg) is set    */
+/* with Tailwind utilities in NotebookCell; these rules add only the    */
+/* state rings + mode bar, which utilities can't express cleanly.       */
+/*                                                                      */
+/* Two distinct focus looks, by design:                                 */
+/*   command — blue ring + a heavier blue border, NO left bar;          */
+/*   edit    — green ring + the green left mode bar (::before);         */
+/*   error   — red ring + red border (data-state).                      */
+/* ------------------------------------------------------------------ */
+/* Left mode bar: sits INSIDE the border (left:0, top/bottom:0) and above the   */
+/* header/footer (z-index) so neither the ring nor the tinted border hides it. */
+/* command = blue (--primary, like the active sidebar item);                    */
+/* edit/running = green (--success, like the run buttons).                      */
+.cell::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: var(--radius-cell) 0 0 var(--radius-cell);
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 2;
+}
+.cell[data-focus='command']::before {
+  background: var(--primary);
+}
+.cell[data-focus='edit']::before {
+  background: var(--success);
+}
+.cell[data-state='running']::before {
+  background: var(--success);
+}
+.cell[data-focus='command'] {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 18%, transparent);
+  border-color: color-mix(in oklch, var(--primary) 60%, var(--border));
+}
+.cell[data-focus='edit'] {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--success) 16%, transparent);
+  border-color: color-mix(in oklch, var(--success) 50%, var(--border));
+}
+.cell[data-state='running'] {
+  border-color: color-mix(in oklch, var(--success) 50%, var(--border));
+}
+.cell[data-state='error'] {
+  border-color: color-mix(in oklch, var(--destructive) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--destructive) 14%, transparent);
+}
+.cell[data-state='halted'] {
+  border-color: color-mix(in oklch, var(--warning) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--warning) 14%, transparent);
+}
+.cell[data-state='skipped'] {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--muted-foreground) 40%, var(--border));
+}

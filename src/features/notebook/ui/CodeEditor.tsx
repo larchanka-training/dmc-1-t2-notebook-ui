@@ -282,5 +282,5 @@ export function CodeEditor({
     if (view && !view.hasFocus) view.focus()
   }, [autoFocus])
 
-  return <div ref={hostRef} className="cm-host overflow-hidden rounded-b-xl" />
+  return <div ref={hostRef} className="cm-host overflow-hidden" />
 }

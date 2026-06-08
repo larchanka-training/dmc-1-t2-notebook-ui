@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Code2, Plus, Type } from 'lucide-react'
+import { Code2, Type } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import {
@@ -17,13 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { resolvedThemeAtom } from '@/entities/theme'
-import { Button } from '@/shared/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/shared/ui/dropdown-menu'
+import { cn } from '@/shared/lib/cn'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
 import { NotebookHeader } from './NotebookHeader'
@@ -146,51 +140,50 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
     addCell(afterId, 'markdown')
   })
 
+  // "Add cell" pill (new-design-v2 insert-strip): a rounded chip with an icon.
+  const pill =
+    'inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[11.5px] font-medium text-foreground shadow-[var(--shadow-pop)] transition-colors hover:border-primary hover:text-primary'
+
   if (variant === 'end') {
+    // Full-width dashed "Add cell" affordance at the end of the notebook.
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="outline" size="sm" className="self-center text-muted-foreground">
-              <Plus className="size-3.5" /> Add cell
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="center">
-          <DropdownMenuItem onClick={onAddCode}>
-            <Code2 className="size-4" /> Code
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onAddText}>
-            <Type className="size-4" /> Text
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onAddCode}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed shadow-none',
+          )}
+        >
+          <Code2 className="size-3.5" /> Code
+        </button>
+        <button
+          type="button"
+          onClick={onAddText}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed shadow-none',
+          )}
+        >
+          <Type className="size-3.5" /> Text
+        </button>
+      </div>
     )
   }
+  // Between-cells gutter: a hairline that lights up on hover, revealing the
+  // insert pills centred over it.
   return (
-    <div className="group/inserter relative h-2 -my-3 flex items-center justify-center">
-      <div className="absolute inset-x-0 h-px bg-transparent group-hover/inserter:bg-border transition-colors" />
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className="relative z-10 h-6 px-2 text-xs opacity-0 group-hover/inserter:opacity-100 transition-opacity"
-            >
-              <Plus className="size-3" /> Add cell
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="center">
-          <DropdownMenuItem onClick={onAddCode}>
-            <Code2 className="size-4" /> Code
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onAddText}>
-            <Type className="size-4" /> Text
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <div className="group/inserter relative -my-2 flex h-[10px] items-center justify-center">
+      <span className="absolute inset-x-0 h-px bg-primary opacity-0 transition-opacity group-hover/inserter:opacity-50" />
+      <span className="relative z-[1] flex gap-1.5 opacity-0 transition-opacity group-hover/inserter:opacity-100">
+        <button type="button" onClick={onAddCode} className={pill}>
+          <Code2 className="size-[13px]" /> Code
+        </button>
+        <button type="button" onClick={onAddText} className={pill}>
+          <Type className="size-[13px]" /> Text
+        </button>
+      </span>
     </div>
   )
 }, 'CellInserter')
@@ -256,9 +249,9 @@ export const NotebookView = reatomComponent(() => {
             autoScroll={{ threshold: { x: 0, y: 0.15 } }}
           >
             <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3">
                 {cells.map((cell, idx) => (
-                  <div key={cell.id} className="flex flex-col gap-6">
+                  <div key={cell.id} className="flex flex-col gap-3">
                     <SortableCell id={cell.id}>
                       <NotebookRow
                         cell={cell}
