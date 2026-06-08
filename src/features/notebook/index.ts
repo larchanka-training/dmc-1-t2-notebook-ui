@@ -70,6 +70,7 @@ export {
   searchOpenAtom,
   searchQueryAtom,
   useRegexAtom,
+  caseSensitiveAtom,
   searchMatchesAtom,
   matchCountLabelAtom,
   activeMatchIndexAtom,

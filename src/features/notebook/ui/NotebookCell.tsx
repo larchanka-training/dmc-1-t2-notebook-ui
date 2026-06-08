@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { MarkdownSearchHighlight } from './MarkdownSearchHighlight'
 
 // Toolbar icon button (new-design-v2 REC.toolBtn): square, muted, hover-filled.
 const TOOL_BTN =
@@ -341,62 +342,68 @@ export function NotebookCell({
             onExitToCommand={onExitToCommand}
           />
         ) : (
-          <textarea
-            ref={textareaRef}
-            value={code}
-            readOnly={readOnly}
-            spellCheck
-            rows={1}
-            placeholder="Markdown — supports `# headings` for the outline"
-            // Mirror the code editor: focusing the textarea puts the cell in
-            // edit mode, so the green left mode-bar shows for markdown too
-            // (not just code). A plain mouse click that lands here would not
-            // otherwise flip the mode.
-            onFocus={onFocus}
-            onChange={(e) => {
-              onCodeChange?.(e.target.value)
-              autoResize(e.target)
-            }}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
-                e.preventDefault()
-                onViewModeChange?.('preview')
-                return
-              }
-              // Enter combos mirror the code editor's run keymap, but a
-              // markdown cell is RENDERED, not executed: we switch it to
-              // preview instead of calling the kernel (runAndAdvance /
-              // runAndInsertBelow skip the run for markdown). Blur first so
-              // the destination cell — or the document-level command-mode
-              // shortcuts — own the focus, not this textarea. A plain Enter
-              // (no modifier) falls through and inserts a newline as usual.
-              // Mod+Shift+Enter is the global "Run All" hotkey — let it bubble
-              // to the document handler instead of running just this cell.
-              if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
-                return
-              }
-              if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                e.currentTarget.blur()
-                onViewModeChange?.('preview')
-                if (e.shiftKey) onRunAndAdvance?.()
-                else if (e.altKey) onRunAndInsertBelow?.()
-                // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
-                else onExitToCommand?.()
-                return
-              }
-              // Esc leaves edit mode for command mode. Blur FIRST (like the
-              // CodeEditor keymap): otherwise focus stays in the textarea and
-              // the document-level command-mode shortcuts get typed as text.
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                e.currentTarget.blur()
-                onExitToCommand?.()
-              }
-            }}
-            onInput={(e) => autoResize(e.currentTarget)}
-            className="w-full resize-none bg-card text-foreground outline-none p-4 min-h-[60px] transition-colors focus:bg-muted/30 font-sans text-base leading-relaxed"
-          />
+          <div className="relative">
+            {/* Search-match backdrop sits behind the textarea (which is
+                transparent-bg) so matches in markdown source are highlighted
+                too, not only in code cells. */}
+            {cellId ? <MarkdownSearchHighlight cellId={cellId} source={code} /> : null}
+            <textarea
+              ref={textareaRef}
+              value={code}
+              readOnly={readOnly}
+              spellCheck
+              rows={1}
+              placeholder="Markdown — supports `# headings` for the outline"
+              // Mirror the code editor: focusing the textarea puts the cell in
+              // edit mode, so the green left mode-bar shows for markdown too
+              // (not just code). A plain mouse click that lands here would not
+              // otherwise flip the mode.
+              onFocus={onFocus}
+              onChange={(e) => {
+                onCodeChange?.(e.target.value)
+                autoResize(e.target)
+              }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+                  e.preventDefault()
+                  onViewModeChange?.('preview')
+                  return
+                }
+                // Enter combos mirror the code editor's run keymap, but a
+                // markdown cell is RENDERED, not executed: we switch it to
+                // preview instead of calling the kernel (runAndAdvance /
+                // runAndInsertBelow skip the run for markdown). Blur first so
+                // the destination cell — or the document-level command-mode
+                // shortcuts — own the focus, not this textarea. A plain Enter
+                // (no modifier) falls through and inserts a newline as usual.
+                // Mod+Shift+Enter is the global "Run All" hotkey — let it bubble
+                // to the document handler instead of running just this cell.
+                if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+                  return
+                }
+                if (e.key === 'Enter' && (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                  onViewModeChange?.('preview')
+                  if (e.shiftKey) onRunAndAdvance?.()
+                  else if (e.altKey) onRunAndInsertBelow?.()
+                  // Cmd/Ctrl+Enter: render and stay on this cell (command mode).
+                  else onExitToCommand?.()
+                  return
+                }
+                // Esc leaves edit mode for command mode. Blur FIRST (like the
+                // CodeEditor keymap): otherwise focus stays in the textarea and
+                // the document-level command-mode shortcuts get typed as text.
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                  onExitToCommand?.()
+                }
+              }}
+              onInput={(e) => autoResize(e.currentTarget)}
+              className="relative w-full resize-none bg-transparent text-foreground outline-none p-4 min-h-[60px] transition-colors focus:bg-muted/30 font-sans text-base leading-relaxed"
+            />
+          </div>
         )}
 
         {/* Execution result: a cell FOOTER (not a detached card) — split from

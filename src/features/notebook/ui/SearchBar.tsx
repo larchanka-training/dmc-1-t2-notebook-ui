@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { ChevronDown, ChevronUp, Regex, Search, X } from 'lucide-react'
+import { CaseSensitive, ChevronDown, ChevronUp, Regex, Search, X } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { cn } from '@/shared/lib/cn'
 import { useHotkeys } from '@/shared/lib/hotkeys'
 import {
   activeMatchAtom,
+  caseSensitiveAtom,
   closeSearch,
   matchCountLabelAtom,
   nextMatch,
@@ -22,6 +23,10 @@ import {
 // Takes the id as an argument — it must NOT read Reatom atoms, because it runs
 // from a useEffect, which is outside the Reatom stack; reading an atom there
 // throws `missing async stack` under clearStack().
+// Active look for the Aa / regex toggles (new-design-v2 search opt): a soft
+// primary tint + primary text, NOT the near-invisible shadcn `accent`.
+const TOGGLE_ACTIVE = 'bg-[color-mix(in_oklch,var(--primary)_16%,transparent)] text-primary'
+
 function scrollCellIntoView(cellId: string): void {
   const el = document.querySelector(`[data-cell-id="${cellId}"]`)
   // scrollIntoView is absent in JSDOM and may be missing on non-element nodes.
@@ -95,9 +100,19 @@ export const SearchBar = reatomComponent(() => {
       <Button
         size="icon"
         variant="ghost"
+        aria-label="Match case"
+        aria-pressed={caseSensitiveAtom()}
+        className={cn('size-6', caseSensitiveAtom() && TOGGLE_ACTIVE)}
+        onClick={wrap(() => caseSensitiveAtom.set((v) => !v))}
+      >
+        <CaseSensitive className="size-4" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
         aria-label="Toggle regex"
         aria-pressed={useRegexAtom()}
-        className={cn('size-6', useRegexAtom() && 'bg-accent text-accent-foreground')}
+        className={cn('size-6', useRegexAtom() && TOGGLE_ACTIVE)}
         onClick={wrap(() => useRegexAtom.set((v) => !v))}
       >
         <Regex className="size-3.5" />
