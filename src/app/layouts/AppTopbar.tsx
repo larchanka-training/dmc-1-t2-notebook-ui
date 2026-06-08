@@ -96,7 +96,7 @@ export const AppTopbar = reatomComponent(() => {
   useHotkeys({ 'Mod-\\': () => toggleSidebar() })
 
   return (
-    <header className="flex h-[60px] shrink-0 items-center gap-2.5 border-b bg-background/80 px-4 backdrop-blur-sm">
+    <header className="flex h-[60px] shrink-0 items-center gap-2.5 border-b border-border bg-background/80 px-4 backdrop-blur-sm">
       <Tooltip>
         <TooltipTrigger
           render={

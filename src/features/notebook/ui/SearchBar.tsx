@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { ChevronDown, ChevronUp, Regex, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Regex, Search, X } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { cn } from '@/shared/lib/cn'
@@ -35,6 +35,9 @@ function scrollCellIntoView(cellId: string): void {
  */
 export const SearchBar = reatomComponent(() => {
   const open = searchOpenAtom()
+  // Overlay stays mounted so it can fade/slide out on close; we focus the
+  // input via the container ref (the Input primitive doesn't forward a ref).
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   // Cmd/Ctrl+F opens search (and steals the key from the browser find).
   useHotkeys({ 'Mod-f': wrap(() => searchOpenAtom.set(true)) })
@@ -48,18 +51,31 @@ export const SearchBar = reatomComponent(() => {
     if (activeCellId) scrollCellIntoView(activeCellId)
   }, [activeCellId])
 
-  if (!open) return null
+  // Focus the field when the overlay opens (replaces autoFocus, which only
+  // fires on mount and the overlay no longer unmounts).
+  useEffect(() => {
+    if (open) overlayRef.current?.querySelector('input')?.focus()
+  }, [open])
 
   const onNext = wrap(() => nextMatch())
   const onPrev = wrap(() => prevMatch())
 
   return (
-    <div className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 shadow-sm">
+    <div
+      ref={overlayRef}
+      role="search"
+      aria-hidden={!open}
+      className={cn(
+        'fixed left-1/2 top-3 z-50 flex w-[min(520px,80vw)] -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-border bg-card py-1.5 pl-3 pr-2 shadow-[var(--shadow-pop)] transition-[opacity,transform] duration-150 ease-out',
+        open ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-2 opacity-0',
+      )}
+    >
+      <Search className="size-4 shrink-0 text-muted-foreground" />
       <Input
-        autoFocus
+        tabIndex={open ? undefined : -1}
         value={searchQueryAtom()}
-        placeholder="Search notebook…"
-        className="h-7 w-48 border-0 bg-transparent px-1 text-sm focus-visible:ring-0"
+        placeholder="Find in notebook…"
+        className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
         onChange={wrap((e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value))}
         onKeyDown={wrap((e: React.KeyboardEvent) => {
           if (e.key === 'Enter') {
