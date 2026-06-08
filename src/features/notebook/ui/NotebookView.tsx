@@ -231,8 +231,13 @@ export const NotebookView = reatomComponent(() => {
   }, [])
 
   return (
-    <div className="flex flex-1 min-h-0">
-      <main className="flex-1 overflow-auto">
+    // No own scroll port here: the shell's content area (AppLayout) scrolls, so
+    // <main> and the sticky outline share one scroll context. The row must size
+    // to its content height (NOT flex-1, which would cap it at one viewport and
+    // make the sticky outline detach halfway down) so the outline stays pinned
+    // for the whole scroll. min-h-full keeps a short notebook filling the area.
+    <div className="flex min-h-full">
+      <main className="flex-1">
         <div className="mx-auto w-full max-w-3xl px-6 py-8">
           {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
               now live in the global AppTopbar. The breadcrumb + editable

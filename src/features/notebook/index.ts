@@ -57,6 +57,7 @@ export {
   timeoutMsAtom,
   lineNumbersAtom,
   outlineVisibleAtom,
+  outlineDrawerOpenAtom,
 } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'

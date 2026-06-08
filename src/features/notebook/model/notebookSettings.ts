@@ -26,8 +26,17 @@ export const timeoutMsAtom = atom<number>(DEFAULT_TIMEOUT_MS, 'notebook.settings
 export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbers')
 
 /**
- * Whether the notebook outline pane is visible. Toggled from the global
- * topbar's outline button (`aria-pressed` mirrors this). On by default; the
- * outline still self-hides when there are < 2 headings to navigate.
+ * Whether the notebook outline pane is visible on wide (>1280px) layouts,
+ * where it is an inline sticky column. Toggled from the global topbar's
+ * outline button (`aria-pressed` mirrors this). On by default; the outline
+ * still self-hides when there are < 2 headings to navigate.
  */
 export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outlineVisible')
+
+/**
+ * Whether the outline floating drawer is open on narrow (≤1280px) layouts.
+ * Separate from `outlineVisibleAtom`: the wide column is "shown by default,
+ * hideable", while the narrow drawer is "closed by default, openable". The same
+ * topbar button drives whichever one applies at the current width.
+ */
+export const outlineDrawerOpenAtom = atom<boolean>(false, 'notebook.settings.outlineDrawerOpen')

@@ -5,6 +5,7 @@ import {
   NotebookToolbar,
   SaveIndicator,
   outlineVisibleAtom,
+  outlineDrawerOpenAtom,
   runAll,
   searchOpenAtom,
 } from '@/features/notebook'
@@ -12,6 +13,7 @@ import { Button } from '@/shared/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { useSidebar } from '@/shared/ui/sidebar'
 import { useHotkeys } from '@/shared/lib/hotkeys'
+import { useIsMobile } from '@/shared/lib/use-mobile'
 import { cn } from '@/shared/lib/cn'
 
 // The notebook lives at the app base path (notebookRoute path = '' under the
@@ -25,7 +27,17 @@ const HOME_PATH = import.meta.env.BASE_URL
  * hotkey is likewise scoped to where a notebook exists.
  */
 const NotebookTopbarControls = reatomComponent(() => {
+  // The outline toggle drives different state per layout: the inline column's
+  // visibility on wide screens, the floating drawer's open state on narrow
+  // ones (≤1280px). `aria-pressed` reflects whichever applies.
+  const isNarrow = useIsMobile()
   const outlineVisible = outlineVisibleAtom()
+  const outlineDrawerOpen = outlineDrawerOpenAtom()
+  const outlineActive = isNarrow ? outlineDrawerOpen : outlineVisible
+  const toggleOutline = wrap(() => {
+    if (isNarrow) outlineDrawerOpenAtom.set((v) => !v)
+    else outlineVisibleAtom.set((v) => !v)
+  })
 
   // Run All from anywhere in the notebook. As a Mod- combo it is intentionally
   // NOT blocked while typing in a cell (see hotkeys.ts `blockedByEditor`); the
@@ -62,12 +74,12 @@ const NotebookTopbarControls = reatomComponent(() => {
               size="icon"
               variant="ghost"
               aria-label="Toggle outline"
-              aria-pressed={outlineVisible}
+              aria-pressed={outlineActive}
               className={cn(
                 'size-9 text-muted-foreground',
-                outlineVisible && 'bg-primary/10 text-primary',
+                outlineActive && 'bg-primary/10 text-primary',
               )}
-              onClick={wrap(() => outlineVisibleAtom.set((v) => !v))}
+              onClick={toggleOutline}
             >
               <Hash className="size-[18px]" />
             </Button>
