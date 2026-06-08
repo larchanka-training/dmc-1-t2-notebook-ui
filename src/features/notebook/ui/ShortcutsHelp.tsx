@@ -74,7 +74,7 @@ export const ShortcutsHelp = reatomComponent(() => {
         <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title} className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-warning">
                 {group.title}
               </h3>
               <ul className="space-y-1.5">
