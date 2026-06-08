@@ -1,0 +1,195 @@
+openapi: 3.1.0
+info:
+  title: LLM API
+  version: 1.0.0
+  description: Cloud code-generation API backed by the authenticated backend proxy.
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local dev
+
+security:
+  - bearerAuth: []
+
+paths:
+  /llm/generate:
+    post:
+      operationId: generateCode
+      summary: Generate code via the Cloud LLM agent
+      tags: [llm]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: OK — validated code generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 8000
+        mode:
+          type: string
+          enum: [generate, edit]
+          default: generate
+        language:
+          type: string
+          enum: [javascript, typescript]
+          default: javascript
+        notebookTitle:
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+        context:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/LlmContextCell'
+          default: []
+        baseCode:
+          type:
+            - string
+            - 'null'
+          maxLength: 8000
+
+    LlmContextCell:
+      type: object
+      required: [kind, source]
+      properties:
+        kind:
+          type: string
+          enum: [code, markdown, text]
+        source:
+          type: string
+          maxLength: 8000
+
+    GenerateResponse:
+      type: object
+      required: [content, model, requestId]
+      properties:
+        resultKind:
+          type: string
+          enum: [code]
+          default: code
+        content:
+          type: string
+        model:
+          type: string
+        tier:
+          type: string
+          enum: [backend]
+          default: backend
+        tokens:
+          $ref: '#/components/schemas/TokenUsage'
+        requestId:
+          type: string
+          format: uuid
+
+    TokenUsage:
+      type: object
+      required: [prompt, completion]
+      properties:
+        prompt:
+          type: integer
+          default: 0
+        completion:
+          type: integer
+          default: 0
+
+    ApiError:
+      type: object
+      required: [code, message, fields]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    ApiErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiError'
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid access token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ValidationError:
+      description: Request validation failed or prompt/code rejected
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    RateLimited:
+      description: Per-user LLM rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until the user can retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    InternalServerError:
+      description: Internal LLM provider configuration error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    BadGateway:
+      description: Bedrock provider failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ServiceUnavailable:
+      description: Bedrock provider is not configured or unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'

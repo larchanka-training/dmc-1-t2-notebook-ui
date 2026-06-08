@@ -1,5 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch'
 import type { paths as AuthPaths } from './generated/openapi-ts/auth'
+import type { paths as LlmPaths } from './generated/openapi-ts/llm'
 import type { paths as NotebookPaths } from './generated/openapi-ts/notebook'
 
 const rawBaseUrl = import.meta.env['VITE_API_BASE_URL'] ?? '/api'
@@ -152,3 +153,8 @@ export const notebookClient = createClient<NotebookPaths>({ baseUrl, fetch: late
 notebookClient.use(authMiddleware)
 notebookClient.use(bodyBufferMiddleware)
 notebookClient.use(refreshMiddleware)
+
+export const llmClient = createClient<LlmPaths>({ baseUrl, fetch: lateBoundFetch })
+llmClient.use(authMiddleware)
+llmClient.use(bodyBufferMiddleware)
+llmClient.use(refreshMiddleware)
