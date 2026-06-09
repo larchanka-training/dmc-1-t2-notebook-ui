@@ -41,7 +41,6 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
-import { ScrollArea } from '@/shared/ui/scroll-area'
 import {
   Sidebar,
   SidebarContent,
@@ -283,8 +282,8 @@ const NotebooksGroup = reatomComponent(() => {
   const currentMatchesFilter = !filterText || currentTitle.toLowerCase().includes(filterText)
 
   return (
-    <SidebarGroup>
-      <div className="flex items-center justify-between gap-1 pr-1">
+    <SidebarGroup className="min-h-0 flex-1">
+      <div className="flex shrink-0 items-center justify-between gap-1 pr-1">
         <SidebarGroupLabel className={GROUP_LABEL}>Notebooks</SidebarGroupLabel>
         <Button
           size="icon"
@@ -296,8 +295,8 @@ const NotebooksGroup = reatomComponent(() => {
           <Plus className="size-4" />
         </Button>
       </div>
-      <SidebarGroupContent className="space-y-2">
-        <div className="relative px-1">
+      <SidebarGroupContent className="flex min-h-0 flex-1 flex-col gap-2">
+        <div className="relative shrink-0 px-1">
           <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Filter notebooks…"
@@ -307,7 +306,7 @@ const NotebooksGroup = reatomComponent(() => {
           />
         </div>
 
-        <ScrollArea className="max-h-72">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <SidebarMenu>
             {currentMatchesFilter ? (
               <SidebarMenuItem className="group/nb">
@@ -342,7 +341,7 @@ const NotebooksGroup = reatomComponent(() => {
               <li className="px-2 text-xs text-muted-foreground">No matches.</li>
             ) : null}
           </SidebarMenu>
-        </ScrollArea>
+        </div>
 
         {createError ? (
           <p role="alert" className="px-2 text-xs text-destructive">
@@ -368,7 +367,7 @@ export function AppSidebar() {
           </span>
         </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="overflow-x-hidden">
         <NavGroup label="Workspace" items={navMain} />
         <NavGroup label="Components" items={navComponents} />
         <NotebooksGroup />

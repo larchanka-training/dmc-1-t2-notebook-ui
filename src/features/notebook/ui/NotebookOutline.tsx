@@ -5,7 +5,7 @@ import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Sheet, SheetContent, SheetTitle } from '@/shared/ui/sheet'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { cn } from '@/shared/lib/cn'
-import { outlineVisibleAtom, outlineDrawerOpenAtom } from '../model/notebookSettings'
+import { outlineVisibleAtom, outlineDrawerOpenAtom } from '@/features/notebook'
 import { hasOutlineAtom, outlineEntriesAtom, type OutlineEntry } from '../model/outline'
 
 function scrollToCell(cellId: string) {
