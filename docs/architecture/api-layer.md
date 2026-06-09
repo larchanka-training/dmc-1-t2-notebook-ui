@@ -11,10 +11,12 @@ src/shared/api/
 ├── generated/
 │   └── openapi-ts/
 │       ├── auth.d.ts          # types-only, regenerated from openapi/auth.openapi.yaml
+│       ├── llm.d.ts           # types-only, regenerated from openapi/llm.openapi.yaml
 │       └── notebook.d.ts      # types-only, regenerated from openapi/notebook.openapi.yaml
 ├── client.ts                  # openapi-fetch clients + auth-token middleware
-├── errors.ts                  # ApiError + 400/401/404 subclasses, status→error mapper
+├── errors.ts                  # ApiError + 400/401/404/429/5xx subclasses, status→error mapper
 ├── auth.ts                    # login / logout / getMe
+├── llm.ts                     # generateCode (Cloud LLM agent)
 ├── notebook.ts                # list / create / runCell
 └── index.ts                   # public re-export (namespace style)
 ```
@@ -37,11 +39,12 @@ See `openapi.md` at the repo root for the PoC that compared this stack against `
 Consumers import the namespaces:
 
 ```ts
-import { auth, notebook } from '@/shared/api'
+import { auth, llm, notebook } from '@/shared/api'
 
 await auth.login({ email, password })
 const notebooks = await notebook.list()
 const result = await notebook.runCell(notebookId, cellId)
+const generated = await llm.generateCode({ prompt: 'sum two numbers' })
 ```
 
 Error classes (rethrown by every facade call when the HTTP status is non-2xx):
