@@ -12,22 +12,22 @@ src/shared/api/
 │   └── openapi-ts/
 │       ├── auth.d.ts          # types-only, regenerated from openapi/auth.openapi.yaml
 │       ├── llm.d.ts           # types-only, regenerated from openapi/llm.openapi.yaml
-│       └── notebook.d.ts      # types-only, regenerated from openapi/notebook.openapi.yaml
+│       └── notebook.d.ts      # types-only, regenerated from openapi/backend/openapi.json (sliced)
 ├── client.ts                  # openapi-fetch clients + auth-token middleware
 ├── errors.ts                  # ApiError + 400/401/404/429/5xx subclasses, status→error mapper
 ├── auth.ts                    # login / logout / getMe
 ├── llm.ts                     # generateCode (Cloud LLM agent)
-├── notebook.ts                # list / create / runCell
+├── notebook.ts                # list / create  (thin shim; full sync facade is #132)
 └── index.ts                   # public re-export (namespace style)
 ```
 
-OpenAPI source-of-truth specs live at the repo root in `openapi/<domain>.openapi.yaml`.
+Source-of-truth specs live in `openapi/`. `auth.openapi.yaml` and `llm.openapi.yaml` are hand-maintained. **notebook** types instead come from the backend contract: a vendored machine copy at `openapi/backend/openapi.json` (refreshed by `pnpm api:vendor`), from which `api-gen.mjs` slices the `/notebooks` paths. This keeps `ui` self-contained — generation never reads `../api`. See [`openapi/backend/README.md`](../../openapi/backend/README.md).
 
 ---
 
 ## Generator: `openapi-typescript` + `openapi-fetch`
 
-- **`openapi-typescript`** (dev) reads each `openapi/*.openapi.yaml` and emits a single `.d.ts` per spec. **Types only — no runtime.**
+- **`openapi-typescript`** (dev) emits a single `.d.ts` per domain. **Types only — no runtime.** auth/llm read their `openapi/*.openapi.yaml`; notebook is assembled on the fly from `openapi/backend/openapi.json` — the `/notebooks` paths with the `/api/v1` prefix stripped (the client already targets that base) and the reachable schemas inlined.
 - **`openapi-fetch`** (prod) is a tiny typed fetch wrapper that takes the generated `paths` interface as a generic.
 
 See `openapi.md` at the repo root for the PoC that compared this stack against `@hey-api/openapi-ts` and the rationale for choosing it.
@@ -43,7 +43,7 @@ import { auth, llm, notebook } from '@/shared/api'
 
 await auth.login({ email, password })
 const notebooks = await notebook.list()
-const result = await notebook.runCell(notebookId, cellId)
+const created = await notebook.create({ title: 'Untitled' })
 const generated = await llm.generateCode({ prompt: 'sum two numbers' })
 ```
 
@@ -53,7 +53,7 @@ Error classes (rethrown by every facade call when the HTTP status is non-2xx):
 import { ApiError, UnauthorizedError, NotFoundError, BadRequestError } from '@/shared/api'
 
 try {
-  await notebook.runCell(nbId, cellId)
+  await notebook.list()
 } catch (e) {
   if (e instanceof NotFoundError) {
     /* ... */
@@ -113,8 +113,9 @@ The public API at `@/shared/api` stays unchanged via `index.ts` re-exports, so `
 
 ## Scripts
 
-- `pnpm api:generate` — regenerate all `*.d.ts` from `openapi/*.openapi.yaml`.
-- `pnpm api:check` — generate into a temp dir and diff against the committed code. Fails if anything drifted. Runs in pre-push.
+- `pnpm api:generate` — regenerate all `*.d.ts` (auth/llm from their YAML; notebook from the vendored `openapi/backend/openapi.json` slice).
+- `pnpm api:check` — generate into a temp dir and diff (EOL-insensitively) against the committed code. Fails if anything drifted. Runs in pre-push.
+- `pnpm api:vendor` — refresh `openapi/backend/openapi.json` from `../api/docs/openapi.json`. Run deliberately when the backend contract changes; needs `../api`, and is **not** run by CI, `api:generate`, or `api:check`.
 
 ---
 
