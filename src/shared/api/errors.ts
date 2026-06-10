@@ -57,19 +57,25 @@ export function parseRetryAfter(headerValue: string | null | undefined): number 
   return seconds
 }
 
-// Backend returns errors as { error: { code, message, fields } } — see api/app/core/errors.py
-type ErrorBody =
-  | { error: { code?: string; message?: string } }
-  | { code?: string; message?: string }
-  | undefined
-
-function unwrapError(body: ErrorBody): { code?: string; message?: string } | undefined {
-  if (!body) return undefined
-  if ('error' in body) return body.error
-  return body
+// Backend wraps errors as { error: { code, message, fields } } (see
+// api/app/core/errors.py); legacy/flat { code, message } is still accepted. The
+// body is whatever JSON the server returned (including FastAPI's
+// { detail: [...] } validation envelope), so treat it as unknown and validate
+// before reading.
+function unwrapError(body: unknown): { code?: string; message?: string } | undefined {
+  if (typeof body !== 'object' || body === null) return undefined
+  const record = body as Record<string, unknown>
+  const inner =
+    typeof record.error === 'object' && record.error !== null
+      ? (record.error as Record<string, unknown>)
+      : record
+  const code = typeof inner.code === 'string' ? inner.code : undefined
+  const message = typeof inner.message === 'string' ? inner.message : undefined
+  if (code === undefined && message === undefined) return undefined
+  return { code, message }
 }
 
-export function toApiError(status: number, body: ErrorBody, retryAfter?: number): ApiError {
+export function toApiError(status: number, body: unknown, retryAfter?: number): ApiError {
   const error = unwrapError(body)
   switch (status) {
     case 400:

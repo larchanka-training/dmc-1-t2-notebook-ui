@@ -18,7 +18,10 @@ const listItem = (id: string, title: string): notebookApi.NotebookListItem => ({
 const fullNotebook = (id: string, title: string): notebookApi.Notebook => ({
   id,
   title,
-  createdAt: '2026-05-15T00:00:00Z',
+  ownerId: 'owner-1',
+  formatVersion: 1,
+  createdAt: 0,
+  updatedAt: 0,
   cells: [],
 })
 

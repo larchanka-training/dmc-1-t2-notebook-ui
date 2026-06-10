@@ -29,6 +29,15 @@ describe('toApiError', () => {
     expect(err.code).toBe('invalid')
   })
 
+  test('validation-error bodies (no code/message) fall back to generic ApiError', () => {
+    const err = toApiError(422, {
+      detail: [{ loc: ['body', 'title'], msg: 'field required', type: 'missing' }],
+    })
+    expect(err.constructor).toBe(ApiError)
+    expect(err.status).toBe(422)
+    expect(err.code).toBeUndefined()
+  })
+
   test('5xx falls back to generic ApiError', () => {
     const err = toApiError(503, undefined)
     expect(err.constructor).toBe(ApiError)

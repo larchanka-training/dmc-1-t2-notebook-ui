@@ -35,8 +35,12 @@ describe('error mapping', () => {
   })
 
   test('404 maps to NotFoundError', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(404, { code: 'not_found', message: 'cell gone' }))
-    await expect(notebook.runCell('nb-x', 'cell-x')).rejects.toBeInstanceOf(NotFoundError)
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { code: 'not_found', message: 'notebook gone' }),
+    )
+    // runCell (and its endpoint) was dropped in TARDIS-131; error mapping is
+    // status-driven, so any facade call exercises it. #132 adds get/patch/delete.
+    await expect(notebook.list()).rejects.toBeInstanceOf(NotFoundError)
   })
 })
 
