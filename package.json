@@ -18,6 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "api:generate": "node scripts/api-gen.mjs",
     "api:check": "node scripts/api-gen.mjs --check",
+    "api:vendor": "node scripts/api-vendor.mjs",
     "hooks:install": "lefthook install"
   },
   "dependencies": {
