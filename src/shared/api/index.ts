@@ -5,6 +5,8 @@ export * as notebook from './notebook'
 export {
   ApiError,
   BadRequestError,
+  ConflictError,
+  NetworkError,
   NotFoundError,
   RateLimitedError,
   UnauthorizedError,

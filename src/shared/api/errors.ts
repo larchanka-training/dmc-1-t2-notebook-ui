@@ -31,6 +31,13 @@ export class NotFoundError extends ApiError {
   }
 }
 
+export class ConflictError extends ApiError {
+  constructor(code?: string, message?: string) {
+    super(409, code, message)
+    this.name = 'ConflictError'
+  }
+}
+
 /**
  * Thrown when the backend returns 429. Exposes the parsed `Retry-After`
  * header so callers can implement honest back-off instead of guessing.
@@ -47,6 +54,24 @@ export class RateLimitedError extends ApiError {
     super(429, code, message)
     this.name = 'RateLimitedError'
     this.retryAfter = retryAfter
+  }
+}
+
+/**
+ * Thrown when the request never reached the server (offline, DNS failure,
+ * connection reset). `fetch` rejects with a TypeError in these cases; the
+ * facade catches it and rethrows as a NetworkError, so callers can tell
+ * "no answer at all" apart from an HTTP status (retry vs. stop on 401).
+ *
+ * `status` is 0 — there was no HTTP response. Extends ApiError so a single
+ * `instanceof ApiError` catch still covers it. `cause` carries the original
+ * fetch error for diagnostics.
+ */
+export class NetworkError extends ApiError {
+  constructor(message = 'Network request failed', cause?: unknown) {
+    super(0, undefined, message)
+    this.name = 'NetworkError'
+    this.cause = cause
   }
 }
 
@@ -84,6 +109,8 @@ export function toApiError(status: number, body: unknown, retryAfter?: number): 
       return new UnauthorizedError(error?.code, error?.message)
     case 404:
       return new NotFoundError(error?.code, error?.message)
+    case 409:
+      return new ConflictError(error?.code, error?.message)
     case 429:
       return new RateLimitedError(error?.code, error?.message, retryAfter)
     default:
