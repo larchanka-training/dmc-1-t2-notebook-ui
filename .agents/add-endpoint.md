@@ -2,11 +2,13 @@
 
 Add a new HTTP endpoint to the API facade. Three steps every time: update the OpenAPI spec, regenerate types, add a thin function to the facade.
 
+> **Note — notebook is different.** This skill covers **hand-maintained** domains (`auth`, `llm`) whose source is `openapi/<domain>.openapi.yaml`. The **notebook** domain has no hand-edited spec: its types are generated from the vendored backend contract (`openapi/backend/openapi.json`, refreshed by `pnpm api:vendor`). To add a notebook endpoint, change the backend, run `pnpm api:vendor`, then `pnpm api:generate`. See [docs/architecture/api-layer.md](../docs/architecture/api-layer.md).
+
 ## Usage
 
 Invoke this skill with:
 
-- domain (`auth`, `notebook`, …) — must match an existing `openapi/<domain>.openapi.yaml`. For a new domain, create that file first.
+- domain (`auth`, `llm`, …) — must match an existing `openapi/<domain>.openapi.yaml`. For a new domain, create that file first. (Not `notebook` — see the note above.)
 - HTTP method + path (e.g. `POST /notebooks/{id}/share`)
 - operationId (camelCase, e.g. `shareNotebook`)
 - request/response shapes (or names of existing schemas to reuse)

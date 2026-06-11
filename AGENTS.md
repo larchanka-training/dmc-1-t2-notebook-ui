@@ -32,7 +32,7 @@ The fractal frontend skill (`.claude/skills/fractal-frontend/`) governs layer pl
 
 ## HTTP API
 
-All HTTP traffic goes through the facade at `@/shared/api`. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, or `app/` — ESLint (`no-restricted-imports`) will fail. Adding a new endpoint: update `openapi/<domain>.openapi.yaml`, run `pnpm api:generate`, then add a thin function to `src/shared/api/<domain>.ts`. See [docs/architecture/api-layer.md](./docs/architecture/api-layer.md) and the [`.agents/add-endpoint.md`](./.agents/add-endpoint.md) skill.
+All HTTP traffic goes through the facade at `@/shared/api`. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, or `app/` — ESLint (`no-restricted-imports`) will fail. Adding a new endpoint (auth/llm): update `openapi/<domain>.openapi.yaml`, run `pnpm api:generate`, then add a thin function to `src/shared/api/<domain>.ts`. **notebook** types come from the vendored backend contract (`openapi/backend/openapi.json`, refreshed by `pnpm api:vendor`), not a hand-edited spec — change the backend, re-vendor, regenerate. See [docs/architecture/api-layer.md](./docs/architecture/api-layer.md) and the [`.agents/add-endpoint.md`](./.agents/add-endpoint.md) skill.
 
 ---
 
