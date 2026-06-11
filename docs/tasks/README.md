@@ -47,7 +47,9 @@
 
 ### OpenAPI
 
-Любой новый эндпоинт = сначала редактирование `openapi/<domain>.openapi.yaml` → `pnpm api:generate` → тонкая обёртка в `src/shared/api/<domain>.ts` → MSW-handler в `src/app/mocks/handlers.ts`. См. [docs/architecture/api-layer.md](../architecture/api-layer.md) и `.agents/add-endpoint.md`.
+Новый эндпоинт **auth/llm** = редактирование `openapi/<domain>.openapi.yaml` → `pnpm api:generate` → тонкая обёртка в `src/shared/api/<domain>.ts` → MSW-handler в `src/app/mocks/handlers.ts`. Для **notebook** ручного yaml нет: контракт берётся из бэкенда через vendored-копию — изменить бэкенд → `pnpm api:vendor` → `pnpm api:generate`. См. [docs/architecture/api-layer.md](../architecture/api-layer.md) и `.agents/add-endpoint.md`.
+
+> Тикеты ниже написаны до перехода notebook на vendored-flow (TARDIS-131) и местами ссылаются на удалённый `openapi/notebook.openapi.yaml`; для notebook читать их как «изменить бэкенд → `pnpm api:vendor` → `pnpm api:generate`».
 
 ### Definition of Done (общая)
 

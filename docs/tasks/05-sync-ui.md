@@ -92,6 +92,8 @@ openapi/notebook.openapi.yaml       ← + If-Match header, 409 response
 src/app/mocks/handlers.ts           ← PUT с поддержкой If-Match
 ```
 
+> **notebook теперь vendored (TARDIS-131):** правки контракта (If-Match/409 выше) идут в backend → `pnpm api:vendor` → `pnpm api:generate`, а не в удалённый `openapi/notebook.openapi.yaml`. См. `docs/architecture/api-layer.md`.
+
 ### Reatom
 
 ```ts
