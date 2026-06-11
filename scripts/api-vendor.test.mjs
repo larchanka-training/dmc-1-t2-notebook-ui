@@ -1,8 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { MARKER_STUB, vendor } from './api-vendor.mjs'
+
+// Resolved from the package root (vitest runs with cwd = ui).
+const SCRIPT = resolve('scripts', 'api-vendor.mjs')
 
 let work
 beforeEach(() => {
@@ -52,5 +56,29 @@ describe('vendor', () => {
         marker: join(work, 'm.md'),
       }),
     ).toThrow(/not found/)
+  })
+})
+
+// Exercises the CLI's cwd-relative default paths (../api/docs/openapi.json ->
+// openapi/backend/openapi.json) by running the real script from a fake ui cwd.
+describe('api:vendor CLI', () => {
+  test('copies ../api/docs/openapi.json into openapi/backend from the ui cwd', () => {
+    const ui = join(work, 'ui')
+    mkdirSync(ui, { recursive: true })
+    mkdirSync(join(work, 'api', 'docs'), { recursive: true })
+    writeFileSync(join(work, 'api', 'docs', 'openapi.json'), '{"openapi":"3.1.0"}\r\n')
+
+    execFileSync('node', [SCRIPT], { cwd: ui })
+
+    expect(readFileSync(join(ui, 'openapi', 'backend', 'openapi.json'), 'utf8')).toBe(
+      '{"openapi":"3.1.0"}\n', // copied + LF-normalized
+    )
+    expect(existsSync(join(ui, 'openapi', 'backend', 'README.md'))).toBe(true)
+  })
+
+  test('exits non-zero when ../api is absent', () => {
+    const ui = join(work, 'ui')
+    mkdirSync(ui, { recursive: true })
+    expect(() => execFileSync('node', [SCRIPT], { cwd: ui, stdio: 'pipe' })).toThrow()
   })
 })
