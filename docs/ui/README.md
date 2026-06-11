@@ -39,7 +39,7 @@ Done — round 3 (markdown polish):
 Known follow-ups (intentionally deferred):
 
 - **Active-notebook routing.** The notebook list in the sidebar and the in-memory `cellsAtom` are not connected — clicking a notebook does nothing. Wiring needs both a route (e.g. `/n/:notebookId`) and a per-notebook cell-store decision (in-memory map vs server fetch).
-- **Notebook rename / delete from sidebar.** Requires extending `openapi/notebook.openapi.yaml` (`PATCH`, `DELETE`) and regenerating the client — backend work first.
+- **Notebook rename / delete from sidebar.** The backend `PATCH` / `DELETE /notebooks/{id}` already exist; re-vendor (`pnpm api:vendor`) + regenerate, then add the facade calls and sidebar wiring.
 - **System theme (`prefers-color-scheme`)**. Only manual toggle for now. Auto-mode would need a 3-state toggle (light / dark / system) and a `matchMedia` listener.
 - **Cell persistence.** `cellsAtom` (incl. `viewMode`) is in-memory and resets on reload. Local-only persistence via `withLocalStorage` is one option; the cleaner path is a server-backed notebook detail endpoint.
 - **GFM extensions for markdown.** `react-markdown` ships only the CommonMark spec. Tables, task lists, autolinks, and strikethrough need the `remark-gfm` plugin.

@@ -125,7 +125,7 @@ activeNotebookIdAtom: Atom<string | null> // привязан к URL через 
   - `PATCH /notebooks/:id` — title/tags/folderId, обновляет `updatedAt`.
   - `DELETE /notebooks/:id` — soft-delete (флаг), чтобы тестировать «Undo».
   - `GET /folders` / `POST /folders` / `DELETE /folders/:id`.
-- OpenAPI: добавить `Folder`, `NotebookSummary`, `UpdateNotebookRequest`. После — `pnpm api:generate`, тонкие фасады в `@/shared/api/notebooks.ts`, `@/shared/api/folders.ts`.
+- OpenAPI: добавить `Folder`, `NotebookSummary`, `UpdateNotebookRequest`. После — `pnpm api:generate`, тонкие фасады в `@/shared/api/notebooks.ts`, `@/shared/api/folders.ts`. _(notebook-схемы теперь приходят из бэкенда: изменить контракт → `pnpm api:vendor` → `pnpm api:generate`; см. `docs/architecture/api-layer.md`.)_
 
 ## Out of scope
 

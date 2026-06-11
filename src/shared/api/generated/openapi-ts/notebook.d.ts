@@ -11,156 +11,210 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List notebooks owned by the current user */
-        get: operations["listNotebooks"];
+        /** List notebooks */
+        get: operations["list_notebooks_api_v1_notebooks_get"];
         put?: never;
-        /** Create a new empty notebook */
-        post: operations["createNotebook"];
+        /** Create notebook */
+        post: operations["create_notebook_api_v1_notebooks_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/notebooks/{notebookId}/cells/{cellId}/run": {
+    "/notebooks/{notebook_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get notebook */
+        get: operations["get_notebook_api_v1_notebooks__notebook_id__get"];
         put?: never;
-        /** Execute a single cell and return its result */
-        post: operations["runCell"];
-        delete?: never;
+        post?: never;
+        /** Delete notebook */
+        delete: operations["delete_notebook_api_v1_notebooks__notebook_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch notebook */
+        patch: operations["patch_notebook_api_v1_notebooks__notebook_id__patch"];
         trace?: never;
     };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Paginated wrapper returned by `GET /notebooks`. */
-        NotebookListResponse: {
-            items: components["schemas"]["NotebookListItem"][];
-            total: number;
-            limit: number;
-            offset: number;
-        };
-        /** @description Lightweight notebook row for the list endpoint (no `cells`, only their count). `createdAt`/`updatedAt` are epoch milliseconds. */
-        NotebookListItem: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            formatVersion: number;
-            createdAt: number;
-            updatedAt: number;
-            cellsCount: number;
-        };
-        Notebook: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            /** Format: date-time */
-            createdAt: string;
-            cells: components["schemas"]["Cell"][];
-        };
-        Cell: {
-            /** Format: uuid */
-            id: string;
+        /** ApiError */
+        ApiError: {
+            /** Code */
             code: string;
-            status: components["schemas"]["CellStatus"];
-            output?: string;
-        };
-        /** @enum {string} */
-        CellStatus: "idle" | "running" | "done" | "error";
-        CreateNotebookRequest: {
-            title: string;
-        };
-        CellRunResult: components["schemas"]["CellRunRunning"] | components["schemas"]["CellRunDone"] | components["schemas"]["CellRunError"];
-        CellRunRunning: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            status: "running";
-            /** Format: date-time */
-            startedAt: string;
-        };
-        CellRunDone: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            status: "done";
-            output: string;
-            durationMs: number;
-        };
-        CellRunError: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            status: "error";
-            error: string;
-        };
-        Error: {
-            code: string;
+            /** Fields */
+            fields?: {
+                [key: string]: string;
+            };
+            /** Message */
             message: string;
         };
-    };
-    responses: {
-        /** @description Missing or invalid credentials */
-        Unauthorized: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
+        /** ApiErrorResponse */
+        ApiErrorResponse: {
+            error: components["schemas"]["ApiError"];
         };
-        /** @description Malformed request */
-        BadRequest: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
+        /** CellSchema */
+        CellSchema: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "code" | "markdown";
+            /** Updatedat */
+            updatedAt: number;
         };
-        /** @description Notebook or cell not found */
-        NotFound: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
+        /** CellTombstone */
+        CellTombstone: {
+            /** Deletedat */
+            deletedAt: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** NotebookCreate */
+        NotebookCreate: {
+            /** Cells */
+            cells?: components["schemas"]["CellSchema"][];
+            /**
+             * Formatversion
+             * @default 1
+             */
+            formatVersion: number;
+            /** Id */
+            id?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** NotebookListItem */
+        NotebookListItem: {
+            /** Cellscount */
+            cellsCount: number;
+            /** Createdat */
+            createdAt: number;
+            /** Formatversion */
+            formatVersion: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Updatedat */
+            updatedAt: number;
+        };
+        /** NotebookListResponse */
+        NotebookListResponse: {
+            /** Items */
+            items: components["schemas"]["NotebookListItem"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** NotebookPatch */
+        NotebookPatch: {
+            /** Cells */
+            cells?: components["schemas"]["CellSchema"][];
+            /** Deletedcells */
+            deletedCells?: components["schemas"]["CellTombstone"][];
+            /**
+             * Formatversion
+             * @default 1
+             */
+            formatVersion: number;
+            /** Title */
+            title: string;
+        };
+        /** NotebookResponse */
+        NotebookResponse: {
+            /** Cells */
+            cells?: components["schemas"]["CellSchema"][];
+            /** Createdat */
+            createdAt: number;
+            /**
+             * Formatversion
+             * @default 1
+             */
+            formatVersion: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Ownerid
+             * Format: uuid
+             */
+            ownerId: string;
+            /** Title */
+            title: string;
+            /** Updatedat */
+            updatedAt: number;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
     };
-    parameters: {
-        NotebookId: string;
-        CellId: string;
-    };
+    responses: never;
+    parameters: never;
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    listNotebooks: {
+    list_notebooks_api_v1_notebooks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+                sort?: string;
+                order?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -169,10 +223,27 @@ export interface operations {
                     "application/json": components["schemas"]["NotebookListResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    createNotebook: {
+    create_notebook_api_v1_notebooks_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -181,46 +252,177 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateNotebookRequest"];
+                "application/json": components["schemas"]["NotebookCreate"];
             };
         };
         responses: {
-            /** @description Created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Notebook"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    runCell: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                notebookId: components["parameters"]["NotebookId"];
-                cellId: components["parameters"]["CellId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run result. Shape depends on `status`. */
+            /** @description Notebook already existed for this owner */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CellRunResult"];
+                    "application/json": components["schemas"]["NotebookResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook id already exists with different content */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notebook_api_v1_notebooks__notebook_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_notebook_api_v1_notebooks__notebook_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_notebook_api_v1_notebooks__notebook_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotebookPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
 }
