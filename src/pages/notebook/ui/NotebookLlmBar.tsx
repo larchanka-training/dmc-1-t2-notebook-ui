@@ -28,7 +28,7 @@ export const NotebookLlmBar = reatomComponent(() => {
   })
   // autoLoad is intentionally from the first render only — it captures the
   // Reatom context at mount time and must not re-run on subsequent renders.
-   
+
   useEffect(() => {
     autoLoad()
   }, [])
