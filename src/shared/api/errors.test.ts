@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { ApiError, BadRequestError, NotFoundError, UnauthorizedError, toApiError } from './errors'
+import {
+  ApiError,
+  BadRequestError,
+  ConflictError,
+  NetworkError,
+  NotFoundError,
+  UnauthorizedError,
+  toApiError,
+} from './errors'
 
 describe('toApiError', () => {
   test('400 → BadRequestError with code and message from envelope', () => {
@@ -21,6 +29,13 @@ describe('toApiError', () => {
     const err = toApiError(404, { error: { code: 'not_found', message: 'gone' } })
     expect(err).toBeInstanceOf(NotFoundError)
     expect(err.status).toBe(404)
+  })
+
+  test('409 → ConflictError', () => {
+    const err = toApiError(409, { error: { code: 'notebook_conflict', message: 'id taken' } })
+    expect(err).toBeInstanceOf(ConflictError)
+    expect(err.status).toBe(409)
+    expect(err.code).toBe('notebook_conflict')
   })
 
   test('legacy flat error bodies are still accepted defensively', () => {
@@ -48,5 +63,22 @@ describe('toApiError', () => {
   test('missing body still produces a useful message', () => {
     const err = toApiError(500, undefined)
     expect(err.message).toContain('500')
+  })
+})
+
+describe('NetworkError', () => {
+  test('is an ApiError with status 0 and a default message', () => {
+    const err = new NetworkError()
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toBeInstanceOf(NetworkError)
+    expect(err.status).toBe(0)
+    expect(err.message).toBe('Network request failed')
+  })
+
+  test('preserves a custom message and the originating cause', () => {
+    const cause = new TypeError('Failed to fetch')
+    const err = new NetworkError('offline', cause)
+    expect(err.message).toBe('offline')
+    expect(err.cause).toBe(cause)
   })
 })
