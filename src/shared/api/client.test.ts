@@ -81,6 +81,27 @@ describe('refresh middleware', () => {
     expect(retryCall![1]?.body).toBe(JSON.stringify({ email: 'user@example.com' }))
   })
 
+  // Regression: the retry must carry exactly the fresh token. The original
+  // request already has a lowercase `authorization` (set by authMiddleware), so
+  // a header overwrite that is not case-insensitive would leave both the stale
+  // and the fresh value and fetch would join them as "Bearer old, Bearer new".
+  test('on 401: retry sends exactly the fresh bearer token, not the stale one', async () => {
+    setAuthTokenGetter(() => 'initial-access')
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh call
+      .mockResolvedValueOnce(jsonResponse(200, stubUser)) // retry
+
+    await authClient.GET('/auth/me')
+
+    const retryInit = fetchMock.mock.calls[2]![1]!
+    const retryHeaders = new Headers(retryInit.headers as HeadersInit)
+    expect(retryHeaders.get('Authorization')).toBe(`Bearer ${stubTokens.accessToken}`)
+    // No comma-joined stale+fresh value, and no leftover initial token.
+    expect(retryHeaders.get('Authorization')).not.toContain('initial-access')
+    expect(retryHeaders.get('Authorization')).not.toContain(',')
+  })
+
   test('on 401 + refresh failure (non-200): calls onSessionExpired', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))

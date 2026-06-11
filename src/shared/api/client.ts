@@ -135,12 +135,15 @@ const refreshMiddleware: Middleware = {
     // Decode the pre-cloned body to text only here (rare path), so the original
     // consumed stream is never re-read.
     const buffered = requestBodyCache.get(request)
+    // Clone the original headers and overwrite Authorization via Headers.set,
+    // which is case-insensitive. A plain object spread would keep the original
+    // lowercase `authorization` next to a new `Authorization`, and fetch would
+    // then merge the stale and fresh tokens into one comma-joined bearer header.
+    const retryHeaders = new Headers(request.headers)
+    retryHeaders.set('Authorization', `Bearer ${newToken}`)
     return lateBoundFetch(request.url, {
       method: request.method,
-      headers: {
-        ...Object.fromEntries(request.headers.entries()),
-        Authorization: `Bearer ${newToken}`,
-      },
+      headers: retryHeaders,
       body: buffered ? await buffered.text() : null,
       credentials: request.credentials,
     })
