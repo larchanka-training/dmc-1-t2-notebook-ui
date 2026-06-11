@@ -13,6 +13,8 @@ export type Notebook = Schemas['NotebookResponse']
 export type NotebookListItem = Schemas['NotebookListItem']
 /** A single notebook cell on the wire. */
 export type NotebookCell = Schemas['CellSchema']
+/** A deleted-cell marker. Request-only: it appears in PATCH bodies, never in responses. */
+export type CellTombstone = Schemas['CellTombstone']
 
 /**
  * What the caller provides to create a notebook. `formatVersion` is owned by
@@ -26,6 +28,19 @@ export interface CreateNotebookInput {
   formatVersion: number
   id?: string
   cells?: NotebookCell[]
+}
+
+/**
+ * What the caller provides to update a notebook. PATCH sends the whole
+ * notebook (LWW merge happens server-side), so `cells` is the full set, not a
+ * delta. `deletedCells` carries tombstones so cell removals propagate too; it
+ * is request-only and absent from the response.
+ */
+export interface UpdateNotebookInput {
+  title: string
+  formatVersion: number
+  cells: NotebookCell[]
+  deletedCells?: CellTombstone[]
 }
 
 // GET /notebooks is paginated ({ items, total, limit, offset }); the facade
@@ -74,4 +89,19 @@ export async function create(input: CreateNotebookInput): Promise<Notebook> {
     ...(input.cells !== undefined ? { cells: input.cells } : {}),
   }
   return await request<Notebook>(notebookClient.POST('/notebooks', { body }))
+}
+
+export async function patch(id: string, input: UpdateNotebookInput): Promise<Notebook> {
+  const body: Schemas['NotebookPatch'] = {
+    title: input.title,
+    formatVersion: input.formatVersion,
+    cells: input.cells,
+    ...(input.deletedCells !== undefined ? { deletedCells: input.deletedCells } : {}),
+  }
+  return await request<Notebook>(
+    notebookClient.PATCH('/notebooks/{notebook_id}', {
+      params: { path: { notebook_id: id } },
+      body,
+    }),
+  )
 }

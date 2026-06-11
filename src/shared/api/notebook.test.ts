@@ -174,3 +174,75 @@ describe('create', () => {
     expect(body).not.toHaveProperty('cells')
   })
 })
+
+describe('patch', () => {
+  const updated = {
+    id: 'nb-1',
+    ownerId: 'owner-1',
+    title: 'Renamed',
+    formatVersion: 1,
+    createdAt: 0,
+    updatedAt: 10,
+    cells: [{ id: 'c1', kind: 'code', content: 'y', updatedAt: 10 }],
+  }
+  const cells = [{ id: 'c1', kind: 'code' as const, content: 'y', updatedAt: 10 }]
+
+  test('PATCHes the whole notebook (title, formatVersion, cells)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, updated))
+
+    const result = await notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells })
+
+    expect(result).toEqual(updated)
+    const req = lastRequest()
+    expect(req.method).toBe('PATCH')
+    expect(req.url).toContain('/api/v1/notebooks/nb-1')
+    expect(await lastRequestBody()).toEqual({ title: 'Renamed', formatVersion: 1, cells })
+  })
+
+  test('sends deletedCells in the body when provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, updated))
+
+    const deletedCells = [{ id: 'c2', deletedAt: 9 }]
+    await notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells, deletedCells })
+
+    expect(await lastRequestBody()).toEqual({
+      title: 'Renamed',
+      formatVersion: 1,
+      cells,
+      deletedCells,
+    })
+  })
+
+  test('omits deletedCells from the body when not provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, updated))
+
+    await notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells })
+
+    expect(await lastRequestBody()).not.toHaveProperty('deletedCells')
+  })
+
+  test('422 maps to a generic ApiError carrying the status', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(422, { detail: [{ loc: ['body', 'title'], msg: 'required', type: 'missing' }] }),
+    )
+    await expect(
+      notebook.patch('nb-1', { title: '', formatVersion: 1, cells }),
+    ).rejects.toMatchObject({ status: 422 })
+  })
+
+  test('401 maps to UnauthorizedError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { error: { code: 'invalid_token', message: 'expired' } }),
+    )
+    await expect(
+      notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells }),
+    ).rejects.toBeInstanceOf(UnauthorizedError)
+  })
+
+  test('a rejected fetch maps to NetworkError', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(
+      notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells }),
+    ).rejects.toBeInstanceOf(NetworkError)
+  })
+})
