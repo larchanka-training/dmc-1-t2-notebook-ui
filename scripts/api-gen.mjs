@@ -11,6 +11,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { normalizeEol } from './eol.mjs'
 import { assembleNotebookSpec } from './notebook-slice.mjs'
 
 const OPENAPI_DIR = 'openapi'
@@ -29,13 +30,6 @@ function generate(input, output) {
   execFileSync('pnpm', ['exec', 'openapi-typescript', input, '-o', output], {
     stdio: 'inherit',
   })
-}
-
-// Committed d.ts files are CRLF on Windows (core.autocrlf) while
-// openapi-typescript always emits LF; compare EOL-insensitively so the drift
-// check does not fire on line endings alone.
-function normalizeEol(text) {
-  return text.replace(/\r\n/g, '\n')
 }
 
 function readBackendSpec() {
@@ -71,14 +65,19 @@ try {
       generate(input, tmpOut)
       const committedPath = join(OUT_DIR, `${name}.d.ts`)
       const committed = existsSync(committedPath) ? readFileSync(committedPath, 'utf8') : ''
-      const fresh = readFileSync(tmpOut, 'utf8')
-      if (normalizeEol(committed) !== normalizeEol(fresh)) {
-        console.error(`[api:check] DRIFT in ${committedPath}`)
+      const committedNorm = normalizeEol(committed)
+      const freshNorm = normalizeEol(readFileSync(tmpOut, 'utf8'))
+      if (committedNorm !== freshNorm) {
+        console.error(
+          `[api:check] DRIFT in ${committedPath} ` +
+            `(committed ${committedNorm.split('\n').length} lines, ` +
+            `regenerated ${freshNorm.split('\n').length})`,
+        )
         drift = true
       }
     }
     if (drift) {
-      console.error('Run `pnpm api:generate` and commit the result.')
+      console.error('Run `pnpm api:generate`, then `git diff` to inspect, and commit the result.')
       process.exit(1)
     }
     console.log('[api:check] generated clients are in sync')
