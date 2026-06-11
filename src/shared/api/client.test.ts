@@ -60,6 +60,27 @@ describe('refresh middleware', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  // OOP-1 guard: the request body is buffered (pre-cloned) before the first
+  // fetch consumes the one-shot stream, so a POST retried after refresh must
+  // re-send the SAME body — not an empty one.
+  test('on 401: retries a POST with the same body after refresh', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh call
+      .mockResolvedValueOnce(jsonResponse(200, { otp: '123456', expiresAt: 0 })) // retry
+
+    await authClient.POST('/auth/otp/request', { body: { email: 'user@example.com' } })
+
+    expect(onTokensRefreshed).toHaveBeenCalledWith(stubTokens.accessToken, stubTokens.refreshToken)
+    // The retry is the only call that targets the endpoint via a plain URL string
+    // (the original is sent as a Request object; the refresh targets /auth/refresh).
+    const retryCall = fetchMock.mock.calls.find(
+      (args) => typeof args[0] === 'string' && args[0].includes('/auth/otp/request'),
+    )
+    expect(retryCall).toBeDefined()
+    expect(retryCall![1]?.body).toBe(JSON.stringify({ email: 'user@example.com' }))
+  })
+
   test('on 401 + refresh failure (non-200): calls onSessionExpired', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))

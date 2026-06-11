@@ -101,14 +101,17 @@ const authMiddleware: Middleware = {
   },
 }
 
-// #2 — Request.body is a ReadableStream that is consumed by the first fetch().
-// We snapshot it as text in onRequest (before fetch runs) so the refresh retry
-// can re-send the same body without a "disturbed stream" error.
-const requestBodyCache = new WeakMap<Request, string | null>()
+// #2 — Request.body is a one-shot ReadableStream consumed by the first fetch(),
+// so the refresh retry needs a copy taken before fetch runs.
+// OOP-1: snapshot a synchronous clone() — no await, no eager string decode on
+// the hot success path; clone() tees the body so the copy survives the original
+// being consumed by the network.
+// The .text() decode is deferred to the rare 401 retry below.
+const requestBodyCache = new WeakMap<Request, Request>()
 
 const bodyBufferMiddleware: Middleware = {
-  async onRequest({ request }) {
-    requestBodyCache.set(request, request.body ? await request.clone().text() : null)
+  onRequest({ request }) {
+    if (request.body) requestBodyCache.set(request, request.clone())
     return request
   },
 }
@@ -129,14 +132,16 @@ const refreshMiddleware: Middleware = {
 
     // Retry the original request with the fresh access token.
     // lateBoundFetch bypasses the middleware, avoiding re-entry.
-    // Uses the pre-buffered body so the consumed stream is not re-read.
+    // Decode the pre-cloned body to text only here (rare path), so the original
+    // consumed stream is never re-read.
+    const buffered = requestBodyCache.get(request)
     return lateBoundFetch(request.url, {
       method: request.method,
       headers: {
         ...Object.fromEntries(request.headers.entries()),
         Authorization: `Bearer ${newToken}`,
       },
-      body: requestBodyCache.get(request) ?? null,
+      body: buffered ? await buffered.text() : null,
       credentials: request.credentials,
     })
   },
