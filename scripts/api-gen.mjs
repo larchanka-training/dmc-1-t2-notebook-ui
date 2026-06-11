@@ -23,6 +23,10 @@ const SUFFIX = '.openapi.yaml'
 // openapi/backend/README.md and scripts/notebook-slice.mjs.
 const BACKEND_SPEC = join(OPENAPI_DIR, 'backend', 'openapi.json')
 const NOTEBOOK_NAME = 'notebook'
+// Hand-maintained YAML domains that must always be present. Discovery is
+// dynamic, so guard against an accidental delete/rename silently skipping a
+// domain and leaving its stale committed .d.ts unchecked.
+const REQUIRED_YAML_DOMAINS = ['auth', 'llm']
 
 const isCheck = process.argv.includes('--check')
 
@@ -44,6 +48,13 @@ function readBackendSpec() {
 const yamlSpecs = readdirSync(OPENAPI_DIR)
   .filter((f) => f.endsWith(SUFFIX))
   .map((f) => ({ name: basename(f, SUFFIX), input: join(OPENAPI_DIR, f) }))
+
+for (const domain of REQUIRED_YAML_DOMAINS) {
+  if (!yamlSpecs.some((s) => s.name === domain)) {
+    console.error(`[api-gen] required spec ${join(OPENAPI_DIR, `${domain}${SUFFIX}`)} is missing`)
+    process.exit(1)
+  }
+}
 
 // Read (and validate) the vendored backend spec before creating the temp dir,
 // so a missing copy exits cleanly with a helpful message and no leftover dir.
