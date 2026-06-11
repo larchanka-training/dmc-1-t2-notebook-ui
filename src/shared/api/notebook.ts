@@ -1,31 +1,71 @@
 import { notebookClient } from './client'
-import { toApiError } from './errors'
+import { NetworkError, toApiError } from './errors'
 import type { components } from './generated/openapi-ts/notebook'
 
-// TARDIS-131: thin temporary shim over the regenerated backend contract. It
-// exposes just enough surface for existing callers to compile; the full typed
-// sync facade (get / patch / delete + offline queue) lands in #132.
-export type Notebook = components['schemas']['NotebookResponse']
-export type NotebookListItem = components['schemas']['NotebookListItem']
-export type CreateNotebookRequest = Pick<components['schemas']['NotebookCreate'], 'title'>
+// Typed facade over the generated notebook client. Business code (features /
+// pages / app) talks to the backend only through these functions and the
+// domain types below — never through the generated `paths`/`components`.
+type Schemas = components['schemas']
+
+/** A notebook with its cells, as returned by GET/POST/PATCH. */
+export type Notebook = Schemas['NotebookResponse']
+/** A lightweight row from GET /notebooks (no cells, just `cellsCount`). */
+export type NotebookListItem = Schemas['NotebookListItem']
+/** A single notebook cell on the wire. */
+export type NotebookCell = Schemas['CellSchema']
+
+/**
+ * What the caller provides to create a notebook. `formatVersion` is owned by
+ * the domain model (features/notebook/persistence), not the transport layer,
+ * so it is passed in rather than hardcoded here. `id` lets the client choose
+ * the identifier for offline-first idempotency (re-POSTing the same id does
+ * not duplicate).
+ */
+export interface CreateNotebookInput {
+  title: string
+  formatVersion: number
+  id?: string
+  cells?: NotebookCell[]
+}
+
+// GET /notebooks is paginated ({ items, total, limit, offset }); the facade
+// currently reads a single page at the server max so users with many notebooks
+// are not silently truncated. TODO(#135): real pagination / bootstrap.
+const LIST_PAGE_LIMIT = 200
+
+/**
+ * Unwrap an openapi-fetch result into the success payload or throw a typed
+ * ApiError. `fetch` rejects (TypeError) only when no HTTP response arrives —
+ * offline, DNS failure, connection reset — which we surface as NetworkError so
+ * the sync layer can tell "retry later" apart from an auth/validation status.
+ */
+async function request<T>(
+  call: Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<T> {
+  let result: { data?: T; error?: unknown; response: Response }
+  try {
+    result = await call
+  } catch (cause) {
+    throw new NetworkError('Notebook request failed', cause)
+  }
+  const { data, error, response } = result
+  if (error !== undefined || data === undefined) throw toApiError(response.status, error)
+  return data
+}
 
 export async function list(): Promise<NotebookListItem[]> {
-  // GET /notebooks is paginated ({ items, total, limit, offset }); this shim
-  // reads a single page. Request the server max (200) so users with many
-  // notebooks are not silently truncated. TODO(#135): real pagination/bootstrap.
-  const { data, error, response } = await notebookClient.GET('/notebooks', {
-    params: { query: { limit: 200 } },
-  })
-  if (error !== undefined || !data) throw toApiError(response.status, error)
+  const data = await request<Schemas['NotebookListResponse']>(
+    notebookClient.GET('/notebooks', { params: { query: { limit: LIST_PAGE_LIMIT } } }),
+  )
   return data.items
 }
 
-export async function create(body: CreateNotebookRequest): Promise<Notebook> {
-  // formatVersion has a server-side default but openapi-typescript types it as
-  // required, so send the default explicitly. #132 carries the real value.
-  const { data, error, response } = await notebookClient.POST('/notebooks', {
-    body: { ...body, formatVersion: 1 },
-  })
-  if (error !== undefined || !data) throw toApiError(response.status, error)
-  return data
+export async function create(input: CreateNotebookInput): Promise<Notebook> {
+  const body: Schemas['NotebookCreate'] = {
+    title: input.title,
+    formatVersion: input.formatVersion,
+    ...(input.id !== undefined ? { id: input.id } : {}),
+    ...(input.cells !== undefined ? { cells: input.cells } : {}),
+  }
+  return await request<Notebook>(notebookClient.POST('/notebooks', { body }))
 }

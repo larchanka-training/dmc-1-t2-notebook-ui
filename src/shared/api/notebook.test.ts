@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as notebook from './notebook'
-import { NotFoundError, UnauthorizedError } from './errors'
+import { ConflictError, NetworkError, UnauthorizedError } from './errors'
 import { setAuthTokenGetter } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -16,6 +16,10 @@ function lastRequest(): Request {
   return fetchMock.mock.calls.at(-1)![0] as Request
 }
 
+async function lastRequestBody(): Promise<Record<string, unknown>> {
+  return JSON.parse(await lastRequest().clone().text())
+}
+
 beforeEach(() => {
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
@@ -29,25 +33,32 @@ afterEach(() => {
 describe('error mapping', () => {
   test('401 maps to UnauthorizedError', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(401, { code: 'unauthenticated', message: 'no session' }),
+      jsonResponse(401, { error: { code: 'invalid_token', message: 'expired' } }),
     )
     await expect(notebook.list()).rejects.toBeInstanceOf(UnauthorizedError)
   })
 
-  test('404 maps to NotFoundError', async () => {
+  test('409 maps to ConflictError', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(404, { code: 'not_found', message: 'notebook gone' }),
+      jsonResponse(409, { error: { code: 'notebook_conflict', message: 'id taken' } }),
     )
-    // runCell (and its endpoint) was dropped in TARDIS-131; error mapping is
-    // status-driven, so any facade call exercises it. #132 adds get/patch/delete.
-    await expect(notebook.list()).rejects.toBeInstanceOf(NotFoundError)
+    await expect(notebook.create({ title: 'n', formatVersion: 1 })).rejects.toBeInstanceOf(
+      ConflictError,
+    )
+  })
+
+  test('a rejected fetch (no response) maps to NetworkError', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(notebook.list()).rejects.toBeInstanceOf(NetworkError)
   })
 })
 
 describe('auth middleware', () => {
   test('sends Bearer header when token getter is set', async () => {
     setAuthTokenGetter(() => 'tok-123')
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [] }))
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { items: [], total: 0, limit: 200, offset: 0 }),
+    )
 
     await notebook.list()
 
@@ -55,38 +66,13 @@ describe('auth middleware', () => {
   })
 
   test('omits Authorization header when token getter returns null', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [] }))
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { items: [], total: 0, limit: 200, offset: 0 }),
+    )
 
     await notebook.list()
 
     expect(lastRequest().headers.has('authorization')).toBe(false)
-  })
-})
-
-describe('create', () => {
-  test('POSTs the title with the default formatVersion and returns the notebook', async () => {
-    const created = {
-      id: 'nb-1',
-      ownerId: 'owner-1',
-      title: 'My notebook',
-      formatVersion: 1,
-      createdAt: 0,
-      updatedAt: 0,
-      cells: [],
-    }
-    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
-
-    const result = await notebook.create({ title: 'My notebook' })
-
-    // The shim injects the server-defaulted formatVersion (TARDIS-131; #132
-    // carries the real value) and returns the parsed notebook unchanged.
-    expect(result).toEqual(created)
-    const req = lastRequest()
-    expect(req.method).toBe('POST')
-    expect(JSON.parse(await req.clone().text())).toEqual({
-      title: 'My notebook',
-      formatVersion: 1,
-    })
   })
 })
 
@@ -104,5 +90,52 @@ describe('list', () => {
     const req = lastRequest()
     expect(req.method).toBe('GET')
     expect(req.url).toContain('/api/v1/notebooks?limit=200')
+  })
+})
+
+describe('create', () => {
+  const created = {
+    id: 'nb-1',
+    ownerId: 'owner-1',
+    title: 'My notebook',
+    formatVersion: 1,
+    createdAt: 0,
+    updatedAt: 0,
+    cells: [],
+  }
+
+  test('POSTs title and the caller-supplied formatVersion, returns the notebook', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+
+    const result = await notebook.create({ title: 'My notebook', formatVersion: 1 })
+
+    expect(result).toEqual(created)
+    const req = lastRequest()
+    expect(req.method).toBe('POST')
+    expect(await lastRequestBody()).toEqual({ title: 'My notebook', formatVersion: 1 })
+  })
+
+  test('forwards a client-chosen id and cells for offline-first creation', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+
+    const cells = [{ id: 'c1', kind: 'code' as const, content: 'x', updatedAt: 5 }]
+    await notebook.create({ title: 'My notebook', formatVersion: 1, id: 'nb-1', cells })
+
+    expect(await lastRequestBody()).toEqual({
+      title: 'My notebook',
+      formatVersion: 1,
+      id: 'nb-1',
+      cells,
+    })
+  })
+
+  test('omits id and cells from the body when not provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+
+    await notebook.create({ title: 'My notebook', formatVersion: 1 })
+
+    const body = await lastRequestBody()
+    expect(body).not.toHaveProperty('id')
+    expect(body).not.toHaveProperty('cells')
   })
 })

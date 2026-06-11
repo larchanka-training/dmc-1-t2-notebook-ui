@@ -48,7 +48,7 @@ describe('createNotebookAction', () => {
     const result = await createNotebookAction('new')
 
     expect(result).toEqual(created)
-    expect(createSpy).toHaveBeenCalledWith({ title: 'new' })
+    expect(createSpy).toHaveBeenCalledWith({ title: 'new', formatVersion: 1 })
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 
