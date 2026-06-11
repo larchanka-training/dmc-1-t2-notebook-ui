@@ -10,6 +10,10 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
+function noContentResponse(): Response {
+  return new Response(null, { status: 204 })
+}
+
 let fetchMock: ReturnType<typeof vi.fn>
 
 function lastRequest(): Request {
@@ -244,5 +248,28 @@ describe('patch', () => {
     await expect(
       notebook.patch('nb-1', { title: 'Renamed', formatVersion: 1, cells }),
     ).rejects.toBeInstanceOf(NetworkError)
+  })
+})
+
+describe('remove', () => {
+  test('DELETEs /notebooks/{id} and resolves on 204', async () => {
+    fetchMock.mockResolvedValueOnce(noContentResponse())
+
+    await expect(notebook.remove('nb-1')).resolves.toBeUndefined()
+    const req = lastRequest()
+    expect(req.method).toBe('DELETE')
+    expect(req.url).toContain('/api/v1/notebooks/nb-1')
+  })
+
+  test('401 maps to UnauthorizedError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { error: { code: 'invalid_token', message: 'expired' } }),
+    )
+    await expect(notebook.remove('nb-1')).rejects.toBeInstanceOf(UnauthorizedError)
+  })
+
+  test('a rejected fetch maps to NetworkError', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(notebook.remove('nb-1')).rejects.toBeInstanceOf(NetworkError)
   })
 })

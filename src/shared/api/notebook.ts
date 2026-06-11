@@ -105,3 +105,24 @@ export async function patch(id: string, input: UpdateNotebookInput): Promise<Not
     }),
   )
 }
+
+/**
+ * Soft-delete a notebook (the server marks it deleted, does not erase it).
+ * Named `remove`, not `delete`, since `delete` is a reserved word. Returns 204
+ * with no body, so success is read from `response.ok` rather than `request`'s
+ * data-or-throw unwrap; a rejected fetch still maps to NetworkError.
+ */
+export async function remove(id: string): Promise<void> {
+  let response: Response
+  let error: unknown
+  try {
+    const result = await notebookClient.DELETE('/notebooks/{notebook_id}', {
+      params: { path: { notebook_id: id } },
+    })
+    response = result.response
+    error = result.error
+  } catch (cause) {
+    throw new NetworkError('Notebook request failed', cause)
+  }
+  if (!response.ok) throw toApiError(response.status, error)
+}
