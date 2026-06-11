@@ -1,7 +1,7 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { notebook as notebookApi } from '@/shared/api'
-import { ApiError } from '@/shared/api/errors'
+import { ApiError, notebook as notebookApi } from '@/shared/api'
+import { FORMAT_VERSION } from '../persistence/schema'
 import { createNotebookAction, notebookListResource } from './notebookList'
 
 // GET /notebooks returns lightweight rows (NotebookListItem); POST returns the
@@ -9,7 +9,7 @@ import { createNotebookAction, notebookListResource } from './notebookList'
 const listItem = (id: string, title: string): notebookApi.NotebookListItem => ({
   id,
   title,
-  formatVersion: 1,
+  formatVersion: FORMAT_VERSION,
   createdAt: 0,
   updatedAt: 0,
   cellsCount: 0,
@@ -19,7 +19,7 @@ const fullNotebook = (id: string, title: string): notebookApi.Notebook => ({
   id,
   title,
   ownerId: 'owner-1',
-  formatVersion: 1,
+  formatVersion: FORMAT_VERSION,
   createdAt: 0,
   updatedAt: 0,
   cells: [],
@@ -48,7 +48,7 @@ describe('createNotebookAction', () => {
     const result = await createNotebookAction('new')
 
     expect(result).toEqual(created)
-    expect(createSpy).toHaveBeenCalledWith({ title: 'new', formatVersion: 1 })
+    expect(createSpy).toHaveBeenCalledWith({ title: 'new', formatVersion: FORMAT_VERSION })
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 

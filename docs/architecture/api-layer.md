@@ -42,7 +42,8 @@ Consumers import the namespaces:
 ```ts
 import { auth, llm, notebook } from '@/shared/api'
 
-await auth.login({ email, password })
+await auth.requestOtp(email) // emails a one-time code (passwordless, no password)
+const session = await auth.verifyOtp({ email, otp }) // verify the code → tokens + user
 const notebooks = await notebook.list() // NotebookListItem[] (no cells)
 const one = await notebook.get(id) // full Notebook with cells
 // formatVersion is owned by the domain model (features/notebook/persistence),
@@ -55,6 +56,8 @@ const merged = await notebook.patch(id, { title, formatVersion: 1, cells, delete
 await notebook.remove(id) // soft-delete (204); named `remove`, not `delete`
 const generated = await llm.generateCode({ prompt: 'sum two numbers' })
 ```
+
+`get`, `create`, and `patch` return a `Notebook` whose `cells` is always an array: the field is optional on the wire (`NotebookResponse` does not require it), so the facade normalizes a missing `cells` to `[]` at the boundary. Consumers can rely on `nb.cells` being present.
 
 Error classes (rethrown by every facade call when the HTTP status is non-2xx):
 
@@ -86,10 +89,10 @@ Token injection:
 
 ```ts
 import { setAuthTokenGetter } from '@/shared/api'
-import { tokenAtom } from '@/entities/session'
+import { accessTokenAtom } from '@/entities/session'
 
 // Once at app boot (currently wired in src/app/model/setup.ts):
-setAuthTokenGetter(() => tokenAtom())
+setAuthTokenGetter(() => accessTokenAtom())
 ```
 
 The token itself lives in `@/entities/session` — the API facade only knows how to read it via the getter, so `shared/api` stays free of business state.
@@ -98,7 +101,7 @@ The token itself lives in `@/entities/session` — the API facade only knows how
 
 ## Rules
 
-1. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, or `app/`. Enforced by ESLint (`no-restricted-imports`).
+1. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, `app/`, or `entities/`. Enforced by ESLint (`no-restricted-imports`).
 2. **`shared/api` is framework-agnostic** — no Reatom, no React. Functions return `Promise<T>` and throw `ApiError`. Reatom wrappers live in `features/<name>/model/`.
 3. **The generated folder is committed** but is treated like a build artifact: never edit by hand, regenerate via `pnpm api:generate`. `api:check` in pre-push fails on drift.
 4. **Calls from Reatom actions must use `wrap`** because the project enables `clearStack()`. See [reatom.md](./reatom.md):
