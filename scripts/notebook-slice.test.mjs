@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import {
-  NOTEBOOK_PATHS,
+  NOTEBOOK_PREFIX,
   STRIP_PREFIX,
   assembleNotebookSpec,
   collectSchemaRefs,
+  notebookPaths,
 } from './notebook-slice.mjs'
 
 // Minimal backend-shaped fixture: the two notebook paths over a small schema
@@ -97,16 +98,55 @@ function fixture() {
   }
 }
 
+describe('notebookPaths', () => {
+  test('selects the resource root and sub-paths, excludes siblings, sorted', () => {
+    const spec = {
+      paths: {
+        '/api/v1/notebooks/{notebook_id}': {},
+        '/api/v1/notebooks': {},
+        '/api/v1/notebooks/{notebook_id}/cells': {},
+        '/api/v1/notebooks-archive': {}, // boundary: NOT a notebook path
+        '/api/v1/execute': {},
+      },
+    }
+    expect(notebookPaths(spec)).toEqual([
+      '/api/v1/notebooks',
+      '/api/v1/notebooks/{notebook_id}',
+      '/api/v1/notebooks/{notebook_id}/cells',
+    ])
+  })
+})
+
 describe('assembleNotebookSpec', () => {
-  test('keeps both notebook paths with the /api/v1 prefix stripped', () => {
+  test('keeps the notebook paths with the /api/v1 prefix stripped', () => {
     const slice = assembleNotebookSpec(fixture())
     expect(Object.keys(slice.paths).sort()).toEqual(['/notebooks', '/notebooks/{notebook_id}'])
   })
 
-  test('throws when a notebook path is missing', () => {
+  test('L7: a new notebook sub-path is picked up automatically', () => {
     const spec = fixture()
+    spec.paths['/api/v1/notebooks/{notebook_id}/cells'] = {
+      get: {
+        responses: {
+          200: {
+            description: 'OK',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/NotebookResponse' } },
+            },
+          },
+        },
+      },
+    }
+    expect(Object.keys(assembleNotebookSpec(spec).paths)).toContain(
+      '/notebooks/{notebook_id}/cells',
+    )
+  })
+
+  test('throws when the backend has no notebook paths', () => {
+    const spec = fixture()
+    delete spec.paths['/api/v1/notebooks']
     delete spec.paths['/api/v1/notebooks/{notebook_id}']
-    expect(() => assembleNotebookSpec(spec)).toThrow(/missing path/)
+    expect(() => assembleNotebookSpec(spec)).toThrow(/no .* paths/)
   })
 
   test('inlines the transitive closure, alphabetical, nothing unrelated', () => {
@@ -147,6 +187,21 @@ describe('assembleNotebookSpec', () => {
     expect(slice.info.version).toBe('9.9.9')
   })
 
+  test('L9: omits securitySchemes when the backend has none', () => {
+    const spec = fixture()
+    delete spec.components.securitySchemes
+    expect(assembleNotebookSpec(spec).components.securitySchemes).toBeUndefined()
+  })
+
+  test('L9: falls back to openapi 3.1.0 / version 0.0.0 when absent', () => {
+    const spec = fixture()
+    delete spec.openapi
+    delete spec.info
+    const slice = assembleNotebookSpec(spec)
+    expect(slice.openapi).toBe('3.1.0')
+    expect(slice.info.version).toBe('0.0.0')
+  })
+
   test('does not mutate the input spec', () => {
     const spec = fixture()
     assembleNotebookSpec(spec)
@@ -154,8 +209,24 @@ describe('assembleNotebookSpec', () => {
     expect(spec.components.schemas.NotebookResponse.description).toBe('schema docstring')
   })
 
-  test('all notebook paths are /api/v1-prefixed (strip is a no-op-free slice)', () => {
-    expect(NOTEBOOK_PATHS.every((p) => p.startsWith(STRIP_PREFIX))).toBe(true)
+  test('L5: throws on a non-schema component $ref left in the slice', () => {
+    const spec = fixture()
+    spec.paths['/api/v1/notebooks'].get.responses[200] = {
+      $ref: '#/components/responses/NotFound',
+    }
+    expect(() => assembleNotebookSpec(spec)).toThrow(/non-schema component/)
+  })
+
+  test('L5: throws on an unresolved schema $ref', () => {
+    const spec = fixture()
+    spec.paths['/api/v1/notebooks'].post.requestBody.content['application/json'].schema = {
+      $ref: '#/components/schemas/Missing',
+    }
+    expect(() => assembleNotebookSpec(spec)).toThrow(/unresolved schema/)
+  })
+
+  test('NOTEBOOK_PREFIX is under STRIP_PREFIX', () => {
+    expect(NOTEBOOK_PREFIX.startsWith(STRIP_PREFIX)).toBe(true)
   })
 })
 

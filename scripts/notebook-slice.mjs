@@ -4,38 +4,78 @@
 // scripts/api-gen.mjs reads openapi/backend/openapi.json and feeds the parsed
 // object here. See scripts/notebook-slice.test.mjs.
 
-export const NOTEBOOK_PATHS = ['/api/v1/notebooks', '/api/v1/notebooks/{notebook_id}']
+// Notebook endpoints are selected by URL prefix, not a literal list, so a new
+// backend endpoint under /api/v1/notebooks is picked up without editing this
+// file. STRIP_PREFIX is dropped from the emitted paths (the client targets it).
+export const NOTEBOOK_PREFIX = '/api/v1/notebooks'
 export const STRIP_PREFIX = '/api/v1'
 
-// Collect every `#/components/schemas/<name>` referenced anywhere under `node`
-// (handles items / allOf / anyOf / oneOf / additionalProperties / nesting).
-export function collectSchemaRefs(node, acc) {
+// Invoke `onRef` with every `$ref` string under `node`, regardless of which
+// component bucket it points at (handles arrays / nested objects).
+function collectRefs(node, onRef) {
   if (Array.isArray(node)) {
-    for (const item of node) collectSchemaRefs(item, acc)
+    for (const item of node) collectRefs(item, onRef)
     return
   }
   if (node && typeof node === 'object') {
     for (const [key, value] of Object.entries(node)) {
-      if (key === '$ref' && typeof value === 'string') {
-        const match = /^#\/components\/schemas\/(.+)$/.exec(value)
-        if (match) acc.add(match[1])
-      } else {
-        collectSchemaRefs(value, acc)
-      }
+      if (key === '$ref' && typeof value === 'string') onRef(value)
+      else collectRefs(value, onRef)
     }
   }
+}
+
+// Collect every `#/components/schemas/<name>` referenced anywhere under `node`
+// (handles items / allOf / anyOf / oneOf / additionalProperties / nesting).
+export function collectSchemaRefs(node, acc) {
+  collectRefs(node, (ref) => {
+    const match = /^#\/components\/schemas\/(.+)$/.exec(ref)
+    if (match) acc.add(match[1])
+  })
+}
+
+// Backend paths under the notebook resource, sorted for deterministic output.
+// The trailing-slash boundary keeps siblings like `/api/v1/notebooks-archive`
+// out.
+export function notebookPaths(spec) {
+  return Object.keys(spec.paths ?? {})
+    .filter((p) => p === NOTEBOOK_PREFIX || p.startsWith(`${NOTEBOOK_PREFIX}/`))
+    .sort()
+}
+
+// The slice inlines only components.schemas (+ securitySchemes). Fail loudly if
+// the assembled doc still references a non-schema component (e.g. a shared
+// response/parameter the backend factored out) or an unresolved schema, instead
+// of silently emitting a dangling / `unknown` type.
+function assertResolvableRefs(doc) {
+  collectRefs(doc, (ref) => {
+    const match = /^#\/components\/schemas\/(.+)$/.exec(ref)
+    if (!match) {
+      throw new Error(
+        `[api-gen] notebook slice references a non-schema component: ${ref}. ` +
+          `The slice inlines only components.schemas — inline it in the backend ` +
+          `or extend scripts/notebook-slice.mjs.`,
+      )
+    }
+    if (!doc.components.schemas[match[1]]) {
+      throw new Error(`[api-gen] notebook slice has an unresolved schema $ref: ${ref}`)
+    }
+  })
 }
 
 // Build a minimal, self-contained OpenAPI doc covering only the notebook paths,
 // with the `/api/v1` prefix stripped and the reachable schemas inlined.
 export function assembleNotebookSpec(spec) {
+  const matched = notebookPaths(spec)
+  if (matched.length === 0) {
+    throw new Error(`[api-gen] backend spec has no ${NOTEBOOK_PREFIX} paths`)
+  }
+
   const paths = {}
-  for (const path of NOTEBOOK_PATHS) {
-    const item = spec.paths?.[path]
-    if (!item) throw new Error(`[api-gen] backend spec is missing path ${path}`)
+  for (const path of matched) {
     // Slice + drop the operation docstrings, but keep the (required) response
     // descriptions so the doc stays valid OpenAPI.
-    const sliced = structuredClone(item)
+    const sliced = structuredClone(spec.paths[path])
     delete sliced.description
     for (const key of Object.keys(sliced)) {
       const op = sliced[key]
@@ -70,7 +110,7 @@ export function assembleNotebookSpec(spec) {
     schemas[name] = schema
   }
 
-  return {
+  const doc = {
     openapi: spec.openapi ?? '3.1.0',
     info: {
       title: 'Notebook API (vendored slice of api/docs/openapi.json)',
@@ -84,4 +124,7 @@ export function assembleNotebookSpec(spec) {
         : {}),
     },
   }
+
+  assertResolvableRefs(doc)
+  return doc
 }
