@@ -62,3 +62,30 @@ describe('auth middleware', () => {
     expect(lastRequest().headers.has('authorization')).toBe(false)
   })
 })
+
+describe('create', () => {
+  test('POSTs the title with the default formatVersion and returns the notebook', async () => {
+    const created = {
+      id: 'nb-1',
+      ownerId: 'owner-1',
+      title: 'My notebook',
+      formatVersion: 1,
+      createdAt: 0,
+      updatedAt: 0,
+      cells: [],
+    }
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, created))
+
+    const result = await notebook.create({ title: 'My notebook' })
+
+    // The shim injects the server-defaulted formatVersion (TARDIS-131; #132
+    // carries the real value) and returns the parsed notebook unchanged.
+    expect(result).toEqual(created)
+    const req = lastRequest()
+    expect(req.method).toBe('POST')
+    expect(JSON.parse(await req.clone().text())).toEqual({
+      title: 'My notebook',
+      formatVersion: 1,
+    })
+  })
+})
