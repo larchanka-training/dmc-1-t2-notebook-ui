@@ -1,5 +1,5 @@
 import { action, atom, wrap } from '@reatom/core'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'

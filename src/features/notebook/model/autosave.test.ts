@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import type { NotebookJSON } from '../persistence/schema'
 import {

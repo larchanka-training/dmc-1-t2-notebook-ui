@@ -16,7 +16,7 @@
 //      never reaches 'saved'.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { clearStack, context, STACK, wrap } from '@reatom/core'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { saveNow, saveStatusAtom } from './autosave'
 
 let frame: ReturnType<typeof context.start>
