@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as notebook from './notebook'
-import { ConflictError, NetworkError, UnauthorizedError } from './errors'
+import { ConflictError, NetworkError, NotFoundError, UnauthorizedError } from './errors'
 import { setAuthTokenGetter } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -90,6 +90,41 @@ describe('list', () => {
     const req = lastRequest()
     expect(req.method).toBe('GET')
     expect(req.url).toContain('/api/v1/notebooks?limit=200')
+  })
+})
+
+describe('get', () => {
+  const full = {
+    id: 'nb-1',
+    ownerId: 'owner-1',
+    title: 'My notebook',
+    formatVersion: 1,
+    createdAt: 0,
+    updatedAt: 0,
+    cells: [{ id: 'c1', kind: 'code', content: 'x', updatedAt: 5 }],
+  }
+
+  test('GETs /notebooks/{id} and returns the full notebook with cells', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, full))
+
+    const result = await notebook.get('nb-1')
+
+    expect(result).toEqual(full)
+    const req = lastRequest()
+    expect(req.method).toBe('GET')
+    expect(req.url).toContain('/api/v1/notebooks/nb-1')
+  })
+
+  test('404 maps to NotFoundError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { error: { code: 'not_found', message: 'gone' } }),
+    )
+    await expect(notebook.get('missing')).rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  test('a rejected fetch maps to NetworkError', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(notebook.get('nb-1')).rejects.toBeInstanceOf(NetworkError)
   })
 })
 

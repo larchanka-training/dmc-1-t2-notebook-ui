@@ -60,6 +60,12 @@ export async function list(): Promise<NotebookListItem[]> {
   return data.items
 }
 
+export async function get(id: string): Promise<Notebook> {
+  return await request<Notebook>(
+    notebookClient.GET('/notebooks/{notebook_id}', { params: { path: { notebook_id: id } } }),
+  )
+}
+
 export async function create(input: CreateNotebookInput): Promise<Notebook> {
   const body: Schemas['NotebookCreate'] = {
     title: input.title,
