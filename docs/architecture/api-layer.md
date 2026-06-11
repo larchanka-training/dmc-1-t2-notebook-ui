@@ -14,10 +14,10 @@ src/shared/api/
 │       ├── llm.d.ts           # types-only, regenerated from openapi/llm.openapi.yaml
 │       └── notebook.d.ts      # types-only, regenerated from openapi/backend/openapi.json (sliced)
 ├── client.ts                  # openapi-fetch clients + auth-token middleware
-├── errors.ts                  # ApiError + 400/401/404/429/5xx subclasses, status→error mapper
+├── errors.ts                  # ApiError + 400/401/404/409/429/5xx + NetworkError, status→error mapper
 ├── auth.ts                    # login / logout / getMe
 ├── llm.ts                     # generateCode (Cloud LLM agent)
-├── notebook.ts                # list / create  (thin shim; full sync facade is #132)
+├── notebook.ts                # list / get / create / patch / remove (typed sync facade)
 └── index.ts                   # public re-export (namespace style)
 ```
 
@@ -43,15 +43,29 @@ Consumers import the namespaces:
 import { auth, llm, notebook } from '@/shared/api'
 
 await auth.login({ email, password })
-const notebooks = await notebook.list()
-const created = await notebook.create({ title: 'Untitled' })
+const notebooks = await notebook.list() // NotebookListItem[] (no cells)
+const one = await notebook.get(id) // full Notebook with cells
+// formatVersion is owned by the domain model (features/notebook/persistence),
+// not the transport layer, so the caller passes it in. `id` is optional and
+// client-chosen for offline-first idempotency.
+const created = await notebook.create({ title: 'Untitled', formatVersion: 1 })
+// PATCH sends the whole notebook (server does the LWW merge); deletedCells
+// carries tombstones so cell removals propagate. It is request-only.
+const merged = await notebook.patch(id, { title, formatVersion: 1, cells, deletedCells })
+await notebook.remove(id) // soft-delete (204); named `remove`, not `delete`
 const generated = await llm.generateCode({ prompt: 'sum two numbers' })
 ```
 
 Error classes (rethrown by every facade call when the HTTP status is non-2xx):
 
 ```ts
-import { ApiError, UnauthorizedError, NotFoundError, BadRequestError } from '@/shared/api'
+import {
+  ApiError,
+  UnauthorizedError,
+  NotFoundError,
+  ConflictError,
+  NetworkError,
+} from '@/shared/api'
 
 try {
   await notebook.list()
@@ -60,7 +74,10 @@ try {
     /* ... */
   }
   if (e instanceof UnauthorizedError) {
-    /* ... */
+    /* token expired — stop syncing until re-login */
+  }
+  if (e instanceof NetworkError) {
+    /* request never reached the server (status 0) — safe to retry later */
   }
 }
 ```
