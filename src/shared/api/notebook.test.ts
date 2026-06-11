@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as notebook from './notebook'
-import { ConflictError, NetworkError, NotFoundError, UnauthorizedError } from './errors'
+import {
+  ApiError,
+  ConflictError,
+  NetworkError,
+  NotFoundError,
+  RateLimitedError,
+  UnauthorizedError,
+} from './errors'
 import { setAuthTokenGetter } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -95,6 +102,14 @@ describe('list', () => {
     expect(req.method).toBe('GET')
     expect(req.url).toContain('/api/v1/notebooks?limit=200')
   })
+
+  test('rejects with a malformed_response ApiError when the body has no items array', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { total: 0 }))
+
+    const err = await notebook.list().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe('malformed_response')
+  })
 })
 
 describe('get', () => {
@@ -119,11 +134,47 @@ describe('get', () => {
     expect(req.url).toContain('/api/v1/notebooks/nb-1')
   })
 
+  test('normalizes a cells-less response to an empty array', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 'nb-1',
+        ownerId: 'owner-1',
+        title: 'My notebook',
+        formatVersion: 1,
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    )
+
+    const result = await notebook.get('nb-1')
+
+    expect(result.cells).toEqual([])
+  })
+
   test('404 maps to NotFoundError', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(404, { error: { code: 'not_found', message: 'gone' } }),
     )
     await expect(notebook.get('missing')).rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  test('401 maps to UnauthorizedError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { error: { code: 'invalid_token', message: 'expired' } }),
+    )
+    await expect(notebook.get('nb-1')).rejects.toBeInstanceOf(UnauthorizedError)
+  })
+
+  test('429 maps to RateLimitedError carrying the parsed Retry-After', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'slow down' } }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'Retry-After': '30' },
+      }),
+    )
+    const err = await notebook.get('nb-1').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(RateLimitedError)
+    expect((err as RateLimitedError).retryAfter).toBe(30)
   })
 
   test('a rejected fetch maps to NetworkError', async () => {
@@ -176,6 +227,39 @@ describe('create', () => {
     const body = await lastRequestBody()
     expect(body).not.toHaveProperty('id')
     expect(body).not.toHaveProperty('cells')
+  })
+
+  test('normalizes a cells-less response to an empty array', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: 'nb-1',
+        ownerId: 'owner-1',
+        title: 'My notebook',
+        formatVersion: 1,
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    )
+
+    const result = await notebook.create({ title: 'My notebook', formatVersion: 1 })
+
+    expect(result.cells).toEqual([])
+  })
+
+  test('422 maps to a generic ApiError carrying the status', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(422, { detail: [{ loc: ['body', 'title'], msg: 'required', type: 'missing' }] }),
+    )
+    await expect(notebook.create({ title: '', formatVersion: 1 })).rejects.toMatchObject({
+      status: 422,
+    })
+  })
+
+  test('a rejected fetch maps to NetworkError', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(notebook.create({ title: 'n', formatVersion: 1 })).rejects.toBeInstanceOf(
+      NetworkError,
+    )
   })
 })
 
@@ -266,6 +350,13 @@ describe('remove', () => {
       jsonResponse(401, { error: { code: 'invalid_token', message: 'expired' } }),
     )
     await expect(notebook.remove('nb-1')).rejects.toBeInstanceOf(UnauthorizedError)
+  })
+
+  test('404 maps to NotFoundError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { error: { code: 'not_found', message: 'gone' } }),
+    )
+    await expect(notebook.remove('missing')).rejects.toBeInstanceOf(NotFoundError)
   })
 
   test('a rejected fetch maps to NetworkError', async () => {

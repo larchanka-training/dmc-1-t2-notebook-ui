@@ -1,5 +1,5 @@
 import { notebookClient } from './client'
-import { NetworkError, toApiError } from './errors'
+import { ApiError, NetworkError, parseRetryAfter, toApiError } from './errors'
 import type { components } from './generated/openapi-ts/notebook'
 
 // Typed facade over the generated notebook client. Business code (features /
@@ -7,12 +7,17 @@ import type { components } from './generated/openapi-ts/notebook'
 // domain types below — never through the generated `paths`/`components`.
 type Schemas = components['schemas']
 
-/** A notebook with its cells, as returned by GET/POST/PATCH. */
-export type Notebook = Schemas['NotebookResponse']
-/** A lightweight row from GET /notebooks (no cells, just `cellsCount`). */
-export type NotebookListItem = Schemas['NotebookListItem']
 /** A single notebook cell on the wire. */
 export type NotebookCell = Schemas['CellSchema']
+/**
+ * A notebook with its cells, as returned by GET/POST/PATCH. `cells` is
+ * optional on the wire (`NotebookResponse` does not require it), but the facade
+ * normalizes it to an array at the boundary, so consumers can always treat
+ * `cells` as a present array — even when the server omits the field.
+ */
+export type Notebook = Omit<Schemas['NotebookResponse'], 'cells'> & { cells: NotebookCell[] }
+/** A lightweight row from GET /notebooks (no cells, just `cellsCount`). */
+export type NotebookListItem = Schemas['NotebookListItem']
 /** A deleted-cell marker. Request-only: it appears in PATCH bodies, never in responses. */
 export type CellTombstone = Schemas['CellTombstone']
 
@@ -44,8 +49,9 @@ export interface UpdateNotebookInput {
 }
 
 // GET /notebooks is paginated ({ items, total, limit, offset }); the facade
-// currently reads a single page at the server max so users with many notebooks
-// are not silently truncated. TODO(#135): real pagination / bootstrap.
+// reads a single page at the server maximum of 200. With more than 200
+// notebooks the tail is not returned; list() logs a warning when it detects
+// this truncation. TODO(#135): real pagination / bootstrap.
 const LIST_PAGE_LIMIT = 200
 
 /**
@@ -64,7 +70,11 @@ async function request<T>(
     throw new NetworkError('Notebook request failed', cause)
   }
   const { data, error, response } = result
-  if (error !== undefined || data === undefined) throw toApiError(response.status, error)
+  if (error !== undefined || data === undefined) {
+    const retryAfter =
+      response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : undefined
+    throw toApiError(response.status, error, retryAfter)
+  }
   return data
 }
 
@@ -72,13 +82,41 @@ export async function list(): Promise<NotebookListItem[]> {
   const data = await request<Schemas['NotebookListResponse']>(
     notebookClient.GET('/notebooks', { params: { query: { limit: LIST_PAGE_LIMIT } } }),
   )
+  // Boundary validation (AGENTS §11): the 2xx body is typed but untrusted. A
+  // schema drift or a garbage 2xx from an edge proxy could give us a body whose
+  // `items` is not an array; returning it as-is crashes the first `.map()` down
+  // the render stack. Fail loud as an ApiError the sync layer already catches.
+  if (!Array.isArray(data.items)) {
+    throw new ApiError(
+      0,
+      'malformed_response',
+      'notebook.list: unexpected response shape (items is not an array)',
+    )
+  }
+  if (data.items.length < data.total) {
+    console.warn(
+      `notebook.list: returned ${data.items.length} of ${data.total} notebooks; ` +
+        `the tail is truncated at limit ${LIST_PAGE_LIMIT}. TODO(#135): pagination.`,
+    )
+  }
   return data.items
 }
 
+/**
+ * Guarantee a `cells` array on a notebook response. `cells` is optional on the
+ * wire (legitimately absent per the contract, unlike `list`'s `items`), so we
+ * default it to `[]` rather than throwing — the sync layer (#133+) can then
+ * `nb.cells.map(...)` without a null check.
+ */
+function normalizeNotebook(data: Schemas['NotebookResponse']): Notebook {
+  return { ...data, cells: data.cells ?? [] }
+}
+
 export async function get(id: string): Promise<Notebook> {
-  return await request<Notebook>(
+  const data = await request<Schemas['NotebookResponse']>(
     notebookClient.GET('/notebooks/{notebook_id}', { params: { path: { notebook_id: id } } }),
   )
+  return normalizeNotebook(data)
 }
 
 export async function create(input: CreateNotebookInput): Promise<Notebook> {
@@ -88,7 +126,10 @@ export async function create(input: CreateNotebookInput): Promise<Notebook> {
     ...(input.id !== undefined ? { id: input.id } : {}),
     ...(input.cells !== undefined ? { cells: input.cells } : {}),
   }
-  return await request<Notebook>(notebookClient.POST('/notebooks', { body }))
+  const data = await request<Schemas['NotebookResponse']>(
+    notebookClient.POST('/notebooks', { body }),
+  )
+  return normalizeNotebook(data)
 }
 
 export async function patch(id: string, input: UpdateNotebookInput): Promise<Notebook> {
@@ -98,12 +139,13 @@ export async function patch(id: string, input: UpdateNotebookInput): Promise<Not
     cells: input.cells,
     ...(input.deletedCells !== undefined ? { deletedCells: input.deletedCells } : {}),
   }
-  return await request<Notebook>(
+  const data = await request<Schemas['NotebookResponse']>(
     notebookClient.PATCH('/notebooks/{notebook_id}', {
       params: { path: { notebook_id: id } },
       body,
     }),
   )
+  return normalizeNotebook(data)
 }
 
 /**
@@ -124,5 +166,9 @@ export async function remove(id: string): Promise<void> {
   } catch (cause) {
     throw new NetworkError('Notebook request failed', cause)
   }
-  if (!response.ok) throw toApiError(response.status, error)
+  if (!response.ok) {
+    const retryAfter =
+      response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : undefined
+    throw toApiError(response.status, error, retryAfter)
+  }
 }
