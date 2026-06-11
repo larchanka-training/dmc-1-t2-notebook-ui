@@ -92,9 +92,23 @@ jobs:
             --build-arg VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL || '/api/v1' }} \
             -t js-notebook-ui:${{ github.sha }} ./
 
+  api-check:
+    name: API drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+      # Self-contained: regenerates from openapi/*.openapi.yaml and the vendored
+      # openapi/backend/openapi.json, then diffs against the committed clients.
+      # Needs no backend and no ../api. Catches a stale generated/*.d.ts.
+      - run: pnpm run api:check
+
   ci-complete:
     name: CI complete
-    needs: [lint, test, build, docker-build]
+    needs: [lint, test, build, docker-build, api-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
