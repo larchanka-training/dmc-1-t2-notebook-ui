@@ -47,7 +47,7 @@ describe('error mapping', () => {
 describe('auth middleware', () => {
   test('sends Bearer header when token getter is set', async () => {
     setAuthTokenGetter(() => 'tok-123')
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, []))
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [] }))
 
     await notebook.list()
 
@@ -55,7 +55,7 @@ describe('auth middleware', () => {
   })
 
   test('omits Authorization header when token getter returns null', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, []))
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [] }))
 
     await notebook.list()
 
@@ -87,5 +87,22 @@ describe('create', () => {
       title: 'My notebook',
       formatVersion: 1,
     })
+  })
+})
+
+describe('list', () => {
+  test('GETs /notebooks?limit=200 and returns the page items', async () => {
+    const items = [
+      { id: 'a', title: 'A', formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 },
+      { id: 'b', title: 'B', formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 },
+    ]
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items, total: 2, limit: 200, offset: 0 }))
+
+    const result = await notebook.list()
+
+    expect(result).toEqual(items)
+    const req = lastRequest()
+    expect(req.method).toBe('GET')
+    expect(req.url).toContain('/api/v1/notebooks?limit=200')
   })
 })
