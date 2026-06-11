@@ -7,6 +7,7 @@ import { accessTokenAtom, clearSession, refreshTokenAtom, userAtom } from '@/ent
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import { loadNotebook, markBootRestored, startAutosave } from '@/features/notebook'
+import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
 // #8 — one-time migration: the pre-OTP model stored a single JWT under
 // 'session.token'. The new model uses 'session.accessToken' + 'session.refreshToken'.
@@ -94,6 +95,7 @@ rootFrame.run(() => loadCurrentUserAction())
 // mounted), and fires synchronously on subscribe to cover the first paint.
 rootFrame.run(() => {
   startThemeSync()
+  startCodeGeneratorBridge()
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order

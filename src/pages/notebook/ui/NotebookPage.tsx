@@ -1,6 +1,7 @@
 import { reatomComponent } from '@reatom/react'
 import { NotebookView, notebookLoadedAtom } from '@/features/notebook'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { NotebookLlmBar } from './NotebookLlmBar'
 
 // Gate the editor behind a skeleton until the boot-time load has settled.
 // `loadNotebook` reads IndexedDB asynchronously; rendering NotebookView before
@@ -16,7 +17,14 @@ const NotebookPage = reatomComponent(() => {
       </div>
     )
   }
-  return <NotebookView />
+  return (
+    <div className="flex min-h-full flex-col">
+      <NotebookLlmBar />
+      <div className="flex-1">
+        <NotebookView />
+      </div>
+    </div>
+  )
 }, 'NotebookPage')
 
 export default NotebookPage

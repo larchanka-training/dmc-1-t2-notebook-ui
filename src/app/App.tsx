@@ -5,6 +5,7 @@ import '@/pages/login'
 import '@/pages/about'
 import '@/pages/shadcn-components'
 import '@/pages/custom-components'
+import '@/pages/llm-playground'
 
 const App = reatomComponent(() => rootRoute.render(), 'App')
 

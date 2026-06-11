@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { reatomComponent } from '@reatom/react'
 import { wrap } from '@reatom/core'
+import { Bot } from 'lucide-react'
 import { cellsAtom, notebookTitleAtom, setNotebookTitle } from '../model/notebook'
+import { loadedModelAtom } from '../model/codeGenerator'
 
 const PLACEHOLDER = 'Untitled notebook'
 
@@ -14,6 +16,7 @@ const PLACEHOLDER = 'Untitled notebook'
 export const NotebookHeader = reatomComponent(() => {
   const title = notebookTitleAtom()
   const cellCount = cellsAtom().length
+  const loadedModel = loadedModelAtom()
   const ref = useRef<HTMLHeadingElement>(null)
   // The title at the moment editing started, so Escape can roll back the
   // live-synced atom to what it was before this edit.
@@ -59,6 +62,15 @@ export const NotebookHeader = reatomComponent(() => {
         </span>
         <span aria-hidden="true">·</span>
         <span>JavaScript / TypeScript</span>
+        {loadedModel && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="flex items-center gap-1 text-primary">
+              <Bot className="size-3" />
+              {loadedModel}
+            </span>
+          </>
+        )}
       </div>
 
       <h1

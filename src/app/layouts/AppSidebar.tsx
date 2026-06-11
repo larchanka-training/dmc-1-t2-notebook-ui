@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   BookText,
+  Bot,
   Copy,
   LogIn,
   LogOut,
@@ -75,6 +76,8 @@ const navComponents: NavItem[] = [
   { title: 'Shadcn UI', icon: LayoutGrid, url: 'components/shadcn' },
   { title: 'Custom', icon: Puzzle, url: 'components/custom' },
 ]
+
+const navAi: NavItem[] = [{ title: 'LLM Playground', icon: Bot, url: 'llm-playground' }]
 
 // About + Help render together at the bottom of the content area via
 // `InfoGroup` (defined below, after the shared label/active styles), so they
@@ -369,6 +372,7 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent className="overflow-x-hidden">
         <NavGroup label="Workspace" items={navMain} />
+        <NavGroup label="AI" items={navAi} />
         <NavGroup label="Components" items={navComponents} />
         <NotebooksGroup />
         <InfoGroup />

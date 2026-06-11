@@ -75,6 +75,9 @@ export interface NotebookCellProps {
   onDelete?: () => void
   onMoveUp?: () => void
   onMoveDown?: () => void
+  onInBrowserGenerate?: () => void
+  isGenerating?: boolean
+  generatorLoaded?: boolean
 }
 
 export function NotebookCell({
@@ -104,6 +107,9 @@ export function NotebookCell({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onInBrowserGenerate,
+  isGenerating,
+  generatorLoaded,
 }: NotebookCellProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -256,16 +262,34 @@ export function NotebookCell({
                 differs by kind (generate vs improve-diff). Presentational only:
                 the buttons click but do nothing until the LLM epic (07) wires
                 them; no handler, no fetch, no new dependency. */}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button type="button" aria-label={agentInBrowserLabel} className={AGENT_BTN}>
-                    <Bot className="size-[15px]" />
-                  </button>
-                }
-              />
-              <TooltipContent>{agentInBrowserLabel}</TooltipContent>
-            </Tooltip>
+            {isMarkdown && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={agentInBrowserLabel}
+                      className={cn(
+                        AGENT_BTN,
+                        !generatorLoaded &&
+                          'text-muted-foreground hover:bg-transparent hover:text-muted-foreground',
+                      )}
+                      disabled={!generatorLoaded || isGenerating}
+                      onClick={onInBrowserGenerate}
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="size-[15px] animate-spin" />
+                      ) : (
+                        <Bot className="size-[15px]" />
+                      )}
+                    </button>
+                  }
+                />
+                <TooltipContent>
+                  {generatorLoaded ? agentInBrowserLabel : 'Load LLM model first'}
+                </TooltipContent>
+              </Tooltip>
+            )}
 
             <Tooltip>
               <TooltipTrigger

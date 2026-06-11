@@ -45,6 +45,7 @@ import {
 import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
+import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -78,6 +79,9 @@ interface NotebookRowProps {
 const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }) => {
   const isActive = activeCellIdAtom() === cell.id
   const mode = cellModeAtom()
+  const hasGenerator = !!codeGeneratorAtom()
+  const isGenerating = !generateAndInsertCodeAction.ready()
+  const generateError = generateAndInsertCodeAction.error()
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
   // re-render the entire cell (card + toolbar + output) on every search
@@ -124,7 +128,17 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         onDelete={wrap(() => deleteCell(cell.id))}
         onMoveUp={wrap(() => moveCell(cell.id, -1))}
         onMoveDown={wrap(() => moveCell(cell.id, 1))}
+        onInBrowserGenerate={
+          cell.kind === 'markdown' ? wrap(() => generateAndInsertCodeAction(cell.id)) : undefined
+        }
+        generatorLoaded={hasGenerator}
+        isGenerating={isGenerating}
       />
+      {generateError && (
+        <p className="px-3 py-1 text-xs text-destructive">
+          Generate failed: {generateError.message}
+        </p>
+      )}
     </div>
   )
 }, 'NotebookRow')
