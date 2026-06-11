@@ -151,6 +151,24 @@ describe('get', () => {
     expect(result.cells).toEqual([])
   })
 
+  test('rejects with malformed_response when cells is present but not an array', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 'nb-1',
+        ownerId: 'owner-1',
+        title: 'My notebook',
+        formatVersion: 1,
+        createdAt: 0,
+        updatedAt: 0,
+        cells: null,
+      }),
+    )
+
+    const err = await notebook.get('nb-1').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe('malformed_response')
+  })
+
   test('404 maps to NotFoundError', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(404, { error: { code: 'not_found', message: 'gone' } }),

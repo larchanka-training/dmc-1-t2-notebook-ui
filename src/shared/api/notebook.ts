@@ -103,13 +103,23 @@ export async function list(): Promise<NotebookListItem[]> {
 }
 
 /**
- * Guarantee a `cells` array on a notebook response. `cells` is optional on the
- * wire (legitimately absent per the contract, unlike `list`'s `items`), so we
- * default it to `[]` rather than throwing — the sync layer (#133+) can then
- * `nb.cells.map(...)` without a null check.
+ * Guarantee a `cells` array on a notebook response (AGENTS §11 boundary check).
+ * `cells` is optional on the wire, so an absent (`undefined`) field defaults to
+ * `[]` — the sync layer (#133+) can then `nb.cells.map(...)` without a null
+ * check. Any other non-array value (`null`, a string, an object) is a contract
+ * violation: we fail loud rather than coerce it, so a malformed 2xx cannot pose
+ * as an empty notebook and look like authoritative "all cells deleted" state.
  */
 function normalizeNotebook(data: Schemas['NotebookResponse']): Notebook {
-  return { ...data, cells: data.cells ?? [] }
+  if (data.cells === undefined) return { ...data, cells: [] }
+  if (!Array.isArray(data.cells)) {
+    throw new ApiError(
+      0,
+      'malformed_response',
+      'notebook: unexpected response shape (cells is present but not an array)',
+    )
+  }
+  return { ...data, cells: data.cells }
 }
 
 export async function get(id: string): Promise<Notebook> {
