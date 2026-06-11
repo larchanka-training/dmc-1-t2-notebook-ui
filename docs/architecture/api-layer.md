@@ -27,7 +27,8 @@ Source-of-truth specs live in `openapi/`. `auth.openapi.yaml` and `llm.openapi.y
 
 ## Generator: `openapi-typescript` + `openapi-fetch`
 
-- **`openapi-typescript`** (dev) emits a single `.d.ts` per domain. **Types only — no runtime.** auth/llm read their `openapi/*.openapi.yaml`; notebook is assembled on the fly from `openapi/backend/openapi.json` — the `/notebooks` paths with the `/api/v1` prefix stripped (the client already targets that base) and the reachable schemas inlined.
+- **`openapi-typescript`** (dev) emits a single `.d.ts` per domain. **Types only — no runtime.** auth/llm read their `openapi/*.openapi.yaml`; notebook is assembled on the fly from `openapi/backend/openapi.json` — paths under `/api/v1/notebooks` with the `/api/v1` prefix stripped (the client already targets that base) and the reachable schemas inlined.
+  - The `/api/v1` version prefix is encoded in `scripts/notebook-slice.mjs` (`NOTEBOOK_PREFIX` / `STRIP_PREFIX`) and the client base URL (`client.ts`). An `/api/v2` bump touches both.
 - **`openapi-fetch`** (prod) is a tiny typed fetch wrapper that takes the generated `paths` interface as a generic.
 
 See `openapi.md` at the repo root for the PoC that compared this stack against `@hey-api/openapi-ts` and the rationale for choosing it.
