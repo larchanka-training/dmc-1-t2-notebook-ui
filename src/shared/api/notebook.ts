@@ -10,10 +10,13 @@ export type NotebookListItem = components['schemas']['NotebookListItem']
 export type CreateNotebookRequest = Pick<components['schemas']['NotebookCreate'], 'title'>
 
 export async function list(): Promise<NotebookListItem[]> {
-  const { data, error, response } = await notebookClient.GET('/notebooks')
+  // GET /notebooks is paginated ({ items, total, limit, offset }); this shim
+  // reads a single page. Request the server max (200) so users with many
+  // notebooks are not silently truncated. TODO(#135): real pagination/bootstrap.
+  const { data, error, response } = await notebookClient.GET('/notebooks', {
+    params: { query: { limit: 200 } },
+  })
   if (error !== undefined || !data) throw toApiError(response.status, error)
-  // GET /notebooks is paginated: { items, total, limit, offset }. Callers want
-  // the rows; pagination metadata is not used yet.
   return data.items
 }
 
