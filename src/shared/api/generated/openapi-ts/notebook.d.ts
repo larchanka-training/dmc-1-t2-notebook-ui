@@ -41,10 +41,58 @@ export interface paths {
         patch: operations["patch_notebook_api_v1_notebooks__notebook_id__patch"];
         trace?: never;
     };
+    "/notebooks/{notebook_id}/ai-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the stored AI generation context for a notebook */
+        get: operations["get_ai_context_api_v1_notebooks__notebook_id__ai_context_get"];
+        /** Store (and roll up) the AI generation context for a notebook */
+        put: operations["put_ai_context_api_v1_notebooks__notebook_id__ai_context_put"];
+        post?: never;
+        /** Clear the stored AI generation context for a notebook */
+        delete: operations["delete_ai_context_api_v1_notebooks__notebook_id__ai_context_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AiContextResponse */
+        AiContextResponse: {
+            /** Context */
+            context?: components["schemas"]["LlmContextCell"][];
+            /**
+             * Historycount
+             * @default 0
+             */
+            historyCount: number;
+            /**
+             * Notebookid
+             * Format: uuid
+             */
+            notebookId: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Updatedat */
+            updatedAt?: number | null;
+        };
+        /** AiContextStoreRequest */
+        AiContextStoreRequest: {
+            /** Context */
+            context?: components["schemas"]["LlmContextCell"][];
+            /** Historycount */
+            historyCount?: number | null;
+        };
         /** ApiError */
         ApiError: {
             /** Code */
@@ -94,6 +142,16 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** LlmContextCell */
+        LlmContextCell: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "code" | "markdown" | "text" | "output" | "globals" | "summary";
+            /** Source */
+            source: string;
         };
         /** NotebookCreate */
         NotebookCreate: {
@@ -407,6 +465,182 @@ export interface operations {
             };
             /** @description Missing or invalid access token */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_context_api_v1_notebooks__notebook_id__ai_context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiContextResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook owned by another user */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_ai_context_api_v1_notebooks__notebook_id__ai_context_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiContextStoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiContextResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook owned by another user */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Stored context exceeds the item/byte limits */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_ai_context_api_v1_notebooks__notebook_id__ai_context_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook owned by another user */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notebook not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
