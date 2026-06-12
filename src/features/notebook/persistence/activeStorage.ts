@@ -20,7 +20,11 @@ import type { NotebookStorageAdapter } from './storageAdapter'
 
 const active: NotebookStorageAdapter = indexedDbAdapter
 
-/** The currently active storage backend. IndexedDB until #136 enables the swap. */
+/**
+ * The currently active storage backend (IndexedDB until #136 enables the swap).
+ * Read it per call — do not cache the returned adapter: a held reference bypasses
+ * the spyable `notebookStorage` delegate and would not follow a future swap.
+ */
 export function getActiveNotebookStorage(): NotebookStorageAdapter {
   return active
 }
@@ -40,11 +44,18 @@ export const notebookStorage: NotebookStorageAdapter = {
  * device (#136): after this resolves, the device holds no notebook data in the
  * active backend.
  *
- * Today it clears the active store. When #134 adds local persistence for the
- * unsynced-change queue and `deletedCells`, clear those here too so sign-out
- * leaves nothing behind.
+ * Scope caveat for #136: this clears only the *active* backend. Once #136 can
+ * make memory the active backend, an authoritative wipe must also clear
+ * IndexedDB unconditionally — otherwise untrusted-device sign-out clears memory
+ * while the real notebooks stay on disk (a false "wiped" signal). Define that
+ * all-backends wipe in #136 before wiring this to sign-out.
+ *
+ * When #134 adds local persistence for the unsynced-change queue and
+ * `deletedCells`, clear those here too so sign-out leaves nothing behind.
  */
 export async function clearLocalNotebookData(): Promise<void> {
+  // Hits the raw active backend, not the `notebookStorage` delegate, on purpose:
+  // a maintenance wipe, not part of the spied save/load path.
   await active.clearAll()
   // TODO(#134): also clear the local unsynced-change queue and deletedCells once
   // they exist, so untrusted-device sign-out wipes them along with the notebooks.

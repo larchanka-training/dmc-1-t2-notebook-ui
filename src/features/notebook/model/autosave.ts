@@ -1,4 +1,4 @@
-// Debounced autosave of the local notebook to IndexedDB.
+// Debounced autosave of the local notebook to the active storage backend.
 //
 // Wiring: `startAutosave()` subscribes to a content signal; every change
 // schedules a save 500 ms later, collapsing a burst of keystrokes into one
@@ -275,6 +275,9 @@ export function startAutosave(): () => void {
     timer = setTimeout(runSave, DEBOUNCE_MS)
   })
 
+  // Cross-tab coordination assumes a shared backend — true for IndexedDB, where
+  // same-origin tabs share the store. A per-instance memory backend (#136) is
+  // isolated, so #136 must gate this channel by device mode before enabling it.
   channel = openCrossTabChannel(
     wrap((message) => {
       if (message.id !== LOCAL_NOTEBOOK_ID) return
