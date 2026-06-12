@@ -37,6 +37,21 @@ export const saveStatusAtom = atom<SaveStatus>('idle', 'notebook.autosave.status
 /** Unix ms of the last successful save, or null if nothing has been saved yet. */
 export const lastSavedAtAtom = atom<number | null>(null, 'notebook.autosave.lastSavedAt')
 
+/**
+ * Monotonic counter bumped after every user-driven local save commits (the
+ * debounced autosave or "Save mine"). The remote autosync layer (#134)
+ * subscribes to this as its push trigger: a server push happens only AFTER the
+ * edit is persisted locally ("local first"), and NOT on boot / reload / cross-tab
+ * pull — those restore content from elsewhere rather than originate a local edit,
+ * so re-pushing them would be wasteful (and risks bouncing a just-pulled version
+ * back to the server).
+ */
+export const localSaveCommittedAtom = atom(0, 'notebook.autosave.localSaveCommitted')
+
+function markLocalSaveCommitted(): void {
+  localSaveCommittedAtom.set((seq) => seq + 1)
+}
+
 // The local revision number that corresponds to the last persisted/accepted
 // baseline. If the current revision differs, this tab has unsaved local changes.
 const savedRevisionAtom = atom<number>(0, 'notebook.autosave.savedRevision')
@@ -81,6 +96,7 @@ async function runConditionalSave(): Promise<void> {
   lastSavedAtAtom.set(Date.now())
   saveStatusAtom.set('saved')
   channel?.postSaved(snapshot.id, snapshot.updatedAt)
+  markLocalSaveCommitted()
 }
 
 /**
@@ -160,6 +176,7 @@ export async function saveMine(): Promise<void> {
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
     channel?.postSaved(snapshot.id, snapshot.updatedAt)
+    markLocalSaveCommitted()
   } catch (error) {
     if (error instanceof NewerFormatError) {
       storageCompatibilityAtom.set('newer-format')
@@ -288,8 +305,9 @@ export function startAutosave(): () => void {
 
   // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
   // but does NOT cancel a save already in flight — that storage write runs to
-  // completion by design. In-flight cancellation (AbortController) arrives with
-  // #134's network-sync layer, where the window actually matters.
+  // completion by design (a sub-ms IndexedDB op). In-flight cancellation
+  // (AbortController) lives in #134's remoteSync layer instead, where the network
+  // push has a window long enough to matter.
   return () => {
     if (timer !== null) clearTimeout(timer)
     unsubscribe()

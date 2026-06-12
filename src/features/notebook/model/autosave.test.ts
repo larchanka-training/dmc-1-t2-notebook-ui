@@ -14,6 +14,7 @@ import {
 import {
   hasLocalChangesAtom,
   lastSavedAtAtom,
+  localSaveCommittedAtom,
   markBootRestored,
   reloadFromStorage,
   saveMine,
@@ -50,6 +51,7 @@ describe('notebook autosave', () => {
     vi.useFakeTimers()
     saveStatusAtom.set('idle')
     lastSavedAtAtom.set(null)
+    localSaveCommittedAtom.set(0)
     storageCompatibilityAtom.set('ok')
   })
 
@@ -346,5 +348,43 @@ describe('notebook autosave', () => {
     expect(saveStatusAtom()).toBe('saved')
     const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
     expect(stored?.cells.map((c) => c.content)).toContain('persisted-through-facade')
+  })
+
+  // The signal the #134 remote-sync layer subscribes to: it must fire on a
+  // committed local edit (so a push follows) but NOT on a pull/boot restore (so a
+  // just-restored version is not bounced back to the server).
+  describe('localSaveCommittedAtom (remote-sync trigger)', () => {
+    test('bumps after a committed debounced save', async () => {
+      vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+      const before = localSaveCommittedAtom()
+      const stop = startAutosave()
+      const [cell] = cellsAtom()
+      updateCellCode(cell.id, 'edit that commits locally')
+      await vi.advanceTimersByTimeAsync(500)
+      expect(localSaveCommittedAtom()).toBe(before + 1)
+      stop()
+    })
+
+    test('bumps after saveMine', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+      vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+      const before = localSaveCommittedAtom()
+      await saveMine()
+      expect(localSaveCommittedAtom()).toBe(before + 1)
+    })
+
+    test('does NOT bump on reloadFromStorage (a pull, not a local edit)', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedNotebook(20, 'from another tab'))
+      const before = localSaveCommittedAtom()
+      await reloadFromStorage()
+      expect(localSaveCommittedAtom()).toBe(before)
+    })
+
+    test('does NOT bump on markBootRestored', () => {
+      notebookBaseUpdatedAtAtom.set(1_700_000_500_000)
+      const before = localSaveCommittedAtom()
+      markBootRestored()
+      expect(localSaveCommittedAtom()).toBe(before)
+    })
   })
 })
