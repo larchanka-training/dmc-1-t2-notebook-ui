@@ -115,6 +115,24 @@ describe('notebook autosave', () => {
     stop()
   })
 
+  test('recovers to saved on the next write after an error', async () => {
+    const putIfNewer = vi
+      .spyOn(notebookStorage, 'putIfNewer')
+      .mockRejectedValueOnce(new Error('QuotaExceededError'))
+      .mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'boom')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(saveStatusAtom()).toBe('error')
+    // A later edit re-arms the debounce; the now-succeeding write clears the error.
+    updateCellCode(cell.id, 'recovered')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(putIfNewer).toHaveBeenCalledTimes(2)
+    expect(saveStatusAtom()).toBe('saved')
+    stop()
+  })
+
   test('stop() cancels a pending save', async () => {
     const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
     const stop = startAutosave()
