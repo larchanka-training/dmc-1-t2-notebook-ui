@@ -277,6 +277,20 @@ describe('remote sync engine', () => {
     expect(createSpy).toHaveBeenCalledTimes(2)
   })
 
+  test('a repeated start does not leave a duplicate save subscription (H-3)', async () => {
+    startRemoteSync(LOCAL_NOTEBOOK_ID) // first engine
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // restart (e.g. #135 re-login)
+    await vi.advanceTimersByTimeAsync(0)
+
+    putSyncStateSpy.mockClear()
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Only one live subscription should react → one dirty-state persist (a leaked
+    // first subscription would fire too, persisting twice).
+    expect(putSyncStateSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('pauseRemoteSync stops pushes without wiping local data', async () => {
     const clearAllSpy = vi.spyOn(notebookStorage, 'clearAll')
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)

@@ -282,6 +282,10 @@ function onLocalSaveCommitted(): void {
  * start while signed out — it stays idle and flushes once a token exists.
  */
 export function startRemoteSync(notebookId: string): () => void {
+  // Idempotent re-init (H-3): drop any prior engine's listeners/subscription/timers
+  // before re-wiring, so a repeated start (e.g. #135's re-login) does not leak a
+  // second save subscription or duplicate window listeners.
+  teardownRemoteSync()
   activeNotebookId = notebookId
   syncState = initialSyncState(notebookId) // provisional until the load resolves
   pausedAtom.set(false)
