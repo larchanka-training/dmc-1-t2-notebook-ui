@@ -12,6 +12,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { applyMigrations, NewerFormatError } from './migrations'
 import type { NotebookJSON } from './schema'
+import { isStaleWrite, type PutResult } from './storageAdapter'
 
 const DB_NAME = 'js-notebook'
 const DB_VERSION = 1
@@ -72,12 +73,6 @@ export async function put(notebook: NotebookJSON): Promise<void> {
   await (await getDB()).put(STORE, notebook)
 }
 
-/** Outcome of a conditional write. */
-export type PutResult =
-  | { ok: true }
-  /** Another writer got there first; `current` is the newer stored version. */
-  | { ok: false; current: NotebookJSON }
-
 /**
  * Compare-and-swap write: persist `notebook` only if no other tab has written
  * a newer version since this tab's `base` timestamp. Read and write happen in
@@ -109,7 +104,7 @@ export async function putIfNewer(notebook: NotebookJSON, base: number | null): P
       existing = undefined // corrupt slot — overwrite it
     }
   }
-  if (existing && (base === null || existing.updatedAt > base)) {
+  if (existing && isStaleWrite(existing.updatedAt, base)) {
     await tx.done
     return { ok: false, current: existing }
   }

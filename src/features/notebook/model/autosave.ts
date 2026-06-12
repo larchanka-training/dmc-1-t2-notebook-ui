@@ -1,4 +1,4 @@
-// Debounced autosave of the local notebook to IndexedDB.
+// Debounced autosave of the local notebook to the active storage backend.
 //
 // Wiring: `startAutosave()` subscribes to a content signal; every change
 // schedules a save 500 ms later, collapsing a burst of keystrokes into one
@@ -14,7 +14,7 @@
 //     every keypress.
 
 import { atom, computed, wrap } from '@reatom/core'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { openCrossTabChannel } from '../persistence/crosstab'
 import {
@@ -275,6 +275,9 @@ export function startAutosave(): () => void {
     timer = setTimeout(runSave, DEBOUNCE_MS)
   })
 
+  // Cross-tab coordination assumes a shared backend — true for IndexedDB, where
+  // same-origin tabs share the store. A per-instance memory backend (#136) is
+  // isolated, so #136 must gate this channel by device mode before enabling it.
   channel = openCrossTabChannel(
     wrap((message) => {
       if (message.id !== LOCAL_NOTEBOOK_ID) return
@@ -283,6 +286,10 @@ export function startAutosave(): () => void {
   )
   const unsubscribeFocusChecks = subscribeToFocusChecks()
 
+  // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
+  // but does NOT cancel a save already in flight — that storage write runs to
+  // completion by design. In-flight cancellation (AbortController) arrives with
+  // #134's network-sync layer, where the window actually matters.
   return () => {
     if (timer !== null) clearTimeout(timer)
     unsubscribe()

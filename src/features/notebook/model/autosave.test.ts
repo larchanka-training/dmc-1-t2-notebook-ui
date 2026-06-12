@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -16,6 +16,7 @@ import {
   lastSavedAtAtom,
   markBootRestored,
   reloadFromStorage,
+  saveMine,
   saveNow,
   saveStatusAtom,
   startAutosave,
@@ -112,6 +113,24 @@ describe('notebook autosave', () => {
     updateCellCode(cell.id, 'boom')
     await vi.advanceTimersByTimeAsync(500)
     expect(saveStatusAtom()).toBe('error')
+    stop()
+  })
+
+  test('recovers to saved on the next write after an error', async () => {
+    const putIfNewer = vi
+      .spyOn(notebookStorage, 'putIfNewer')
+      .mockRejectedValueOnce(new Error('QuotaExceededError'))
+      .mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'boom')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(saveStatusAtom()).toBe('error')
+    // A later edit re-arms the debounce; the now-succeeding write clears the error.
+    updateCellCode(cell.id, 'recovered')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(putIfNewer).toHaveBeenCalledTimes(2)
+    expect(saveStatusAtom()).toBe('saved')
     stop()
   })
 
@@ -252,5 +271,80 @@ describe('notebook autosave', () => {
       expect(saveStatusAtom()).toBe('idle')
       expect(lastSavedAtAtom()).toBeNull()
     })
+  })
+
+  // saveMine and the focus/visibility re-check now reach storage through the
+  // facade (`notebookStorage`); these pin those paths so a future facade change
+  // can't silently break force-write or the background staleness check.
+  describe('saveMine (force-write through the facade)', () => {
+    test('writes this tab version and marks saved', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+      const put = vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+      await saveMine()
+      expect(put).toHaveBeenCalledTimes(1)
+      expect(saveStatusAtom()).toBe('saved')
+      expect(lastSavedAtAtom()).not.toBeNull()
+    })
+
+    test('marks outdated when the store reports a newer format', async () => {
+      vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
+      await saveMine()
+      expect(storageCompatibilityAtom()).toBe('newer-format')
+      expect(saveStatusAtom()).toBe('outdated')
+    })
+
+    test('marks error on a generic storage failure', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+      vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
+      await saveMine()
+      expect(saveStatusAtom()).toBe('error')
+    })
+  })
+
+  test('re-checks the store through the facade on window focus', async () => {
+    const get = vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    const stop = startAutosave()
+    get.mockClear()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(get).toHaveBeenCalledWith(LOCAL_NOTEBOOK_ID)
+    // A clean background check leaves the indicator untouched (advisory only).
+    expect(saveStatusAtom()).toBe('idle')
+    stop()
+  })
+
+  test('re-checks the store through the facade on visibilitychange when visible', async () => {
+    // jsdom defaults document.visibilityState to 'visible', so the handler runs.
+    const get = vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    const stop = startAutosave()
+    get.mockClear()
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(get).toHaveBeenCalledWith(LOCAL_NOTEBOOK_ID)
+    stop()
+  })
+
+  test('gates to newer-format/outdated when the background focus check reads a newer record', async () => {
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
+    const stop = startAutosave()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(storageCompatibilityAtom()).toBe('newer-format')
+    expect(saveStatusAtom()).toBe('outdated')
+    stop()
+  })
+
+  test('persists a real snapshot through the facade — read-back, no storage spy', async () => {
+    // Integration-style: no putIfNewer spy. Real timers because fake-indexeddb
+    // schedules transaction callbacks on real macrotasks; drive saveNow()
+    // directly to skip the 500ms debounce.
+    vi.useRealTimers()
+    await notebookStorage.clearAll()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'persisted-through-facade')
+    await saveNow()
+    expect(saveStatusAtom()).toBe('saved')
+    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
+    expect(stored?.cells.map((c) => c.content)).toContain('persisted-through-facade')
   })
 })
