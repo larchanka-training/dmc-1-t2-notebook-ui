@@ -61,6 +61,23 @@ describe('createNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 
+  test('keeps the reconciled row when the post-create refetch fails (FU2)', async () => {
+    const existing = listItem('nb1', 'old')
+    notebookListResource.data.set([existing])
+
+    // Server echoes the client id; the list refetch then fails transiently.
+    const created = fullNotebook(CLIENT_ID, 'new')
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+    vi.spyOn(notebookApi, 'list').mockRejectedValue(new ApiError(503, 'unavailable', 'down'))
+
+    const result = await createNotebookAction('new')
+
+    // The create succeeded, so the action resolves and the optimistic row is
+    // reconciled to the server notebook — NOT rolled back by the failed refetch.
+    expect(result).toEqual(created)
+    expect(peek(notebookListResource.data)).toEqual([existing, listItem(CLIENT_ID, 'new')])
+  })
+
   test('refuses empty titles without calling the API', async () => {
     const createSpy = vi.spyOn(notebookApi, 'create')
     const result = await createNotebookAction('   ')

@@ -18,6 +18,18 @@ export const notebookListResource = computed(
 
 notebookListResource.data.extend(withRollback())
 
+/** Project a full notebook onto the lightweight list row (same id; FU2 reconcile). */
+function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
+  return {
+    id: nb.id,
+    title: nb.title,
+    formatVersion: nb.formatVersion,
+    createdAt: nb.createdAt,
+    updatedAt: nb.updatedAt,
+    cellsCount: nb.cells.length,
+  }
+}
+
 export const createNotebookAction = action(async (title: string) => {
   const trimmed = title.trim()
   if (!trimmed) return null
@@ -38,6 +50,18 @@ export const createNotebookAction = action(async (title: string) => {
   notebookListResource.data.set((items) => [...items, optimistic])
 
   const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
-  await wrap(notebookListResource.retry())
+  // FU2: reconcile the optimistic row with the server's authoritative values
+  // (same id) BEFORE the refetch, so the row is correct even if the refetch
+  // fails. Without this, a transient list failure after a committed POST would
+  // roll the optimistic row back under withTransaction() — a false "create
+  // failed" for a notebook that already exists on the server.
+  notebookListResource.data.set((items) => items.map((it) => (it.id === id ? toListItem(nb) : it)))
+  try {
+    await wrap(notebookListResource.retry())
+  } catch {
+    // Best-effort refetch: the list invalidation is advisory. The reconciled
+    // optimistic row stands until the next successful load. The create itself
+    // succeeded, so we must not reject (that would roll the row back).
+  }
   return nb
 }, 'notebook.list.create').extend(withAsync(), withTransaction())
