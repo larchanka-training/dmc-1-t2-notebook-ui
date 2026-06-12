@@ -24,6 +24,11 @@ import { isStaleWrite, type NotebookStorageAdapter } from './storageAdapter'
 // result — or the object handed to `put` — would retro-mutate the store and
 // corrupt the CAS baseline. `structuredClone` is the algorithm IndexedDB itself
 // uses to persist, so both backends observe the same snapshot contract.
+//
+// `structuredClone` is a global in every target runtime (browsers, Node ≥ 17,
+// jsdom in tests), so no polyfill is needed. It deep-clones the whole notebook on
+// each boundary; negligible for the single-notebook MVP, but clone cost on large
+// notebooks is worth revisiting when #136 actually wires the memory backend in.
 const snapshot = (notebook: NotebookJSON): NotebookJSON => structuredClone(notebook)
 
 export function createMemoryAdapter(): NotebookStorageAdapter {

@@ -13,7 +13,10 @@
 //
 // Every method is reached through this object at call time (property access, not
 // a captured reference), so tests can `vi.spyOn(notebookStorage, …)` and the spy
-// intercepts the real call.
+// intercepts the real call. This is load-bearing: tested code must call
+// `notebookStorage.get(…)` (property access), never destructure
+// `const { get } = notebookStorage` — a captured method skips the spy seam and
+// would also not follow the #136 backend swap.
 
 import { indexedDbAdapter } from './indexedDbAdapter'
 import type { NotebookStorageAdapter } from './storageAdapter'
