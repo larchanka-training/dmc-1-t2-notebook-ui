@@ -107,6 +107,27 @@ describe('remote sync engine', () => {
     })
   })
 
+  test('merges a local save recorded during sync-state load instead of dropping it (H-2)', async () => {
+    let resolveGet!: (v: NotebookSyncState | undefined) => void
+    getSyncStateSpy.mockReturnValue(
+      new Promise<NotebookSyncState | undefined>((r) => {
+        resolveGet = r
+      }),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    // The sync-state load is still pending; a local save commits in that window.
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(0)
+    // The load now resolves with a CLEAN remote record.
+    resolveGet({ ...existingRemoteState })
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // The provisional dirty change survived the merge and was pushed (old code
+    // let the clean loaded record clobber it → no push).
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('does not push when no user is signed in', async () => {
     accessTokenAtom.set(null)
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)

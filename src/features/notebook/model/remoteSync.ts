@@ -35,6 +35,7 @@ import { isOnlineAtom, startOnlineTracking } from './online'
 import {
   addTombstones,
   dropAckedTombstones,
+  mergeSyncState,
   removedCellIds,
   retractTombstones,
   serverNotebookToJSON,
@@ -241,9 +242,12 @@ async function pushNow(): Promise<void> {
 
 async function loadStateAndFlush(notebookId: string): Promise<void> {
   const loaded = await wrap(notebookStorage.getSyncState(notebookId))
-  // Don't clobber tombstones recorded between start and this load resolving.
   if (activeNotebookId !== notebookId) return
-  syncState = loaded ?? syncState ?? initialSyncState(notebookId)
+  // Merge, don't clobber: a local save during the load window already recorded
+  // dirty/tombstones into the provisional state — union them with the loaded
+  // record instead of letting a clean record overwrite the change (H-2).
+  const provisional = syncState ?? initialSyncState(notebookId)
+  syncState = loaded ? mergeSyncState(loaded, provisional) : provisional
   if (syncState.dirty || syncState.deletedCells.length > 0) void pushNow()
 }
 

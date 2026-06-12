@@ -2,9 +2,12 @@ import { describe, expect, test } from 'vitest'
 import { notebook as notebookApi } from '@/shared/api'
 import { FORMAT_VERSION, isNotebookJSON } from '../persistence/schema'
 import type { CellTombstoneJSON } from '../persistence/storageAdapter'
+import type { NotebookSyncState } from '../persistence/storageAdapter'
 import {
   addTombstones,
   dropAckedTombstones,
+  mergeSyncState,
+  mergeTombstones,
   removedCellIds,
   retractTombstones,
   serverNotebookToJSON,
@@ -91,6 +94,46 @@ describe('dropAckedTombstones', () => {
       { id: B, deletedAt: 200 },
     ]
     expect(dropAckedTombstones(buffer, [A, B])).toEqual([])
+  })
+})
+
+describe('mergeTombstones', () => {
+  test('unions by id and keeps the earliest deletedAt', () => {
+    const a: CellTombstoneJSON[] = [{ id: A, deletedAt: 100 }]
+    const b: CellTombstoneJSON[] = [
+      { id: A, deletedAt: 50 },
+      { id: B, deletedAt: 200 },
+    ]
+    expect(mergeTombstones(a, b)).toEqual([
+      { id: A, deletedAt: 50 },
+      { id: B, deletedAt: 200 },
+    ])
+  })
+})
+
+describe('mergeSyncState', () => {
+  test('ORs dirty/remoteCreated and unions tombstones', () => {
+    const loaded: NotebookSyncState = {
+      notebookId: A,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [{ id: B, deletedAt: 100 }],
+    }
+    const provisional: NotebookSyncState = {
+      notebookId: A,
+      remoteCreated: false,
+      dirty: true,
+      deletedCells: [{ id: C, deletedAt: 200 }],
+    }
+    expect(mergeSyncState(loaded, provisional)).toEqual({
+      notebookId: A,
+      remoteCreated: true,
+      dirty: true,
+      deletedCells: [
+        { id: B, deletedAt: 100 },
+        { id: C, deletedAt: 200 },
+      ],
+    })
   })
 })
 

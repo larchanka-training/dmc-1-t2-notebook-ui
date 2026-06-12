@@ -6,7 +6,7 @@
 
 import type { notebook as notebookApi } from '@/shared/api'
 import type { CellJSON, NotebookJSON } from '../persistence/schema'
-import type { CellTombstoneJSON } from '../persistence/storageAdapter'
+import type { CellTombstoneJSON, NotebookSyncState } from '../persistence/storageAdapter'
 
 /**
  * Cell ids present in `prev` but gone from `current` — i.e. locally deleted since
@@ -69,6 +69,37 @@ export function dropAckedTombstones(
   const sent = new Set(sentIds)
   const next = buffer.filter((t) => !sent.has(t.id))
   return next.length === buffer.length ? buffer : next
+}
+
+/** Union two tombstone buffers by id, keeping the earliest `deletedAt` per id. */
+export function mergeTombstones(
+  a: CellTombstoneJSON[],
+  b: CellTombstoneJSON[],
+): CellTombstoneJSON[] {
+  const byId = new Map<string, number>()
+  for (const t of [...a, ...b]) {
+    const existing = byId.get(t.id)
+    byId.set(t.id, existing === undefined ? t.deletedAt : Math.min(existing, t.deletedAt))
+  }
+  return [...byId].map(([id, deletedAt]) => ({ id, deletedAt }))
+}
+
+/**
+ * Merge a sync-state loaded from disk with the provisional in-memory one, with
+ * monotonic semantics — `dirty`/`remoteCreated` via OR, tombstones via union. Used
+ * at startup so a local save recorded while `getSyncState` was in flight is not
+ * dropped by the (possibly clean) loaded record overwriting it.
+ */
+export function mergeSyncState(
+  loaded: NotebookSyncState,
+  provisional: NotebookSyncState,
+): NotebookSyncState {
+  return {
+    notebookId: loaded.notebookId,
+    remoteCreated: loaded.remoteCreated || provisional.remoteCreated,
+    dirty: loaded.dirty || provisional.dirty,
+    deletedCells: mergeTombstones(loaded.deletedCells, provisional.deletedCells),
+  }
 }
 
 /**
