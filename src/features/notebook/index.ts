@@ -87,3 +87,16 @@ export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'
 export { runInWorker, restartWorker } from './runtime/workerHost'
 export type { OutputItem, RuntimeStatus, SerializedValue } from './runtime/types'
 export { codeGeneratorAtom, loadedModelAtom } from './model/codeGenerator'
+export { aiContextModeAtom } from './model/context-ai/aiContextMode'
+export type { AiContextMode } from './model/context-ai/aiContextMode'
+export {
+  startAiContextSync,
+  persistedContextAtom,
+  whenContextReady,
+} from './model/context-ai/aiContext'
+export {
+  buildNotebookContext,
+  contextToPromptBlock,
+  CONTEXT_BYTE_CAP,
+  DEFAULT_CONTEXT_WINDOW,
+} from './model/context-ai/contextBuilder'
