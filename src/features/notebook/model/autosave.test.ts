@@ -16,6 +16,7 @@ import {
   lastSavedAtAtom,
   markBootRestored,
   reloadFromStorage,
+  saveMine,
   saveNow,
   saveStatusAtom,
   startAutosave,
@@ -270,5 +271,45 @@ describe('notebook autosave', () => {
       expect(saveStatusAtom()).toBe('idle')
       expect(lastSavedAtAtom()).toBeNull()
     })
+  })
+
+  // saveMine and the focus/visibility re-check now reach storage through the
+  // facade (`notebookStorage`); these pin those paths so a future facade change
+  // can't silently break force-write or the background staleness check.
+  describe('saveMine (force-write through the facade)', () => {
+    test('writes this tab version and marks saved', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+      const put = vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+      await saveMine()
+      expect(put).toHaveBeenCalledTimes(1)
+      expect(saveStatusAtom()).toBe('saved')
+      expect(lastSavedAtAtom()).not.toBeNull()
+    })
+
+    test('marks outdated when the store reports a newer format', async () => {
+      vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
+      await saveMine()
+      expect(storageCompatibilityAtom()).toBe('newer-format')
+      expect(saveStatusAtom()).toBe('outdated')
+    })
+
+    test('marks error on a generic storage failure', async () => {
+      vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+      vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
+      await saveMine()
+      expect(saveStatusAtom()).toBe('error')
+    })
+  })
+
+  test('re-checks the store through the facade on window focus', async () => {
+    const get = vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    const stop = startAutosave()
+    get.mockClear()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(get).toHaveBeenCalledWith(LOCAL_NOTEBOOK_ID)
+    // A clean background check leaves the indicator untouched (advisory only).
+    expect(saveStatusAtom()).toBe('idle')
+    stop()
   })
 })
