@@ -19,6 +19,8 @@ import {
 
 const CELL_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const CELL_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+// Well past the engine's capped (60s) retry backoff — proves no retry is armed.
+const MAX_RETRY_WAIT = 120_000
 
 function cell(id: string, content = 'x', updatedAt = 1): NotebookJSON['cells'][number] {
   return { id, kind: 'code', content, updatedAt }
@@ -344,6 +346,36 @@ describe('remote sync engine', () => {
     // Only one live subscription should react → one dirty-state persist (a leaked
     // first subscription would fire too, persisting twice).
     expect(putSyncStateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('retries a 5xx with backoff and succeeds (review L-10)', async () => {
+    createSpy.mockRejectedValueOnce(new ApiError(503, 'unavailable'))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('error')
+
+    createSpy.mockResolvedValue(serverResponse([cell(CELL_A)]))
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS)
+    expect(createSpy).toHaveBeenCalledTimes(2)
+  })
+
+  test('does NOT loop on a permanent 4xx; keeps the queue and goes terminal (review M-2)', async () => {
+    // A shared-id 403 (C0) lands here: the body is rejected every time.
+    createSpy.mockRejectedValue(new ApiError(403, 'forbidden'))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('failed')
+    // No retry is armed — advancing well past any backoff issues no further call.
+    await vi.advanceTimersByTimeAsync(MAX_RETRY_WAIT)
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    // The change is NOT lost — it stays queued (dirty) for a future opportunity.
+    expect(lastPersistedState(putSyncStateSpy).dirty).toBe(true)
   })
 
   test('pauseRemoteSync stops pushes without wiping local data', async () => {

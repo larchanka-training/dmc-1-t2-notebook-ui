@@ -24,7 +24,7 @@
 //     is a follow-up.
 
 import { atom, wrap } from '@reatom/core'
-import { NetworkError, notebook as notebookApi } from '@/shared/api'
+import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'
 import { accessTokenAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { isNotebookJSON } from '../persistence/schema'
@@ -41,7 +41,14 @@ import {
   serverNotebookToJSON,
 } from './remoteSyncCore'
 
-export type RemoteSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'paused' | 'error'
+export type RemoteSyncStatus =
+  | 'idle'
+  | 'syncing'
+  | 'synced'
+  | 'offline'
+  | 'paused'
+  | 'error' // transient/recoverable — a retry is armed or a later trigger re-pushes
+  | 'failed' // terminal (e.g. a permanent 4xx) — queue kept, no auto-retry loop
 
 /** Separate from autosave's local debounce (500 ms) — coalesce more before the network. */
 export const REMOTE_DEBOUNCE_MS = 1500
@@ -90,24 +97,61 @@ function armDebounce(): void {
   debounceTimer = setTimeout(() => flushDebouncedPush?.(), REMOTE_DEBOUNCE_MS)
 }
 
-function clearRetry(): void {
+/** Cancel a pending retry timer WITHOUT resetting the backoff delay. */
+function cancelRetryTimer(): void {
   if (retryTimer !== null) {
     clearTimeout(retryTimer)
     retryTimer = null
   }
+}
+
+/** Cancel a pending retry AND reset the backoff — only on a successful push / fresh session. */
+function resetRetry(): void {
+  cancelRetryTimer()
   retryDelay = INITIAL_RETRY_MS
 }
 
-function scheduleRetry(): void {
+/**
+ * Arm a single delayed retry with exponential backoff (capped). `delayOverride`
+ * (ms) honours a server `Retry-After`. The backoff grows per scheduled retry and
+ * is reset only by a successful push — NOT on every `online` edge — so a flapping
+ * connection can't hammer a throttling server.
+ */
+function scheduleRetry(delayOverride?: number): void {
   if (retryTimer !== null) return // one pending retry at a time
+  const delay = Math.max(delayOverride ?? 0, retryDelay)
   retryTimer = setTimeout(
     wrap(() => {
       retryTimer = null
-      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS)
       void pushNow()
     }),
-    retryDelay,
+    delay,
   )
+  retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS)
+}
+
+/**
+ * Retryable: no HTTP answer (network), a transient HTTP status (5xx / 408 / 429),
+ * or a 401 — which the issue mandates be treated as an ordinary failed request
+ * (keep the queue, retry), NOT as end-of-session (only onSessionExpired pauses).
+ * Deterministic 4xx (400/403/404/409/422) are terminal: the server rejects this
+ * body every time, so looping would never succeed and would hide a real bug.
+ */
+function isRetryable(error: unknown): boolean {
+  if (error instanceof NetworkError) return true
+  if (error instanceof ApiError) {
+    const s = error.status
+    return s >= 500 || s === 408 || s === 429 || s === 401
+  }
+  return true // unknown error shape — retry rather than get permanently stuck
+}
+
+/** The server-requested delay (ms) for a 429, if present. */
+function retryAfterMs(error: unknown): number | undefined {
+  if (error instanceof RateLimitedError && error.retryAfter !== undefined) {
+    return error.retryAfter * 1000
+  }
+  return undefined
 }
 
 /** Write the in-memory sync-state through to the active backend's sync partition. */
@@ -187,14 +231,17 @@ async function runOnePush(): Promise<void> {
     return
   }
 
+  // Capture the generation BEFORE the first await, so a teardown/pause during the
+  // storage read is detected and we never issue HTTP for a dead engine.
+  const myGeneration = generation
   // Local-first: push exactly what local storage holds (INV-2: full doc incl. cells).
   const stored = await wrap(notebookStorage.get(notebookId))
+  if (myGeneration !== generation) return
   if (!stored) {
     setStatus('idle')
     return
   }
 
-  const myGeneration = generation
   const sentSeq = localSaveCommittedAtom()
   const sentState = syncState
   const sentTombstoneIds = sentState.deletedCells.map((t) => t.id)
@@ -222,7 +269,7 @@ async function runOnePush(): Promise<void> {
     // Discard the result if the engine was torn down / paused during the await.
     if (myGeneration !== generation) return
 
-    clearRetry()
+    resetRetry()
     // A local save that committed while the request was in flight keeps us dirty
     // and means the merged response is stale (don't apply it; re-push instead).
     const newerLocal = localSaveCommittedAtom() !== sentSeq
@@ -268,12 +315,22 @@ async function runOnePush(): Promise<void> {
     }
   } catch (error) {
     if (myGeneration !== generation) return
-    // Never parse 401 / never refresh here (refreshMiddleware owns that). Any
-    // failure — NetworkError, 5xx, even a 401 that slipped through — is an ordinary
-    // failed request: keep the queue (dirty + tombstones untouched) and retry. It
-    // is NOT end-of-session; only onSessionExpired pauses.
-    setStatus(error instanceof NetworkError ? 'offline' : 'error')
-    scheduleRetry()
+    // Never parse 401 / never refresh here (refreshMiddleware owns that). The queue
+    // (dirty + tombstones) is kept on EVERY failure, so nothing is ever lost. It is
+    // never treated as end-of-session — only onSessionExpired pauses.
+    if (isRetryable(error)) {
+      // No HTTP answer, a 5xx, 408, or 429 — retry with backoff (honouring a 429
+      // Retry-After). A 401 that slipped past refreshMiddleware lands here too and
+      // is retried, not paused.
+      setStatus(error instanceof NetworkError ? 'offline' : 'error')
+      scheduleRetry(retryAfterMs(error))
+    } else {
+      // A permanent 4xx (400/403/404/409/422): the server rejects this body every
+      // time, so do NOT loop forever (which would also hide a real bug behind a
+      // false 'synced'). Keep the queue and surface a terminal status. A shared-id
+      // 403 lands here — see docs/architecture/remote-sync.md "per-owner id".
+      setStatus('failed')
+    }
   }
 }
 
@@ -353,7 +410,9 @@ export function startRemoteSync(notebookId: string): () => void {
   unsubscribeOnline = startOnlineTracking()
   onlineHandler = wrap(() => {
     if (isOnlineAtom()) {
-      clearRetry()
+      // Cancel the pending retry timer but keep the backoff: a flapping connection
+      // must not reset to the 2s floor on every online edge.
+      cancelRetryTimer()
       void pushNow()
     }
   })
@@ -384,7 +443,7 @@ export function startRemoteSync(notebookId: string): () => void {
       }
       if (token !== null && was === null) {
         pausedAtom.set(false)
-        clearRetry()
+        resetRetry()
         void pushNow()
       }
     }),
@@ -398,7 +457,7 @@ function teardownRemoteSync(): void {
     clearTimeout(debounceTimer)
     debounceTimer = null
   }
-  clearRetry()
+  resetRetry()
   unsubscribeSignal?.()
   unsubscribeSignal = null
   unsubscribeToken?.()
@@ -426,6 +485,6 @@ export function pauseRemoteSync(): void {
     clearTimeout(debounceTimer)
     debounceTimer = null
   }
-  clearRetry()
+  resetRetry()
   setStatus('paused')
 }
