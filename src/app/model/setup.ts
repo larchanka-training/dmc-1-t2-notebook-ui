@@ -3,7 +3,7 @@ import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
 import { LOGIN_PATH } from '@/shared/lib/paths'
 import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
-import { accessTokenAtom, clearSession, refreshTokenAtom, userAtom } from '@/entities/session'
+import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
@@ -11,11 +11,11 @@ import {
   loadNotebook,
   LOCAL_NOTEBOOK_ID,
   markBootRestored,
-  pauseRemoteSync,
   startAiContextSync,
   startAutosave,
   startRemoteSync,
 } from '@/features/notebook'
+import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
 // #8 — one-time migration: the pre-OTP model stored a single JWT under
@@ -85,18 +85,9 @@ setRefreshHandlers({
       refreshTokenAtom.set(refreshToken)
     })
   },
-  onSessionExpired: () => {
-    // Pause background sync (refresh already failed — a real re-login is needed).
-    // This is the ONLY end-of-session signal the sync layer honours; it never
-    // wipes local notebook data (INV-4 — an untrusted-device wipe is #136).
-    rootFrame.run(() => {
-      pauseRemoteSync()
-      clearSession()
-    })
-    if (window.location.pathname !== LOGIN_PATH) {
-      window.location.replace(`${LOGIN_PATH}?reason=session_expired`)
-    }
-  },
+  // Pause background sync + clear the session (no local wipe — INV-4), then
+  // redirect. Extracted to `sessionExpiry.ts` so this auth↔sync seam is testable.
+  onSessionExpired: handleSessionExpired,
 })
 
 // Restore session if a token was persisted from a previous run.
