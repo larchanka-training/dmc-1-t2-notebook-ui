@@ -286,6 +286,10 @@ export function startAutosave(): () => void {
   )
   const unsubscribeFocusChecks = subscribeToFocusChecks()
 
+  // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
+  // but does NOT cancel a save already in flight — that storage write runs to
+  // completion by design. In-flight cancellation (AbortController) arrives with
+  // #134's network-sync layer, where the window actually matters.
   return () => {
     if (timer !== null) clearTimeout(timer)
     unsubscribe()

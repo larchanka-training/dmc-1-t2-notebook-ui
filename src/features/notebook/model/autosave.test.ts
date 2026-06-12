@@ -312,4 +312,39 @@ describe('notebook autosave', () => {
     expect(saveStatusAtom()).toBe('idle')
     stop()
   })
+
+  test('re-checks the store through the facade on visibilitychange when visible', async () => {
+    // jsdom defaults document.visibilityState to 'visible', so the handler runs.
+    const get = vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+    const stop = startAutosave()
+    get.mockClear()
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(get).toHaveBeenCalledWith(LOCAL_NOTEBOOK_ID)
+    stop()
+  })
+
+  test('gates to newer-format/outdated when the background focus check reads a newer record', async () => {
+    vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
+    const stop = startAutosave()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(storageCompatibilityAtom()).toBe('newer-format')
+    expect(saveStatusAtom()).toBe('outdated')
+    stop()
+  })
+
+  test('persists a real snapshot through the facade — read-back, no storage spy', async () => {
+    // Integration-style: no putIfNewer spy. Real timers because fake-indexeddb
+    // schedules transaction callbacks on real macrotasks; drive saveNow()
+    // directly to skip the 500ms debounce.
+    vi.useRealTimers()
+    await notebookStorage.clearAll()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'persisted-through-facade')
+    await saveNow()
+    expect(saveStatusAtom()).toBe('saved')
+    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
+    expect(stored?.cells.map((c) => c.content)).toContain('persisted-through-facade')
+  })
 })
