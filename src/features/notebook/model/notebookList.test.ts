@@ -1,8 +1,12 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, notebook as notebookApi } from '@/shared/api'
+import * as idLib from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { createNotebookAction, notebookListResource } from './notebookList'
+
+// A fixed client UUID so the create payload (FU1) is deterministic to assert.
+const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
 
 // GET /notebooks returns lightweight rows (NotebookListItem); POST returns the
 // full Notebook. Helpers keep the two shapes straight in the assertions below.
@@ -26,6 +30,7 @@ const fullNotebook = (id: string, title: string): notebookApi.Notebook => ({
 })
 
 beforeEach(() => {
+  vi.spyOn(idLib, 'newId').mockReturnValue(CLIENT_ID)
   vi.spyOn(notebookApi, 'list').mockResolvedValue([])
   notebookListResource.reset()
   createNotebookAction.error.set(undefined)
@@ -48,7 +53,11 @@ describe('createNotebookAction', () => {
     const result = await createNotebookAction('new')
 
     expect(result).toEqual(created)
-    expect(createSpy).toHaveBeenCalledWith({ title: 'new', formatVersion: FORMAT_VERSION })
+    expect(createSpy).toHaveBeenCalledWith({
+      id: CLIENT_ID,
+      title: 'new',
+      formatVersion: FORMAT_VERSION,
+    })
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 
