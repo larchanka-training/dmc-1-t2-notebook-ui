@@ -175,12 +175,12 @@ No configuration file needs updating — docs are just markdown files.
 
 ## Docs index
 
-| Topic           | Files                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------------- |
-| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md`                    |
-| Architecture    | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` |
-| Notebook        | `docs/notebook/how-it-works.md` · `adding-cells.md`                                      |
-| Browser LLM     | `docs/browser-llm/README.md` · `how-it-works.md` · `models.md` · `architecture.md`       |
-| Components      | `docs/components/shadcn.md` · `custom.md`                                                |
-| Contributing    | `docs/contributing.md`                                                                   |
-| CI/CD           | `docs/ci-cd.md`                                                                          |
+| Topic           | Files                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md`                                       |
+| Architecture    | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` · `remote-sync.md` |
+| Notebook        | `docs/notebook/how-it-works.md` · `adding-cells.md`                                                         |
+| Browser LLM     | `docs/browser-llm/README.md` · `how-it-works.md` · `models.md` · `architecture.md`                          |
+| Components      | `docs/components/shadcn.md` · `custom.md`                                                                   |
+| Contributing    | `docs/contributing.md`                                                                                      |
+| CI/CD           | `docs/ci-cd.md`                                                                                             |
