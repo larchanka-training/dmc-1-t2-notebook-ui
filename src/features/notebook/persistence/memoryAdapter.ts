@@ -18,15 +18,24 @@
 import type { NotebookJSON } from './schema'
 import { isStaleWrite, type NotebookStorageAdapter } from './storageAdapter'
 
+// Snapshot on every boundary, matching IndexedDB's structured-clone semantics:
+// store a copy on write, hand back a copy on read. Otherwise the Map would hold
+// caller-owned references, so mutating a `get` / `list` / failed-CAS `current`
+// result — or the object handed to `put` — would retro-mutate the store and
+// corrupt the CAS baseline. `structuredClone` is the algorithm IndexedDB itself
+// uses to persist, so both backends observe the same snapshot contract.
+const snapshot = (notebook: NotebookJSON): NotebookJSON => structuredClone(notebook)
+
 export function createMemoryAdapter(): NotebookStorageAdapter {
   const store = new Map<string, NotebookJSON>()
 
   return {
     async get(id) {
-      return store.get(id)
+      const stored = store.get(id)
+      return stored && snapshot(stored)
     },
     async put(notebook) {
-      store.set(notebook.id, notebook)
+      store.set(notebook.id, snapshot(notebook))
     },
     async putIfNewer(notebook, base) {
       // Shared `isStaleWrite` conflict rule from the contract — same decision as
@@ -34,17 +43,18 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
       // autosave's conflict semantics.
       const existing = store.get(notebook.id)
       if (existing && isStaleWrite(existing.updatedAt, base)) {
-        return { ok: false, current: existing }
+        return { ok: false, current: snapshot(existing) }
       }
-      store.set(notebook.id, notebook)
+      store.set(notebook.id, snapshot(notebook))
       return { ok: true }
     },
     async delete(id) {
       store.delete(id)
     },
     async list() {
-      // Most recently edited first, mirroring the disk backend's ordering.
-      return [...store.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+      // Most recently edited first, mirroring the disk backend's ordering; each
+      // element is a snapshot so a caller cannot mutate the stored copy.
+      return [...store.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(snapshot)
     },
     async clearAll() {
       store.clear()

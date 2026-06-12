@@ -106,4 +106,58 @@ describe('memoryAdapter', () => {
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })
+
+  // Snapshot semantics: the store holds copies, never caller-owned references,
+  // so external mutation can never reach back into it (matches IndexedDB).
+  describe('snapshot isolation', () => {
+    test('put stores a snapshot — mutating the source object leaves the store intact', async () => {
+      const store = createMemoryAdapter()
+      const source = notebook(ID, 1, 'original')
+      await store.put(source)
+      source.title = 'mutated'
+      source.cells[0].content = 'mutated'
+      const stored = await store.get(ID)
+      expect(stored?.title).toBe('original')
+      expect(stored?.cells[0].content).toBe('x')
+    })
+
+    test('get returns a snapshot — mutating the result leaves the store intact', async () => {
+      const store = createMemoryAdapter()
+      await store.put(notebook(ID, 1, 'original'))
+      const first = await store.get(ID)
+      if (!first) throw new Error('expected a stored notebook')
+      first.title = 'mutated'
+      first.cells[0].content = 'mutated'
+      expect((await store.get(ID))?.title).toBe('original')
+      expect((await store.get(ID))?.cells[0].content).toBe('x')
+    })
+
+    test('list returns snapshots — mutating a result element leaves the store intact', async () => {
+      const store = createMemoryAdapter()
+      await store.put(notebook(ID, 1, 'original'))
+      const [first] = await store.list()
+      first.title = 'mutated'
+      expect((await store.get(ID))?.title).toBe('original')
+    })
+
+    test('list returns a fresh array — mutating it leaves the store intact', async () => {
+      const store = createMemoryAdapter()
+      await store.put(notebook(ID, 1))
+      const listed = await store.list()
+      listed.push(notebook('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 2))
+      listed.length = 0
+      expect(await store.list()).toHaveLength(1)
+    })
+
+    test('failed putIfNewer returns a snapshot of current — mutating it leaves the store intact', async () => {
+      const store = createMemoryAdapter()
+      await store.put(notebook(ID, 30, 'stored'))
+      const result = await store.putIfNewer(notebook(ID, 20, 'stale'), 10)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        result.current.title = 'mutated'
+      }
+      expect((await store.get(ID))?.title).toBe('stored')
+    })
+  })
 })
