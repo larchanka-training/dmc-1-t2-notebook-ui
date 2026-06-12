@@ -59,7 +59,7 @@ describe('notebook IndexedDB storage', () => {
   test('putIfNewer rethrows newer-format storage instead of downgrading it', async () => {
     const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', {
       ...notebook(id, FORMAT_VERSION + 1, 'future'),
       formatVersion: FORMAT_VERSION + 1,
@@ -97,7 +97,7 @@ describe('notebook IndexedDB storage', () => {
   test('get rejects a structurally invalid stored record', async () => {
     // Write a broken record straight to IDB, bypassing put()'s typing.
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', { id: 'broken', title: 42 })
     db.close()
     await expect(get('broken')).rejects.toThrow(/Invalid notebook JSON/)
@@ -106,7 +106,7 @@ describe('notebook IndexedDB storage', () => {
   test('list skips a corrupt record but returns the valid ones', async () => {
     await put(notebook('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 1))
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', { id: 'broken', updatedAt: 5 })
     db.close()
     const all = await list()

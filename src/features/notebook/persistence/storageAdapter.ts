@@ -40,6 +40,67 @@ export function isStaleWrite(storedUpdatedAt: number, base: number | null): bool
   return base === null || storedUpdatedAt > base
 }
 
+// ---------------------------------------------------------------------------
+// Sync-metadata partition (#134)
+// ---------------------------------------------------------------------------
+//
+// The remote autosync layer keeps per-notebook bookkeeping — an unsynced-change
+// flag and the `deletedCells` tombstone buffer — in a SEPARATE named partition of
+// the SAME active backend, never a parallel IndexedDB. Routing it through this
+// contract means the storage mode follows the trusted/untrusted device choice
+// (#136) and `clearAll()` wipes it together with the notebooks, so
+// `clearLocalNotebookData()` leaves nothing behind in one call.
+
+/** A deleted-cell marker (tombstone): persisted in the queue, sent on PATCH. */
+export interface CellTombstoneJSON {
+  /** The deleted cell's id (UUID; matches the backend `CellTombstone.id`). */
+  id: string
+  /** Deletion time, Unix epoch ms (`CellTombstone.deletedAt`). */
+  deletedAt: number
+}
+
+/** Per-notebook sync state, stored in the sync-metadata partition. */
+export interface NotebookSyncState {
+  /** Owning notebook id (the partition key). */
+  notebookId: string
+  /** True once the notebook exists server-side (the first POST succeeded). */
+  remoteCreated: boolean
+  /** True when the locally-persisted doc has changes not yet acked by the server. */
+  dirty: boolean
+  /** Tombstones for cells deleted locally, not yet acked by the server's merge. */
+  deletedCells: CellTombstoneJSON[]
+}
+
+function isSyncObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isCellTombstoneJSON(value: unknown): value is CellTombstoneJSON {
+  return (
+    isSyncObject(value) &&
+    typeof value['id'] === 'string' &&
+    typeof value['deletedAt'] === 'number' &&
+    Number.isFinite(value['deletedAt'])
+  )
+}
+
+/**
+ * Boundary validator for a stored sync-state record (AGENTS §11 — a read from
+ * storage is untrusted). A record that fails this is treated as absent by the
+ * backend (the engine re-initialises it), never thrown: sync bookkeeping must not
+ * be able to crash boot or autosave.
+ */
+export function isNotebookSyncState(value: unknown): value is NotebookSyncState {
+  return (
+    isSyncObject(value) &&
+    typeof value['notebookId'] === 'string' &&
+    typeof value['remoteCreated'] === 'boolean' &&
+    typeof value['dirty'] === 'boolean' &&
+    Array.isArray(value['deletedCells']) &&
+    value['deletedCells'].every(isCellTombstoneJSON)
+  )
+}
+
 export interface NotebookStorageAdapter {
   /**
    * Read one notebook by id, migrated + validated. `undefined` if absent.
@@ -68,6 +129,12 @@ export interface NotebookStorageAdapter {
    * skips it and lists the rest.
    */
   list(): Promise<NotebookJSON[]>
-  /** Remove every notebook held by this backend. */
+  /** Remove every notebook AND every sync-state record held by this backend. */
   clearAll(): Promise<void>
+  /** Read one notebook's sync state, validated. `undefined` if absent or invalid. */
+  getSyncState(notebookId: string): Promise<NotebookSyncState | undefined>
+  /** Insert or replace one notebook's sync state (keyed by `state.notebookId`). */
+  putSyncState(state: NotebookSyncState): Promise<void>
+  /** Delete one notebook's sync state. No-op if it does not exist. */
+  deleteSyncState(notebookId: string): Promise<void>
 }

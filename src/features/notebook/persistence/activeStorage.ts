@@ -40,6 +40,9 @@ export const notebookStorage: NotebookStorageAdapter = {
   delete: (id) => active.delete(id),
   list: () => active.list(),
   clearAll: () => active.clearAll(),
+  getSyncState: (id) => active.getSyncState(id),
+  putSyncState: (state) => active.putSyncState(state),
+  deleteSyncState: (id) => active.deleteSyncState(id),
 }
 
 /**
@@ -53,13 +56,12 @@ export const notebookStorage: NotebookStorageAdapter = {
  * while the real notebooks stay on disk (a false "wiped" signal). Define that
  * all-backends wipe in #136 before wiring this to sign-out.
  *
- * When #134 adds local persistence for the unsynced-change queue and
- * `deletedCells`, clear those here too so sign-out leaves nothing behind.
+ * The #134 unsynced-change queue and `deletedCells` live in the same backend's
+ * sync-metadata partition, and `clearAll()` wipes that partition together with
+ * the notebooks — so this one call leaves nothing behind.
  */
 export async function clearLocalNotebookData(): Promise<void> {
   // Hits the raw active backend, not the `notebookStorage` delegate, on purpose:
   // a maintenance wipe, not part of the spied save/load path.
   await active.clearAll()
-  // TODO(#134): also clear the local unsynced-change queue and deletedCells once
-  // they exist, so untrusted-device sign-out wipes them along with the notebooks.
 }
