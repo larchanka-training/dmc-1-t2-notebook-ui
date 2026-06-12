@@ -305,9 +305,10 @@ export function startAutosave(): () => void {
 
   // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
   // but does NOT cancel a save already in flight — that storage write runs to
-  // completion by design (a sub-ms IndexedDB op). In-flight cancellation
-  // (AbortController) lives in #134's remoteSync layer instead, where the network
-  // push has a window long enough to matter.
+  // completion by design (a sub-ms IndexedDB op). In-flight cancellation lives in
+  // #134's remoteSync layer instead (a `generation` guard that discards a stale
+  // push's result; the notebook facade takes no AbortSignal yet), where the
+  // network push has a window long enough to matter.
   return () => {
     if (timer !== null) clearTimeout(timer)
     unsubscribe()

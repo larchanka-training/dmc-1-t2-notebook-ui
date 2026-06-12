@@ -61,35 +61,76 @@ buffer and persisted.
 ## Applying the server response (LWW baseline)
 
 On success the merged response is adopted as the new local baseline — persisted
-to storage and reloaded into the editor (`reloadFromStorage`, which also
-re-accepts the clean baseline so autosave does not immediately re-save, and does
-not re-trigger a push).
+to storage and reloaded into the editor. The reload is **only** for the open
+notebook (`LOCAL_NOTEBOOK_ID` in the single-notebook MVP); `reloadFromStorage`
+also re-accepts the clean baseline so autosave does not immediately re-save, and
+does not re-trigger a push.
 
-**Guard (INV-3):** the response is adopted **only** when the in-memory notebook
-is clean (`!hasLocalChangesAtom()`) and no newer save committed during the
-request. If the user edited while the push was in flight, the merged response is
-discarded and the newer local version is re-pushed instead — local edits are
-never clobbered. A malformed / newer-format response is not adopted either.
+Adoption (`applyServerBaseline`) returns one of three outcomes and **never loses
+local data**:
+
+- **`applied`** — adopted as the new baseline.
+- **`deferred`** — a concurrent local edit (checked before _and_ after the
+  storage write), or storage already holds a newer version than this push was
+  based on (`putIfNewer` CAS, not an unconditional `put`, so another tab is not
+  clobbered). Local stays authoritative and is re-pushed.
+- **`rejected`** — a malformed/newer-format response, or a well-formed `cells: []`
+  that would zero a non-empty notebook. Local is kept, the anomaly is logged, and
+  the engine does **not** auto-loop on it.
+
+**Guard (INV-3):** adoption runs only when the in-memory notebook is clean
+(`!hasLocalChangesAtom()`) and no newer save committed during the request. If the
+user edited while the push was in flight, the merged response is discarded and
+the newer local version re-pushed — local edits are never clobbered.
 
 ## Offline, retries, errors
 
 - `isOnlineAtom` mirrors `navigator.onLine`. While offline the engine does not
   push; it schedules a retry and re-attempts on the `online` event.
-- Any failure (NetworkError, 5xx, or even a 401 that reached the facade) keeps
-  the queue (dirty flag + tombstones untouched) and retries with capped
-  exponential backoff. Data is never dropped on failure.
+- **Every** failure keeps the queue (dirty flag + tombstones untouched) — data is
+  never dropped. Failures are then classified:
+  - **Retryable** — `NetworkError`, 5xx, 408, 429 (honouring a `Retry-After`),
+    and 401 (an ordinary failed request per the issue, **not** end-of-session):
+    retry with capped exponential backoff (reset only on a _successful_ push, so a
+    flapping connection can't reset the floor on every `online` edge).
+  - **Terminal** — a deterministic 4xx (400/403/404/409/422): the server rejects
+    this body every time, so the engine stops the retry loop and surfaces a
+    terminal `failed` status (queue still kept) instead of looping forever and
+    hiding the problem behind a false `synced`.
 
 ## Auth and session end
 
 - The engine syncs only for an authorized user (`accessTokenAtom`). Signed out,
-  it stays idle and the queue persists.
+  it stays idle and the queue persists. It subscribes to `accessTokenAtom` and,
+  on a null→token transition (sign-in / re-login), clears pause and **flushes the
+  queued change** — so a change made while signed out syncs as soon as the user
+  signs in.
 - It **never** inspects 401 or runs its own token refresh. `refreshMiddleware`
   (`shared/api/client.ts`) heals a transient 401 transparently — the engine does
   not even see it.
-- The **only** end-of-session signal is `pauseRemoteSync()`, wired to
-  `onSessionExpired` in `app/model/setup.ts` (which fires only when the refresh
-  token is also dead). It pauses pushes and **never wipes local data** — a real
-  re-login resumes and flushes the queue. A wipe-on-sign-out is #136's job.
+- The **only** end-of-session signal is `pauseRemoteSync()`, wired through
+  `handleSessionExpired` (`app/model/sessionExpiry.ts`) to the client's
+  `onSessionExpired` (which fires only when the refresh token is also dead). It
+  pauses pushes and **never wipes local data** — a wipe-on-sign-out is #136's job.
+
+## Notebook id scoping (single-notebook MVP) — known limitation
+
+The synced notebook currently carries the compile-time constant `LOCAL_NOTEBOOK_ID`
+for every user (the single-notebook MVP; FU1's client UUID applies only to _list_
+notebooks). The backend keys notebooks by `id` and 403s a cross-owner re-POST, so
+correctness depends on the backend being owner-scoped, and **only the first user
+to POST that id can create it** — every other user's first push gets a permanent 403. That 403 is handled fail-safe (terminal status, queue kept, no infinite loop,
+no false `synced`), but real multi-user sync needs a **per-user server id** (e.g.
+derived from the account id), designed together with the #135 bootstrap (the GET
+must use the same id). Tracked as a #135 design item.
+
+## Scaling note
+
+Every POST/PATCH sends the **whole** document (full cell list + the entire
+`deletedCells` buffer) — required by the server's full-set LWW contract and fine
+for the single-notebook MVP, but a large notebook re-uploads fully on every
+debounce cycle while editing. A future delta / changed-cells PATCH is the
+mitigation.
 
 ## Persistence of sync state
 
