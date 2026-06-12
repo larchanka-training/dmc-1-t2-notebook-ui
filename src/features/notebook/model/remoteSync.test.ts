@@ -138,6 +138,22 @@ describe('remote sync engine', () => {
     expect(patchSpy).not.toHaveBeenCalled()
   })
 
+  test('flushes the queued change when the user signs in (review issue-1)', async () => {
+    accessTokenAtom.set(null) // signed out
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // A signed-out edit commits → queued, but not pushed (engine idle).
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).not.toHaveBeenCalled()
+
+    // Signing in flushes the queue automatically.
+    accessTokenAtom.set('fresh-token')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(createSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('PATCHes an existing notebook and sends a tombstone for a deleted cell', async () => {
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
     cellsAtom.set([reatomCell('x', 'code', CELL_A), reatomCell('x', 'code', CELL_B)])

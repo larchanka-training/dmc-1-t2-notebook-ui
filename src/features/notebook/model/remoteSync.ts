@@ -57,6 +57,9 @@ let activeNotebookId: string | null = null
 let syncState: NotebookSyncState | null = null
 let previousCellIds = new Set<string>()
 let unsubscribeSignal: (() => void) | null = null
+let unsubscribeToken: (() => void) | null = null
+let primedToken = false
+let previousToken: string | null = null
 let unsubscribeOnline: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -314,6 +317,28 @@ export function startRemoteSync(notebookId: string): () => void {
   void wrap(loadStateAndFlush(notebookId))
 
   unsubscribeSignal = localSaveCommittedAtom.subscribe(wrap(onLocalSaveCommitted))
+  // Resume + flush on a fresh sign-in: a change queued while signed out (the
+  // engine stayed idle on the `!isAuthenticated` guard) is sent once a token
+  // appears, and a paused engine resumes. Only a null→token transition triggers
+  // it (a token→null sign-out does not push).
+  primedToken = false
+  previousToken = null
+  unsubscribeToken = accessTokenAtom.subscribe(
+    wrap(() => {
+      const token = accessTokenAtom()
+      const was = previousToken
+      previousToken = token
+      if (!primedToken) {
+        primedToken = true
+        return
+      }
+      if (token !== null && was === null) {
+        pausedAtom.set(false)
+        clearRetry()
+        void pushNow()
+      }
+    }),
+  )
   return teardownRemoteSync
 }
 
@@ -326,6 +351,8 @@ function teardownRemoteSync(): void {
   clearRetry()
   unsubscribeSignal?.()
   unsubscribeSignal = null
+  unsubscribeToken?.()
+  unsubscribeToken = null
   if (onlineHandler && typeof window !== 'undefined') {
     window.removeEventListener('online', onlineHandler)
   }
