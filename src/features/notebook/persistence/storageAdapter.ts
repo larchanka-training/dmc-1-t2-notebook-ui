@@ -7,11 +7,34 @@
 // memory without touching the autosave/load logic.
 //
 // Method names follow the issue's contract (`delete` / `clearAll`); the value
-// types are the existing persisted ones (`NotebookJSON`, `PutResult`), so no
-// shape change ripples through the codebase.
+// type for reads/writes is the existing persisted `NotebookJSON`, so no shape
+// change ripples through the codebase. The conflict contract — `PutResult` and
+// the `isStaleWrite` rule — lives here, in the abstraction, so both backends
+// import it from the contract (impl → contract) rather than the contract
+// reaching into a concrete backend.
 
 import type { NotebookJSON } from './schema'
-import type { PutResult } from './storage'
+
+/** Outcome of a conditional write. */
+export type PutResult =
+  | { ok: true }
+  /** Another writer got there first; `current` is the newer stored version. */
+  | { ok: false; current: NotebookJSON }
+
+/**
+ * The shared `putIfNewer` conflict rule, owned by the contract so every backend
+ * decides staleness identically (the divergence the adapter layer exists to
+ * prevent). Returns `true` when a write carrying baseline `base` must be
+ * rejected because the stored version is newer: a `null` baseline means "no
+ * known baseline yet" — write only into an empty slot, so any existing record
+ * makes the write stale; otherwise the write is stale when `storedUpdatedAt` is
+ * strictly greater than `base`. Callers pair it with a presence check
+ * (`existing && isStaleWrite(existing.updatedAt, base)`), which also narrows
+ * `existing` for the `current` field.
+ */
+export function isStaleWrite(storedUpdatedAt: number, base: number | null): boolean {
+  return base === null || storedUpdatedAt > base
+}
 
 export interface NotebookStorageAdapter {
   /** Read one notebook by id, migrated + validated. `undefined` if absent. */

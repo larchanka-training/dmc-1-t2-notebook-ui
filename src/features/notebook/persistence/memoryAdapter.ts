@@ -16,7 +16,7 @@
 // IndexedDB, localStorage or sessionStorage.
 
 import type { NotebookJSON } from './schema'
-import type { NotebookStorageAdapter } from './storageAdapter'
+import { isStaleWrite, type NotebookStorageAdapter } from './storageAdapter'
 
 export function createMemoryAdapter(): NotebookStorageAdapter {
   const store = new Map<string, NotebookJSON>()
@@ -29,10 +29,11 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
       store.set(notebook.id, notebook)
     },
     async putIfNewer(notebook, base) {
-      // Same compare-and-swap baseline rule as the disk backend, so swapping the
-      // active adapter never changes autosave's conflict semantics.
+      // Shared `isStaleWrite` conflict rule from the contract — same decision as
+      // the disk backend, so swapping the active adapter never changes
+      // autosave's conflict semantics.
       const existing = store.get(notebook.id)
-      if (existing && (base === null || existing.updatedAt > base)) {
+      if (existing && isStaleWrite(existing.updatedAt, base)) {
         return { ok: false, current: existing }
       }
       store.set(notebook.id, notebook)
