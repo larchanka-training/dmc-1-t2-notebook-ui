@@ -12,6 +12,7 @@ import {
   INITIAL_RETRY_MS,
   pauseRemoteSync,
   pausedAtom,
+  PERSIST_RETRY_MS,
   REMOTE_DEBOUNCE_MS,
   remoteSyncStatusAtom,
   startRemoteSync,
@@ -376,6 +377,27 @@ describe('remote sync engine', () => {
     expect(createSpy).toHaveBeenCalledTimes(1)
     // The change is NOT lost — it stays queued (dirty) for a future opportunity.
     expect(lastPersistedState(putSyncStateSpy).dirty).toBe(true)
+  })
+
+  test('retries persisting dirty sync metadata when the write fails (review A-4)', async () => {
+    isOnlineAtom.set(false) // keep the network push out of the persist-count
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    putSyncStateSpy.mockClear()
+    putSyncStateSpy.mockRejectedValueOnce(new Error('quota exceeded'))
+
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(0)
+    // The first persist failed and was logged (not silently swallowed).
+    expect(putSyncStateSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalled()
+
+    // The scheduled retry persists the dirty state durably.
+    putSyncStateSpy.mockResolvedValue()
+    await vi.advanceTimersByTimeAsync(PERSIST_RETRY_MS)
+    expect(putSyncStateSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
   test('pauseRemoteSync stops pushes without wiping local data', async () => {

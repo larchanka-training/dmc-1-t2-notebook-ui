@@ -54,6 +54,8 @@ export type RemoteSyncStatus =
 export const REMOTE_DEBOUNCE_MS = 1500
 export const INITIAL_RETRY_MS = 2000
 const MAX_RETRY_MS = 60_000
+/** Backoff for re-attempting a failed sync-metadata write (queue durability). */
+export const PERSIST_RETRY_MS = 2000
 
 /** Coarse status for the UI (#135 surfaces it; the engine only needs internal state). */
 export const remoteSyncStatusAtom = atom<RemoteSyncStatus>('idle', 'notebook.remoteSync.status')
@@ -71,6 +73,7 @@ let unsubscribeOnline: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
+let persistRetryTimer: ReturnType<typeof setTimeout> | null = null
 let retryDelay = INITIAL_RETRY_MS
 let pushInFlight = false
 let pushAgain = false
@@ -154,9 +157,28 @@ function retryAfterMs(error: unknown): number | undefined {
   return undefined
 }
 
-/** Write the in-memory sync-state through to the active backend's sync partition. */
-function persistSyncState(): Promise<void> {
-  return syncState ? notebookStorage.putSyncState(syncState) : Promise.resolve()
+/**
+ * Write the in-memory sync-state through to the active backend's sync partition.
+ * Never rejects: a failed write (quota / blocked DB) is logged and a retry is
+ * scheduled, so the dirty flag + tombstone queue is not silently lost before the
+ * next push (queue durability — review A-4).
+ */
+async function persistSyncState(): Promise<void> {
+  if (!syncState) return
+  try {
+    await wrap(notebookStorage.putSyncState(syncState))
+  } catch (error) {
+    console.error('remoteSync: failed to persist sync metadata; scheduling a retry', error)
+    if (persistRetryTimer === null) {
+      persistRetryTimer = setTimeout(
+        wrap(() => {
+          persistRetryTimer = null
+          void persistSyncState()
+        }),
+        PERSIST_RETRY_MS,
+      )
+    }
+  }
 }
 
 /** Outcome of trying to adopt the server's merged response as the local baseline. */
@@ -380,7 +402,7 @@ function onLocalSaveCommitted(): void {
       dirty: true,
       deletedCells: retractTombstones(withAdded, currentIds),
     }
-    void wrap(persistSyncState())
+    void persistSyncState() // self-handles errors + retry
   }
   armDebounce()
 }
@@ -456,6 +478,10 @@ function teardownRemoteSync(): void {
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer)
     debounceTimer = null
+  }
+  if (persistRetryTimer !== null) {
+    clearTimeout(persistRetryTimer)
+    persistRetryTimer = null
   }
   resetRetry()
   unsubscribeSignal?.()
