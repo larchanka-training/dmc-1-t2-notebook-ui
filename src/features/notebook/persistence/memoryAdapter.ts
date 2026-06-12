@@ -52,9 +52,14 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
       store.delete(id)
     },
     async list() {
-      // Most recently edited first, mirroring the disk backend's ordering; each
-      // element is a snapshot so a caller cannot mutate the stored copy.
-      return [...store.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(snapshot)
+      // Most recently edited first, mirroring the disk backend's order exactly:
+      // IndexedDB returns equal-`updatedAt` ties by id ascending then `.reverse()`s,
+      // i.e. id descending. The `|| b.id.localeCompare(a.id)` secondary key keeps
+      // both backends identical on ties instead of falling back to insertion
+      // order. Each element is a snapshot so a caller cannot mutate the store.
+      return [...store.values()]
+        .sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
+        .map(snapshot)
     },
     async clearAll() {
       store.clear()

@@ -1,21 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { FORMAT_VERSION, type NotebookJSON } from './schema'
 import { indexedDbAdapter } from './indexedDbAdapter'
 import { clearLocalNotebookData, getActiveNotebookStorage, notebookStorage } from './activeStorage'
-
-const CELL_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
-const ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
-
-function notebook(id: string, updatedAt: number, title = 'NB'): NotebookJSON {
-  return {
-    formatVersion: FORMAT_VERSION,
-    id,
-    title,
-    createdAt: 1_700_000_000_000,
-    updatedAt,
-    cells: [{ id: CELL_ID, kind: 'code', content: 'x', updatedAt }],
-  }
-}
+import {
+  makeNotebook as notebook,
+  NOTEBOOK_ID as ID,
+  NOTEBOOK_ID_B as ID_B,
+} from './__fixtures__/notebook'
 
 describe('activeStorage facade', () => {
   beforeEach(async () => {
@@ -53,8 +43,8 @@ describe('activeStorage facade', () => {
   })
 
   test('delegates list, most recently edited first', async () => {
-    await notebookStorage.put(notebook('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 100))
-    await notebookStorage.put(notebook('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 300))
+    await notebookStorage.put(notebook(ID, 100))
+    await notebookStorage.put(notebook(ID_B, 300))
     expect((await notebookStorage.list()).map((n) => n.updatedAt)).toEqual([300, 100])
   })
 
