@@ -6,6 +6,7 @@ import {
   addTombstones,
   dropAckedTombstones,
   removedCellIds,
+  retractTombstones,
   serverNotebookToJSON,
 } from './remoteSyncCore'
 
@@ -50,6 +51,22 @@ describe('addTombstones', () => {
   test('is a no-op (same reference) for an empty id list', () => {
     const buffer: CellTombstoneJSON[] = [{ id: A, deletedAt: 100 }]
     expect(addTombstones(buffer, [], 200)).toBe(buffer)
+  })
+})
+
+describe('retractTombstones', () => {
+  test('drops a tombstone whose id is present again (delete then undo)', () => {
+    const buffer: CellTombstoneJSON[] = [
+      { id: A, deletedAt: 100 },
+      { id: B, deletedAt: 200 },
+    ]
+    // A was restored (its id is back in the cells); B is still deleted.
+    expect(retractTombstones(buffer, [A])).toEqual([{ id: B, deletedAt: 200 }])
+  })
+
+  test('is a no-op (same reference) when no tombstone id is present', () => {
+    const buffer: CellTombstoneJSON[] = [{ id: A, deletedAt: 100 }]
+    expect(retractTombstones(buffer, [B])).toBe(buffer)
   })
 })
 

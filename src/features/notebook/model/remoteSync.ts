@@ -36,6 +36,7 @@ import {
   addTombstones,
   dropAckedTombstones,
   removedCellIds,
+  retractTombstones,
   serverNotebookToJSON,
 } from './remoteSyncCore'
 
@@ -256,10 +257,14 @@ function onLocalSaveCommitted(): void {
   const removed = removedCellIds(previousCellIds, currentIds)
   previousCellIds = new Set(currentIds)
   if (syncState) {
+    // Add tombstones for cells deleted since the last commit, and retract any
+    // whose id is present again (delete→undo restores the same id) — otherwise
+    // the next PATCH would carry the cell AND a tombstone for it.
+    const withAdded = addTombstones(syncState.deletedCells, removed, Date.now())
     syncState = {
       ...syncState,
       dirty: true,
-      deletedCells: addTombstones(syncState.deletedCells, removed, Date.now()),
+      deletedCells: retractTombstones(withAdded, currentIds),
     }
     void wrap(persistSyncState())
   }

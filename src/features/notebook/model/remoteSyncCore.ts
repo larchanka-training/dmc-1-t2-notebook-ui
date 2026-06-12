@@ -40,6 +40,23 @@ export function addTombstones(
 }
 
 /**
+ * Retract tombstones whose cell id is present again in the current notebook — a
+ * delete-then-undo within one unsynced window restores the same cell id, and a
+ * `removedCellIds` diff alone never un-marks it. Without this the next PATCH would
+ * be self-contradictory (`cells` containing the cell AND a `deletedCells`
+ * tombstone for it), and server LWW could delete the restored cell. Returns the
+ * SAME array reference when nothing is retracted.
+ */
+export function retractTombstones(
+  buffer: CellTombstoneJSON[],
+  presentIds: Iterable<string>,
+): CellTombstoneJSON[] {
+  const present = new Set(presentIds)
+  const next = buffer.filter((t) => !present.has(t.id))
+  return next.length === buffer.length ? buffer : next
+}
+
+/**
  * Drop the tombstones the server processed in a PATCH — exactly the ids we sent —
  * keeping any added since the request left the client (a delete made while the
  * PATCH was in flight). Implements "remove only server-confirmed tombstones".

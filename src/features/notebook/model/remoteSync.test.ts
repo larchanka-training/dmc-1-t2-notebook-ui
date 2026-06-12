@@ -135,6 +135,28 @@ describe('remote sync engine', () => {
     ])
   })
 
+  test('retracts a tombstone when a deleted cell is undone before the push (H-1)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A), cell(CELL_B)]))
+    cellsAtom.set([reatomCell('x', 'code', CELL_A), reatomCell('x', 'code', CELL_B)])
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Delete cell B, commit (no push yet — still inside the debounce window)...
+    cellsAtom.set([reatomCell('x', 'code', CELL_A)])
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(100)
+    // ...then undo: cell B is restored with the same id, commit.
+    cellsAtom.set([reatomCell('x', 'code', CELL_A), reatomCell('x', 'code', CELL_B)])
+    localSaveCommittedAtom.set(2)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // One PATCH, and it must NOT carry a tombstone for the restored cell.
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    expect(patchSpy.mock.calls[0][1].deletedCells).toEqual([])
+  })
+
   test('keeps deletedCells after a failed PATCH and drops them after success', async () => {
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
     cellsAtom.set([reatomCell('x', 'code', CELL_A), reatomCell('x', 'code', CELL_B)])
