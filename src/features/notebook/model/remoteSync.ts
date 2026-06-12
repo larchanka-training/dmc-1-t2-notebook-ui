@@ -115,21 +115,54 @@ function persistSyncState(): Promise<void> {
   return syncState ? notebookStorage.putSyncState(syncState) : Promise.resolve()
 }
 
+/** Outcome of trying to adopt the server's merged response as the local baseline. */
+type AdoptResult =
+  | 'applied' // adopted as the new baseline
+  | 'deferred' // transient block (concurrent edit / newer storage) — keep local, re-push
+  | 'rejected' // suspect response (malformed / would-zero) — keep local, do not auto-loop
+
 /**
- * Adopt the server's LWW-merged response as the new local baseline: persist it,
- * then reload the open notebook from storage (which restores the cells AND
- * re-accepts the clean baseline, so autosave does not immediately re-save and —
- * because reload does not bump `localSaveCommittedAtom` — this adoption does not
- * re-trigger a push). A malformed / newer-format response is not adopted.
+ * Adopt the server's LWW-merged response as the new local baseline: persist it
+ * (compare-and-swap so a newer version is not clobbered), then reload the open
+ * notebook from storage (which restores the cells AND re-accepts the clean
+ * baseline, so autosave does not immediately re-save and — because reload does
+ * not bump `localSaveCommittedAtom` — this adoption does not re-trigger a push).
+ *
+ * Refuses adoption (returns non-`applied`, keeping local intact) when: the
+ * response is malformed/newer-format; it would zero a non-empty notebook (M-3); a
+ * concurrent local edit is present before or during the write (M-1); or storage
+ * already holds a version newer than the one this push was based on (another tab).
  */
 async function applyServerBaseline(
   notebookId: string,
   merged: notebookApi.Notebook,
-): Promise<void> {
+  base: number,
+  pushedNonEmpty: boolean,
+): Promise<AdoptResult> {
   const json = serverNotebookToJSON(merged)
-  if (!isNotebookJSON(json)) return
-  await wrap(notebookStorage.put(json))
-  if (notebookId === LOCAL_NOTEBOOK_ID) await wrap(reloadFromStorage())
+  if (!isNotebookJSON(json)) {
+    console.warn('remoteSync: server response is not a valid notebook; keeping local')
+    return 'rejected'
+  }
+  // M-3: never let a well-formed empty-cells response zero a non-empty notebook.
+  if (json.cells.length === 0 && pushedNonEmpty) {
+    console.warn('remoteSync: server returned 0 cells for a non-empty notebook; keeping local')
+    return 'rejected'
+  }
+  // M-1: don't adopt over a concurrent local edit — checked before any write, so
+  // neither storage nor editor is touched while the user is mid-edit.
+  if (notebookId === LOCAL_NOTEBOOK_ID && hasLocalChangesAtom()) return 'deferred'
+  // Storage CAS: refuse to clobber a version newer than the one this push was
+  // based on (e.g. another tab saved during the PATCH) instead of an unconditional put.
+  const result = await wrap(notebookStorage.putIfNewer(json, base))
+  if (!result.ok) return 'deferred'
+  if (notebookId === LOCAL_NOTEBOOK_ID) {
+    // Re-check after the write: a keystroke during the put must not be clobbered
+    // by the wholesale reload (it survives in the editor; autosave reconciles).
+    if (hasLocalChangesAtom()) return 'deferred'
+    await wrap(reloadFromStorage())
+  }
+  return 'applied'
 }
 
 async function runOnePush(): Promise<void> {
@@ -206,7 +239,24 @@ async function runOnePush(): Promise<void> {
     // in-memory notebook is clean and nothing newer committed — otherwise the
     // user's fresher edits would be clobbered.
     if (!hasLocalChangesAtom() && !newerLocal) {
-      await wrap(applyServerBaseline(notebookId, merged))
+      const result = await wrap(
+        applyServerBaseline(notebookId, merged, stored.updatedAt, stored.cells.length > 0),
+      )
+      if (myGeneration !== generation) return
+      if (result !== 'applied') {
+        // Keep local authoritative and stay dirty so the change reconverges.
+        syncState = { ...syncState, dirty: true }
+        await wrap(persistSyncState())
+        if (result === 'deferred') {
+          // Transient (concurrent edit / newer storage) — re-push after a delay.
+          setStatus('syncing')
+          scheduleRetry()
+        } else {
+          // 'rejected' (suspect empty/malformed response) — surface, don't auto-loop.
+          setStatus('error')
+        }
+        return
+      }
     }
     if (myGeneration !== generation) return
 

@@ -55,7 +55,7 @@ let teardown: (() => void) | undefined
 let getSyncStateSpy: ReturnType<typeof vi.spyOn>
 let putSyncStateSpy: ReturnType<typeof vi.spyOn>
 let getSpy: ReturnType<typeof vi.spyOn>
-let putSpy: ReturnType<typeof vi.spyOn>
+let putIfNewerSpy: ReturnType<typeof vi.spyOn>
 let createSpy: ReturnType<typeof vi.spyOn>
 let patchSpy: ReturnType<typeof vi.spyOn>
 
@@ -71,7 +71,7 @@ beforeEach(() => {
   getSyncStateSpy = vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
   putSyncStateSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
   getSpy = vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedDoc(5, [cell(CELL_A)]))
-  putSpy = vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+  putIfNewerSpy = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
   createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(serverResponse([cell(CELL_A)]))
   patchSpy = vi.spyOn(notebookApi, 'patch').mockResolvedValue(serverResponse([cell(CELL_A)]))
 })
@@ -219,8 +219,9 @@ describe('remote sync engine', () => {
   test('adopts the merged server response as the new baseline when local is clean', async () => {
     let current = storedDoc(5, [cell(CELL_A, 'local', 5)])
     getSpy.mockImplementation(async () => current)
-    putSpy.mockImplementation(async (nb: NotebookJSON) => {
+    putIfNewerSpy.mockImplementation(async (nb: NotebookJSON) => {
       current = nb
+      return { ok: true }
     })
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
     patchSpy.mockResolvedValue(serverResponse([cell(CELL_A, 'merged-from-server', 10)]))
@@ -240,8 +241,9 @@ describe('remote sync engine', () => {
   test('does not adopt the merged response when a newer save commits in flight', async () => {
     let current = storedDoc(5, [cell(CELL_A, 'local', 5)])
     getSpy.mockImplementation(async () => current)
-    putSpy.mockImplementation(async (nb: NotebookJSON) => {
+    putIfNewerSpy.mockImplementation(async (nb: NotebookJSON) => {
       current = nb
+      return { ok: true }
     })
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
     patchSpy
@@ -260,6 +262,43 @@ describe('remote sync engine', () => {
     // First push skips apply (stale) and re-pushes; the second applies cleanly.
     expect(patchSpy).toHaveBeenCalledTimes(2)
     expect(cellsAtom()[0].code()).toBe('server-2')
+  })
+
+  test('refuses an empty-cells response that would zero a non-empty notebook (M-3)', async () => {
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'local', 5)]))
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    patchSpy.mockResolvedValue(serverResponse([])) // server returns 0 cells
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // The notebook is NOT zeroed — adoption refused, local kept, storage untouched.
+    expect(cellsAtom()[0].code()).toBe('local')
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('error')
+  })
+
+  test('refuses baseline adoption when storage holds a newer version (M-1 CAS)', async () => {
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'local', 5)]))
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    patchSpy.mockResolvedValue(serverResponse([cell(CELL_A, 'server', 10)]))
+    // Another tab wrote a newer version since this push's baseline.
+    putIfNewerSpy.mockResolvedValue({
+      ok: false,
+      current: storedDoc(99, [cell(CELL_A, 'other-tab', 99)]),
+    })
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // The newer stored version is not clobbered; the editor is not reloaded to the
+    // server doc, and the change stays dirty for a re-push.
+    expect(cellsAtom()[0].code()).toBe('local')
+    expect(lastPersistedState(putSyncStateSpy).dirty).toBe(true)
   })
 
   test('does not push while offline and flushes on reconnect', async () => {
