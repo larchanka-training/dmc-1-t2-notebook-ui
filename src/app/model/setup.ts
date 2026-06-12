@@ -11,8 +11,10 @@ import {
   loadNotebook,
   LOCAL_NOTEBOOK_ID,
   markBootRestored,
+  pauseRemoteSync,
   startAiContextSync,
   startAutosave,
+  startRemoteSync,
 } from '@/features/notebook'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
@@ -84,7 +86,13 @@ setRefreshHandlers({
     })
   },
   onSessionExpired: () => {
-    rootFrame.run(() => clearSession())
+    // Pause background sync (refresh already failed — a real re-login is needed).
+    // This is the ONLY end-of-session signal the sync layer honours; it never
+    // wipes local notebook data (INV-4 — an untrusted-device wipe is #136).
+    rootFrame.run(() => {
+      pauseRemoteSync()
+      clearSession()
+    })
     if (window.location.pathname !== LOGIN_PATH) {
       window.location.replace(`${LOGIN_PATH}?reason=session_expired`)
     }
@@ -127,6 +135,10 @@ rootFrame.run(async () => {
     if (restored) markBootRestored()
   } finally {
     startAutosave()
+    // Background remote sync (#134): push local changes to the backend for the
+    // authorized user. Starts unconditionally — it self-guards on auth, staying
+    // idle while signed out and flushing the persisted queue once a token exists.
+    startRemoteSync(LOCAL_NOTEBOOK_ID)
     // Mode B (persisted AI context, Epic 07 / #116): load the saved context and
     // keep it in sync with edits/deletes. Opt-in via VITE_AI_CONTEXT_MODE; the
     // default 'at-send' mode builds context lazily at generate time and needs no

@@ -34,6 +34,8 @@ export {
   saveNow,
 } from './model/autosave'
 export type { SaveStatus } from './model/autosave'
+export { startRemoteSync, pauseRemoteSync, remoteSyncStatusAtom } from './model/remoteSync'
+export type { RemoteSyncStatus } from './model/remoteSync'
 export {
   runCell,
   runAll,
