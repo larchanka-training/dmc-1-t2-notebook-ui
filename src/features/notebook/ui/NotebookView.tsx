@@ -46,6 +46,8 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import { cloudGenerateAndInsertCodeAction } from '../model/cloudCodeGenerator'
+import { RateLimitedError } from '@/shared/api/errors'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -70,6 +72,24 @@ function runAndInsertBelow(cellId: string) {
   enterEdit(inserted.id)
 }
 
+function formatCloudGenerateError(err: Error): string {
+  if (err instanceof RateLimitedError) {
+    const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
+    return `Rate limit reached.${wait}`
+  }
+  const msg = err.message.toLowerCase()
+  if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
+    return 'Prompt was flagged by the safety filter.'
+  }
+  if (msg.includes('llm_timeout') || msg.includes('timeout')) {
+    return 'Cloud generation timed out. Try the local model instead.'
+  }
+  if (msg.includes('503') || msg.includes('502') || msg.includes('unavailable')) {
+    return 'Cloud AI is temporarily unavailable. Try the local model instead.'
+  }
+  return `Cloud generation failed: ${err.message}`
+}
+
 interface NotebookRowProps {
   cell: Cell
   isFirst: boolean
@@ -82,6 +102,8 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const hasGenerator = !!codeGeneratorAtom()
   const isGenerating = !generateAndInsertCodeAction.ready()
   const generateError = generateAndInsertCodeAction.error()
+  const isCloudGenerating = !cloudGenerateAndInsertCodeAction.ready()
+  const cloudGenerateError = cloudGenerateAndInsertCodeAction.error()
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
   // re-render the entire cell (card + toolbar + output) on every search
@@ -133,10 +155,21 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         }
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
+        onCloudGenerate={
+          cell.kind === 'markdown'
+            ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
+            : undefined
+        }
+        isCloudGenerating={isCloudGenerating}
       />
       {generateError && (
         <p className="px-3 py-1 text-xs text-destructive">
           Generate failed: {generateError.message}
+        </p>
+      )}
+      {cloudGenerateError && (
+        <p className="px-3 py-1 text-xs text-destructive">
+          {formatCloudGenerateError(cloudGenerateError)}
         </p>
       )}
     </div>
