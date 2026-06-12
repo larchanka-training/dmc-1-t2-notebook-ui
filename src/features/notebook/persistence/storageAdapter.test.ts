@@ -21,4 +21,18 @@ describe('isStaleWrite', () => {
   test('a write is fresh when the stored version is older than the baseline', () => {
     expect(isStaleWrite(5, 10)).toBe(false)
   })
+
+  // Guard-doc for the finite-number precondition in the JSDoc: pin the
+  // non-finite behaviour so a future refactor can't silently change it.
+  test('treats a NaN stored timestamp as a fresh write (NaN comparisons are false)', () => {
+    expect(isStaleWrite(NaN, 10)).toBe(false)
+  })
+
+  test('a null baseline still wins over a NaN stored timestamp (null short-circuits)', () => {
+    expect(isStaleWrite(NaN, null)).toBe(true)
+  })
+
+  test('treats Infinity as newer than any finite baseline', () => {
+    expect(isStaleWrite(Infinity, 10)).toBe(true)
+  })
 })
