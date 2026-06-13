@@ -65,6 +65,11 @@ buffer and persisted.
   (`dropAckedTombstones`), keeping any deletion made while the request was in
   flight.
 - A failed `PATCH` leaves the buffer intact — deletions are never lost.
+- The diff baseline (`previousCellIds`) is re-seeded whenever the notebook is
+  replaced wholesale from storage (boot, cross-tab pull, Reload, baseline
+  adoption — signalled by `notebookRestoredAtom`), so deleting a cell that arrived
+  via a reload still produces a tombstone instead of silently resurrecting on the
+  server.
 
 ## Applying the server response (LWW baseline)
 
@@ -124,6 +129,15 @@ the newer local version re-pushed — local edits are never clobbered.
   `onSessionExpired` (which fires only when the refresh token is also dead). It
   pauses pushes and **never wipes local data** — a wipe-on-sign-out is #136's job.
 
+**Cross-account safety (owner-gate).** The persisted queue + notebook content
+survive `clearSession()` (offline-first on a trusted device), so on a **shared**
+device a queue left by account A must not be uploaded under account B. The
+sync-state records an `ownerId` (`userAtom().id` when the dirty change is made),
+and the engine refuses to push a queue whose `ownerId` does not match the current
+user. This closes the auto-flush leak; full per-account **content** isolation (B
+still _sees_ A's local notebook in the editor) is #136's device-mode job, and a
+real per-account server id is #135's (see "Notebook id scoping").
+
 ## Notebook id scoping (single-notebook MVP) — known limitation
 
 The synced notebook currently carries the compile-time constant `LOCAL_NOTEBOOK_ID`
@@ -143,6 +157,10 @@ for the single-notebook MVP, but a large notebook re-uploads fully on every
 debounce cycle while editing. A future delta / changed-cells PATCH is the
 mitigation.
 
+**Cell cap.** The backend caps `cells` at `maxItems: 500`. The engine refuses to
+push a notebook over `MAX_SYNCABLE_CELLS` (500) with a distinct log instead of
+sending it to be `422`'d into a silent terminal `failed` — local stays intact.
+
 ## Persistence of sync state
 
 `{ remoteCreated, dirty, deletedCells, lastSyncedUpdatedAt }` per notebook lives
@@ -153,9 +171,17 @@ in memory and is write-through-persisted to the storage adapter's `sync` partiti
 **Crash recovery (boot detection).** `lastSyncedUpdatedAt` is the `updatedAt` of
 the doc at the last successful sync. If a content autosave landed durable but the
 `dirty` flag was lost to a crash before it persisted, the marker alone would miss
-the unsynced change. On boot, a previously-created notebook whose stored
-`updatedAt` is **newer** than `lastSyncedUpdatedAt` is marked dirty and pushed —
-so the change is not stranded until the next edit.
+the unsynced change. On boot, a previously-created notebook (`remoteCreated`) whose
+stored `updatedAt` is **newer** than `lastSyncedUpdatedAt` is marked dirty and
+pushed — so the change is not stranded until the next edit.
+
+Boot detection is deliberately scoped to `remoteCreated` notebooks: a
+**never-created** notebook whose dirty flag was lost to a crash has no `ownerId`
+recorded either, so boot-pushing it would risk uploading content under the wrong
+account (the cross-account leak the owner-gate exists to prevent). That case is a
+liveness gap only — no data loss, and it syncs on the next edit (which re-records
+`ownerId` + `dirty`). A fully durable fix is an atomic content + dirty-marker
+write, deferred to #135.
 
 ## Reatom notes
 
@@ -180,3 +206,11 @@ same pattern autosave uses.
 - **`loadStateAndFlush` generation guard.** Boot load is guarded by
   `activeNotebookId`; a `generation`-based guard (matching the push path) is a
   latent hardening for the #135 re-login path.
+- **First-create crash durability (#135).** A never-created notebook whose dirty
+  marker is lost to a crash syncs only on the next edit (see "Crash recovery"). An
+  atomic content + dirty-marker write would close the window.
+- **Engine decomposition (#135).** `runOnePush` carries the whole push protocol in
+  one function and the lifecycle lives in ~20 module-level `let`s; a
+  behaviour-preserving extraction (`createOrRecover` / `handleAdoptResult`, one
+  lifecycle object) is worth doing before #135/#136 reuse the singleton — the
+  existing suite guards it.
