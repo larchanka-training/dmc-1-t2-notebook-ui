@@ -5,7 +5,12 @@ import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
 import { reatomCell } from '../domain/cell'
-import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
+import {
+  cellsAtom,
+  LOCAL_NOTEBOOK_ID,
+  notebookBaseUpdatedAtAtom,
+  restoreNotebook,
+} from './notebook'
 import { bumpNotebookRevision, notebookRevisionAtom } from './revision'
 import { localSaveCommittedAtom } from './autosave'
 import { isOnlineAtom } from './online'
@@ -271,6 +276,31 @@ describe('remote sync engine', () => {
     // One PATCH, and it must NOT carry a tombstone for the restored cell.
     expect(patchSpy).toHaveBeenCalledTimes(1)
     expect(patchSpy.mock.calls[0][1].deletedCells).toEqual([])
+  })
+
+  test('a cell from a cross-tab reload still produces a tombstone when deleted (review veai High)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    cellsAtom.set([reatomCell('x', 'code', CELL_A)]) // engine starts knowing only A
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // A cross-tab pull replaces the editor with A + B (restoreNotebook bumps the
+    // restore signal, which re-seeds the delete-detection baseline to {A, B}).
+    restoreNotebook(storedDoc(6, [cell(CELL_A), cell(CELL_B)]))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Now delete B and commit.
+    cellsAtom.set([reatomCell('x', 'code', CELL_A)])
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // B's deletion is detected and sent as a tombstone (without the re-seed it
+    // would be missed and B could resurrect on the server).
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    expect(patchSpy.mock.calls[0][1].deletedCells).toEqual([
+      { id: CELL_B, deletedAt: expect.any(Number) },
+    ])
   })
 
   test('keeps deletedCells after a failed PATCH and drops them after success', async () => {

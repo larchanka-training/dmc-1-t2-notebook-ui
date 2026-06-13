@@ -30,6 +30,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { isNotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
 import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
+import { notebookRestoredAtom } from './revision'
 import { hasLocalChangesAtom, localSaveCommittedAtom, reloadFromStorage } from './autosave'
 import { isOnlineAtom, startOnlineTracking } from './online'
 import {
@@ -66,6 +67,8 @@ let activeNotebookId: string | null = null
 let syncState: NotebookSyncState | null = null
 let previousCellIds = new Set<string>()
 let unsubscribeSignal: (() => void) | null = null
+let unsubscribeRestored: (() => void) | null = null
+let primedRestored = false
 let unsubscribeToken: (() => void) | null = null
 let primedToken = false
 let previousToken: string | null = null
@@ -392,11 +395,9 @@ async function runOnePush(): Promise<void> {
         return
       }
       adoptedToServer = true
-      // C-10: adoption reloaded the editor from the server merge, so the cell set
-      // may differ from what the delete-detection diff last saw. Re-seed it from the
-      // adopted cells, or a future cross-device merge (#137) would mis-detect
-      // deletions on the next commit.
-      previousCellIds = new Set(cellsAtom().map((c) => c.id))
+      // Note: re-seeding previousCellIds after the adopted reload is handled by the
+      // notebookRestoredAtom subscription (restoreNotebook bumps it), which also
+      // covers cross-tab reloads and the Reload button (review veai High).
     }
     if (myGeneration !== generation) return
 
@@ -523,11 +524,25 @@ export function startRemoteSync(notebookId: string): () => void {
   startEpoch += 1
   const myEpoch = startEpoch
   primed = false
+  primedRestored = false
   pushInFlight = false
   pushAgain = false
   previousCellIds = new Set(cellsAtom().map((c) => c.id))
   retryDelay = INITIAL_RETRY_MS
   setStatus('idle')
+
+  // Re-seed the delete-detection baseline whenever the notebook is replaced from
+  // storage (cross-tab pull, Reload, adoption), so deleting a cell that arrived via
+  // a reload still emits a tombstone (review veai High). Skip the first emit.
+  unsubscribeRestored = notebookRestoredAtom.subscribe(
+    wrap(() => {
+      if (!primedRestored) {
+        primedRestored = true
+        return
+      }
+      previousCellIds = new Set(cellsAtom().map((c) => c.id))
+    }),
+  )
 
   unsubscribeOnline = startOnlineTracking()
   onlineHandler = wrap(() => {
@@ -598,6 +613,8 @@ function teardownRemoteSync(): void {
   resetRetry()
   unsubscribeSignal?.()
   unsubscribeSignal = null
+  unsubscribeRestored?.()
+  unsubscribeRestored = null
   unsubscribeToken?.()
   unsubscribeToken = null
   if (onlineHandler && typeof window !== 'undefined') {
