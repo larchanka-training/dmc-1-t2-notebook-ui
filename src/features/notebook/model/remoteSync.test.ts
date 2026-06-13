@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ApiError, NetworkError, notebook as notebookApi } from '@/shared/api'
+import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'
 import { accessTokenAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
@@ -461,6 +461,64 @@ describe('remote sync engine', () => {
     putSyncStateSpy.mockResolvedValue()
     await vi.advanceTimersByTimeAsync(PERSIST_RETRY_MS)
     expect(putSyncStateSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('honours a 429 Retry-After before retrying (review C-5)', async () => {
+    // retryAfter 5s — longer than the 2s initial backoff floor.
+    createSpy.mockRejectedValueOnce(new RateLimitedError('rate_limited', 'slow down', 5))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    // At the 2s backoff floor the server's 5s hint is not yet satisfied — no retry.
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS)
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    createSpy.mockResolvedValue(serverResponse([cell(CELL_A)]))
+    await vi.advanceTimersByTimeAsync(5000 - INITIAL_RETRY_MS)
+    expect(createSpy).toHaveBeenCalledTimes(2)
+  })
+
+  test('grows the retry backoff between attempts (review C-5)', async () => {
+    createSpy.mockRejectedValue(new ApiError(503, 'unavailable'))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush() // push #1 fails → retry armed at +2000
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS) // retry #2 fires → next backoff 4000
+    expect(createSpy).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS) // +2000: not enough for the grown 4000
+    expect(createSpy).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS) // +2000 more → retry #3
+    expect(createSpy).toHaveBeenCalledTimes(3)
+  })
+
+  test('discards an in-flight push result when paused mid-request (review C-5)', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined)
+    let resolveCreate!: (nb: notebookApi.Notebook) => void
+    createSpy.mockReturnValue(
+      new Promise<notebookApi.Notebook>((r) => {
+        resolveCreate = r
+      }),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).toHaveBeenCalledTimes(1) // request in flight
+
+    putSyncStateSpy.mockClear()
+    pauseRemoteSync() // bumps generation
+    resolveCreate(serverResponse([cell(CELL_A)])) // response arrives AFTER pause
+    await vi.advanceTimersByTimeAsync(0)
+
+    // The post-await generation check discards it — no state mutation or adoption.
+    expect(putSyncStateSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
+    expect(pausedAtom()).toBe(true)
   })
 
   test('pauseRemoteSync stops pushes without wiping local data', async () => {
