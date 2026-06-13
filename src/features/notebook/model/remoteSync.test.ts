@@ -271,6 +271,46 @@ describe('remote sync engine', () => {
     expect(patchSpy).toHaveBeenCalledTimes(1)
   })
 
+  test('attributes and flushes a token-present/user-null save once identity hydrates (review gpt-v-7 A-1)', async () => {
+    // Token present (beforeEach), user not hydrated yet, and NO durable queue — so
+    // the edit is recorded in-memory with no ownerId. The owner-gate would strand
+    // it forever (the hydration retry only re-runs pushNow) until A-1's re-stamp.
+    userAtom.set(null)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await commitAndFlush() // a local edit commits while the user is unknown
+    expect(createSpy).not.toHaveBeenCalled() // no attributable owner yet
+
+    // Identity hydrates for the SAME session → attribute the queue and flush,
+    // without waiting for another edit.
+    userAtom.set(user(ALICE))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(lastPersistedState(putSyncStateSpy).ownerId).toBe(ALICE)
+  })
+
+  test('does NOT attribute a token-present/user-null save to a user who signs in after a sign-out (review gpt-v-7 A-1)', async () => {
+    // A save made in the token-present/user-null window, then a sign-out, then a
+    // DIFFERENT user signs in. The unattributed queue must NOT be auto-pushed
+    // under the new account (cross-account safety): the pending flag is cleared on
+    // sign-out, so the owner-gate keeps refusing it.
+    userAtom.set(null)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await commitAndFlush()
+    expect(createSpy).not.toHaveBeenCalled()
+
+    // Sign-out clears the pending attribution, then Bob signs in.
+    accessTokenAtom.set(null)
+    await vi.advanceTimersByTimeAsync(0)
+    accessTokenAtom.set('bob-token')
+    userAtom.set(user(BOB))
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    expect(createSpy).not.toHaveBeenCalled() // still unattributed, never under Bob
+  })
+
   test('pushes a queued change that belongs to the current account', async () => {
     getSyncStateSpy.mockResolvedValue({
       notebookId: LOCAL_NOTEBOOK_ID,

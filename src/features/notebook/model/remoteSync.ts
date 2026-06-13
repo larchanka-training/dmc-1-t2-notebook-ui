@@ -86,6 +86,12 @@ let primedToken = false
 let previousToken: string | null = null
 let unsubscribeUser: (() => void) | null = null
 let primedUser = false
+// A-1 (review gpt-v-7): a local save committed while the access token is present
+// but `userAtom` has not hydrated yet is stamped with no ownerId. This flags that
+// the in-memory queue is awaiting attribution, so the userAtom-hydration handler
+// can stamp the now-known owner of the SAME session. Cleared on sign-out (a queue
+// that outlived a sign-out is genuinely ambiguous) and reset on (re)start.
+let ownerHydrationPending = false
 let unsubscribeOnline: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -659,6 +665,14 @@ function onLocalSaveCommitted(): void {
       ownerId: currentOwnerId() ?? syncState.ownerId,
       deletedCells: retractTombstones(withAdded, currentIds),
     }
+    // A-1: a save made with the token present but the user not hydrated yet gets
+    // no ownerId; without this the owner-gate would strand it until the next edit
+    // (the userAtom-hydration retry only re-runs pushNow, never re-attributes).
+    // Flag it for stamping once identity arrives. A truly signed-out save (no
+    // token) stays unattributed by #136 device-mode design.
+    if (syncState.ownerId === undefined && isAuthenticated()) {
+      ownerHydrationPending = true
+    }
     if (syncState.deletedCells.length > MAX_DELETED_CELLS) {
       console.warn(
         `remoteSync: deletedCells buffer over cap (${syncState.deletedCells.length} > ` +
@@ -695,6 +709,7 @@ export function startRemoteSync(notebookId: string): () => void {
   metadataLoaded = false
   pushInFlight = false
   pushAgain = false
+  ownerHydrationPending = false
   previousCellIds = new Set(cellsAtom().map((c) => c.id))
   retryDelay = INITIAL_RETRY_MS
   setStatus('idle')
@@ -758,14 +773,20 @@ export function startRemoteSync(notebookId: string): () => void {
         console.info('remoteSync: signed out, sync idle')
         generation += 1
         abortCurrentPush()
+        // A-1: a pending-attribution queue that has now outlived a sign-out is
+        // genuinely ambiguous — never auto-attribute it to whoever signs in next.
+        ownerHydrationPending = false
       }
     }),
   )
-  // Auth hydration race (A-3): the owner-gate needs `userAtom().id`, but the token
-  // can hydrate before the user (e.g. a restored session whose /auth/me is still in
-  // flight, or `setSession` setting the token first). A push gated out as an owner
-  // mismatch while the user was unknown has no other retry, so re-attempt the flush
-  // when the user identity arrives.
+  // Auth hydration race (A-3 + A-1): the owner-gate needs `userAtom().id`, but the
+  // token can hydrate before the user (a restored session whose /auth/me is still
+  // in flight, or `setSession` setting the token first). Two cases when identity
+  // arrives: (A-3) a durable queue already attributed to this user just needs a
+  // re-flush; (A-1) an in-memory save made in the token-present/user-null window
+  // got no ownerId and must be attributed now, or the gate strands it until the
+  // next edit. Stamp the now-known owner (same session — sign-out clears the flag),
+  // then flush.
   primedUser = false
   unsubscribeUser = userAtom.subscribe(
     wrap(() => {
@@ -773,7 +794,20 @@ export function startRemoteSync(notebookId: string): () => void {
         primedUser = true
         return
       }
-      if (userAtom() !== null) void pushNow()
+      if (userAtom() === null) return
+      const ownerNow = currentOwnerId()
+      if (
+        ownerHydrationPending &&
+        ownerNow !== undefined &&
+        syncState !== null &&
+        syncState.ownerId === undefined &&
+        !syncState.ownerConflict
+      ) {
+        ownerHydrationPending = false
+        syncState = { ...syncState, ownerId: ownerNow }
+        if (metadataLoaded) void persistSyncState()
+      }
+      void pushNow()
     }),
   )
   // Generation-bound (by start epoch) so a stale handle from a PREVIOUS start

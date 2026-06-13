@@ -102,7 +102,10 @@ the newer local version re-pushed — local edits are never clobbered.
 ## Offline, retries, errors
 
 - `isOnlineAtom` mirrors `navigator.onLine`. While offline the engine does not
-  push; it schedules a retry and re-attempts on the `online` event.
+  push: it sets the `offline` status and arms **no** retry timer (a timer would
+  re-enter this branch and grow the backoff with no server contact). Sync resumes
+  on the browser `online` event (which flushes the queue) and on the next
+  committed edit.
 - **Every** failure keeps the queue (dirty flag + tombstones untouched) — data is
   never dropped. Failures are then classified:
   - **Retryable** — `NetworkError`, 5xx, 408, 429 (honouring a `Retry-After`),
