@@ -18,10 +18,10 @@
 //     pauses pushes and never wipes local data.
 //   - Reatom clearStack: every entry point is `wrap`-captured and every await is
 //     `await wrap(promise)`, so atom reads/writes in continuations keep a stack.
-//   - Cancellation: the notebook facade takes no AbortSignal, so a torn-down /
-//     paused engine discards an in-flight push's result via a `generation` guard
-//     rather than aborting the fetch. Wiring a real AbortSignal through the facade
-//     is a follow-up.
+//   - Cancellation: each push gets an AbortController whose signal is threaded
+//     through the facade; pause/teardown/sign-out abort the in-flight request AND
+//     bump the `generation` (which discards a late result), so a hung request can't
+//     keep `pushInFlight` true and block later sync.
 
 import { atom, wrap } from '@reatom/core'
 import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'

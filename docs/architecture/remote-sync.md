@@ -183,6 +183,21 @@ liveness gap only — no data loss, and it syncs on the next edit (which re-reco
 `ownerId` + `dirty`). A fully durable fix is an atomic content + dirty-marker
 write, deferred to #135.
 
+## Robustness guards
+
+- **Metadata load.** A failed `getSyncState()` read leaves the durable queue
+  unknown, so the engine holds off persisting and pushing (`metadataLoaded`) and
+  retries the load — a fresh provisional state is never written over the unread
+  durable record.
+- **Auth hydration.** The owner-gate needs `userAtom().id`; if the token hydrates
+  before the user, the flush is re-attempted when the user identity arrives.
+- **Cancellation.** Each push has an `AbortController`; pause / teardown / sign-out
+  abort the in-flight request (the `generation` guard still discards a late result),
+  so a hung request can't keep `pushInFlight` true and block later sync.
+- **Tombstone ↔ body consistency.** The sent `deletedCells` are filtered against
+  the pushed document's cell ids, so a PATCH never carries a cell AND a tombstone
+  for it (a deletion made in memory before its own save committed).
+
 ## Reatom notes
 
 Under `clearStack()` every entry point (`flush`, retry, `online`, the
@@ -192,10 +207,6 @@ same pattern autosave uses.
 
 ## Known follow-ups
 
-- The notebook facade takes no `AbortSignal`, so a torn-down / paused engine
-  discards an in-flight push's result via a `generation` guard rather than
-  aborting the fetch. Threading a real `AbortSignal` through the facade is a
-  follow-up.
 - **Per-user server id (#135).** The shared `LOCAL_NOTEBOOK_ID` only works for the
   first user; a real per-account id must be designed with the #135 bootstrap (see
   "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
