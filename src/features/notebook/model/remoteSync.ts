@@ -270,16 +270,19 @@ async function runOnePush(): Promise<void> {
 
   setStatus('syncing')
   try {
-    const merged = sentState.remoteCreated
-      ? await wrap(
-          notebookApi.patch(notebookId, {
-            title: stored.title,
-            formatVersion: stored.formatVersion,
-            cells: stored.cells,
-            deletedCells: sentState.deletedCells,
-          }),
-        )
-      : await wrap(
+    let merged: notebookApi.Notebook
+    if (sentState.remoteCreated) {
+      merged = await wrap(
+        notebookApi.patch(notebookId, {
+          title: stored.title,
+          formatVersion: stored.formatVersion,
+          cells: stored.cells,
+          deletedCells: sentState.deletedCells,
+        }),
+      )
+    } else {
+      try {
+        merged = await wrap(
           notebookApi.create({
             id: stored.id,
             title: stored.title,
@@ -287,6 +290,22 @@ async function runOnePush(): Promise<void> {
             cells: stored.cells,
           }),
         )
+      } catch (error) {
+        // A 409 on create means the notebook already exists under us: the POST
+        // committed server-side but its ack was lost, then an edit made the
+        // re-POSTed content differ (backend `_matches_create_payload`). Adopt it
+        // as created and re-push as PATCH (which LWW-merges) instead of wedging on
+        // a terminal 409 forever — the create-ack/409 family (review C-1/C-2).
+        if (error instanceof ApiError && error.status === 409) {
+          if (myGeneration !== generation) return
+          syncState = { ...syncState, remoteCreated: true, dirty: true }
+          await wrap(persistSyncState())
+          pushAgain = true
+          return
+        }
+        throw error
+      }
+    }
 
     // Discard the result if the engine was torn down / paused during the await.
     if (myGeneration !== generation) return

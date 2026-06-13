@@ -363,6 +363,26 @@ describe('remote sync engine', () => {
     expect(createSpy).toHaveBeenCalledTimes(2)
   })
 
+  test('recovers from a lost create-ack: a 409 on re-POST switches to PATCH (review C-1/C-2)', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined) // remoteCreated = false
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'edited-after-lost-ack', 5)]))
+    // The original POST committed server-side but its ack was lost; the re-POST
+    // (different content after an edit) gets a 409 NOTEBOOK_CONFLICT.
+    createSpy.mockRejectedValue(new ApiError(409, 'notebook_conflict'))
+    patchSpy.mockResolvedValue(serverResponse([cell(CELL_A, 'edited-after-lost-ack', 5)]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // Instead of wedging on a terminal 'failed', the engine adopts the notebook as
+    // created and re-pushes via PATCH — the sync recovers.
+    expect(createSpy).toHaveBeenCalled()
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('synced')
+    expect(lastPersistedState(putSyncStateSpy).remoteCreated).toBe(true)
+  })
+
   test('does NOT loop on a permanent 4xx; keeps the queue and goes terminal (review M-2)', async () => {
     // A shared-id 403 (C0) lands here: the body is rejected every time.
     createSpy.mockRejectedValue(new ApiError(403, 'forbidden'))
