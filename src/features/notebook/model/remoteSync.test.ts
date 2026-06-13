@@ -626,6 +626,23 @@ describe('remote sync engine', () => {
     expect(pausedAtom()).toBe(true)
   })
 
+  test('classifies a transient local-read failure as retryable, not unhandled (review veai High)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockRejectedValueOnce(new Error('blocked db'))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0) // boot-flush (dirty) → get rejects
+
+    expect(remoteSyncStatusAtom()).toBe('error')
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+
+    // The retry re-reads successfully and pushes — no stuck/unhandled state.
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A)]))
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS)
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('discards an in-flight push on sign-out (review C-11)', async () => {
     getSyncStateSpy.mockResolvedValue(undefined)
     let resolveCreate!: (nb: notebookApi.Notebook) => void

@@ -27,7 +27,8 @@ import { atom, wrap } from '@reatom/core'
 import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
-import { isNotebookJSON } from '../persistence/schema'
+import { NewerFormatError } from '../persistence/migrations'
+import { isNotebookJSON, type NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
 import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
 import { notebookRestoredAtom } from './revision'
@@ -298,7 +299,26 @@ async function runOnePush(): Promise<void> {
   // storage read is detected and we never issue HTTP for a dead engine.
   const myGeneration = generation
   // Local-first: push exactly what local storage holds (INV-2: full doc incl. cells).
-  const stored = await wrap(notebookStorage.get(notebookId))
+  // The read is in its own try so a storage failure doesn't escape as an unhandled
+  // rejection with no status/retry (review veai High).
+  let stored: NotebookJSON | undefined
+  try {
+    stored = await wrap(notebookStorage.get(notebookId))
+  } catch (error) {
+    if (myGeneration !== generation) return
+    if (error instanceof NewerFormatError) {
+      // Local doc is from a newer app version — never upload a format we can't
+      // understand (the autosave newer-format gate owns the user-facing state).
+      console.warn('remoteSync: local notebook is a newer format; not pushing', error)
+      setStatus('error')
+      return
+    }
+    // Transient read failure (blocked DB / quota) — keep the queue and retry.
+    console.warn('remoteSync: failed to read the local notebook; will retry', error)
+    setStatus('error')
+    scheduleRetry()
+    return
+  }
   if (myGeneration !== generation) return
   if (!stored) {
     setStatus('idle')
@@ -454,7 +474,15 @@ async function pushNow(): Promise<void> {
 }
 
 async function loadStateAndFlush(notebookId: string): Promise<void> {
-  const loaded = await wrap(notebookStorage.getSyncState(notebookId))
+  let loaded: NotebookSyncState | undefined
+  try {
+    loaded = await wrap(notebookStorage.getSyncState(notebookId))
+  } catch (error) {
+    // A storage failure reading bookkeeping must not reject this fire-and-forget
+    // boot task — fall back to a fresh state (review veai High).
+    console.warn('remoteSync: failed to load sync metadata; using a fresh state', error)
+    loaded = undefined
+  }
   if (activeNotebookId !== notebookId) return
   // Merge, don't clobber: a local save during the load window already recorded
   // dirty/tombstones into the provisional state — union them with the loaded
