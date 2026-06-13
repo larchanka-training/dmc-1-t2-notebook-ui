@@ -116,11 +116,14 @@ the newer local version re-pushed — local edits are never clobbered.
 
 ## Auth and session end
 
-- The engine syncs only for an authorized user (`accessTokenAtom`). Signed out,
-  it stays idle and the queue persists. It subscribes to `accessTokenAtom` and,
-  on a null→token transition (sign-in / re-login), clears pause and **flushes the
-  queued change** — so a change made while signed out syncs as soon as the user
-  signs in.
+- The engine syncs only for an authorized user. Signed out, it stays idle and the
+  queue persists. On sign-in / re-login (a null→token transition, and the matching
+  `userAtom` hydration) it clears pause and re-attempts a flush — but the owner-gate
+  below decides: **only a queue positively attributed to the signing-in user**
+  auto-uploads. A change made while signed **out** is unattributed and stays local
+  until the user edits it again while signed in (which records `ownerId`) or a
+  later import/keep/discard flow handles it — it is **not** auto-uploaded on the
+  next sign-in.
 - It **never** inspects 401 or runs its own token refresh. `refreshMiddleware`
   (`shared/api/client.ts`) heals a transient 401 transparently — the engine does
   not even see it.
