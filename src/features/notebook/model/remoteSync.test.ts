@@ -74,6 +74,17 @@ function lastPersistedState(spy: ReturnType<typeof vi.spyOn>): NotebookSyncState
   return spy.mock.calls.at(-1)?.[0] as NotebookSyncState
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+const CELL_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const CELL_D = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+
 let teardown: (() => void) | undefined
 let getSyncStateSpy: ReturnType<typeof vi.spyOn>
 let putSyncStateSpy: ReturnType<typeof vi.spyOn>
@@ -309,6 +320,70 @@ describe('remote sync engine', () => {
     await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
 
     expect(createSpy).not.toHaveBeenCalled() // still unattributed, never under Bob
+  })
+
+  test('a stale push unwinding after a restart keeps the new engine in-flight lock (review gpt-v-10)', async () => {
+    // Engine A and engine B (after a restart) each get a hung create; A's request
+    // settles AFTER the restart. Its stale `finally` must not clear engine B's
+    // in-flight lock, or a later save would start an overlapping create.
+    const a = deferred<notebookApi.Notebook>()
+    const b = deferred<notebookApi.Notebook>()
+    createSpy.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: false,
+      dirty: true,
+      ownerId: OWNER,
+      deletedCells: [],
+    })
+
+    const stopA = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(createSpy).toHaveBeenCalledTimes(1) // engine A's create is in flight
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // restart → engine B
+    await vi.advanceTimersByTimeAsync(0)
+    expect(createSpy).toHaveBeenCalledTimes(2) // engine B's create is in flight
+
+    a.resolve(serverResponse([cell(CELL_A)])) // A's stale request settles post-restart
+    await vi.advanceTimersByTimeAsync(0)
+
+    // A new edit in engine B must coalesce behind B's in-flight push (pushAgain),
+    // not start an overlapping third create.
+    await commitAndFlush()
+    expect(createSpy).toHaveBeenCalledTimes(2)
+
+    stopA() // stale handle — no-op (epoch already moved)
+  })
+
+  test('rejects an oversized aggregate payload without running the exact serializer (review gpt-v-10)', async () => {
+    // Within per-cell (262144) and count caps but over the 1 MB aggregate cap.
+    // The cheap lower-bound preflight must reject it WITHOUT JSON.stringify-ing
+    // the whole body (the pathological multi-MB UI-thread allocation).
+    const big = 'x'.repeat(260_000) // 4 × 260k = 1.04M > 1M cap; each < per-cell cap
+    getSpy.mockResolvedValue(
+      storedDoc(5, [cell(CELL_A, big), cell(CELL_B, big), cell(CELL_C, big), cell(CELL_D, big)]),
+    )
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: false,
+      dirty: true,
+      ownerId: OWNER,
+      deletedCells: [],
+    })
+    const stringifySpy = vi.spyOn(JSON, 'stringify')
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('failed')
+    // The request body (the object carrying `cells`) was never serialized.
+    const serializedBody = stringifySpy.mock.calls.some((args) => {
+      const payload = args[0] as { cells?: unknown } | null
+      return !!payload && typeof payload === 'object' && Array.isArray(payload.cells)
+    })
+    expect(serializedBody).toBe(false)
   })
 
   test('pushes a queued change that belongs to the current account', async () => {

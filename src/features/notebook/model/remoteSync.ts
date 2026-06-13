@@ -211,6 +211,20 @@ function autosyncPayloadBytes(payload: unknown): number {
   return new Blob([JSON.stringify(payload)]).size
 }
 
+// Cheap lower bound on the serialized payload size, in bytes: every UTF-16 code
+// unit is at least one UTF-8 byte and JSON structure (quotes, keys, commas) only
+// adds more, so the real size is always ≥ the summed code-unit length of the
+// variable-length fields. When even this lower bound exceeds the cap the payload
+// is definitely too large, so the caller can reject WITHOUT the exact
+// `autosyncPayloadBytes` — which would otherwise materialize a multi-MB JSON
+// string + Blob on the UI thread just to learn it is oversized. `.length` is O(1)
+// per string, so this stays bounded even for a pathological notebook.
+function payloadByteLowerBound(stored: NotebookJSON): number {
+  let units = stored.title.length
+  for (const cell of stored.cells) units += cell.id.length + cell.content.length
+  return units
+}
+
 function codePointLength(value: string): number {
   return Array.from(value).length
 }
@@ -434,6 +448,18 @@ async function runOnePush(): Promise<void> {
         formatVersion: stored.formatVersion,
         cells: stored.cells,
       }
+  // Short-circuit a clearly-oversized notebook on the cheap lower bound so the
+  // exact JSON.stringify + Blob (a multi-MB UI-thread allocation) never runs; the
+  // exact count stays authoritative for a borderline multibyte payload.
+  const lowerBound = payloadByteLowerBound(stored)
+  if (lowerBound > MAX_AUTOSYNC_PAYLOAD_BYTES) {
+    console.warn(
+      `remoteSync: autosync payload is too large (≥ ${lowerBound} bytes > ` +
+        `${MAX_AUTOSYNC_PAYLOAD_BYTES}); not pushing`,
+    )
+    setStatus('failed')
+    return
+  }
   const payloadBytes = autosyncPayloadBytes(requestBody)
   if (payloadBytes > MAX_AUTOSYNC_PAYLOAD_BYTES) {
     console.warn(
@@ -575,6 +601,13 @@ async function pushNow(): Promise<void> {
     return
   }
   pushInFlight = true
+  // Scope the in-flight lock to this engine instance. After teardown/pause aborts
+  // an old request and a fresh startRemoteSync begins a newer engine (re-login),
+  // the stale old push can still settle here; without this guard its `finally`
+  // would clear the NEWER engine's lock, letting a later save start an overlapping
+  // POST/PATCH. `startEpoch` bumps only on (re)start, so a pause+resume keeps the
+  // same epoch (the lock is still ours), while a restart does not.
+  const myEpoch = startEpoch
   try {
     do {
       pushAgain = false
@@ -583,9 +616,15 @@ async function pushNow(): Promise<void> {
       // full-document push per server round-trip instead of re-arming the 1500ms
       // debounce for the `newerLocal` case (the 409→PATCH recovery should stay
       // immediate). Bounded and data-safe (opus L7).
-    } while (pushAgain && !pausedAtom() && isAuthenticated() && isOnlineAtom())
+    } while (
+      pushAgain &&
+      myEpoch === startEpoch &&
+      !pausedAtom() &&
+      isAuthenticated() &&
+      isOnlineAtom()
+    )
   } finally {
-    pushInFlight = false
+    if (myEpoch === startEpoch) pushInFlight = false
   }
 }
 

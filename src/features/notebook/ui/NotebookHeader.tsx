@@ -18,8 +18,9 @@ export const NotebookHeader = reatomComponent(() => {
   const cellCount = cellsAtom().length
   const loadedModel = loadedModelAtom()
   const ref = useRef<HTMLHeadingElement>(null)
-  // The title at the moment editing started, so Escape can roll back the
-  // live-synced atom to what it was before this edit.
+  // The title at the moment editing started, captured on focus, so Escape can
+  // restore it. The atom is written only on commit, so nothing reactive changes
+  // while typing — this ref is the sole record of the pre-edit value.
   const committedRef = useRef(title)
 
   // Push external title changes (boot load, restore, sidebar rename)
@@ -49,6 +50,13 @@ export const NotebookHeader = reatomComponent(() => {
   // text is enough; the follow-up blur re-commits it as a no-op.
   const cancel = wrap(() => {
     if (ref.current) ref.current.textContent = committedRef.current
+  })
+
+  // Snapshot the pre-edit title on focus. This reads an atom from a React event
+  // boundary, so it must be wrapped: production enables clearStack(), under which
+  // a bare atom read in an unwrapped handler throws `missing async stack`.
+  const beginEdit = wrap(() => {
+    committedRef.current = notebookTitleAtom()
   })
 
   return (
@@ -82,9 +90,7 @@ export const NotebookHeader = reatomComponent(() => {
         aria-label="Notebook title"
         data-placeholder={PLACEHOLDER}
         spellCheck={false}
-        onFocus={() => {
-          committedRef.current = notebookTitleAtom()
-        }}
+        onFocus={beginEdit}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
