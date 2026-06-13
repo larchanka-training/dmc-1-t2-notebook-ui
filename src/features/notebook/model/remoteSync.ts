@@ -588,12 +588,12 @@ export function startRemoteSync(notebookId: string): () => void {
 
   unsubscribeOnline = startOnlineTracking()
   onlineHandler = wrap(() => {
-    if (isOnlineAtom()) {
-      // Cancel the pending retry timer but keep the backoff: a flapping connection
-      // must not reset to the 2s floor on every online edge.
-      cancelRetryTimer()
-      void pushNow()
-    }
+    // On the reconnect edge, attempt a flush. Cancel the pending retry timer but
+    // KEEP the backoff (a flapping connection must not reset to the 2s floor every
+    // edge). No `isOnlineAtom()` re-check here: runOnePush re-checks it, so this is
+    // independent of whether online.ts's listener ran first (review opus L9).
+    cancelRetryTimer()
+    void pushNow()
   })
   if (typeof window !== 'undefined') window.addEventListener('online', onlineHandler)
 
@@ -629,6 +629,7 @@ export function startRemoteSync(notebookId: string): () => void {
         // logout can't write/adopt. New pushes are already blocked by the
         // isAuthenticated() guard. A pause is NOT used — logout is not a session
         // expiry, and #136 owns any local-data wipe.
+        console.info('remoteSync: signed out, sync idle')
         generation += 1
       }
     }),
@@ -642,8 +643,8 @@ export function startRemoteSync(notebookId: string): () => void {
   }
 }
 
-function teardownRemoteSync(): void {
-  generation += 1 // discard any in-flight push result
+/** Clear every lifecycle timer (debounce, metadata-persist retry, push retry). */
+function cancelAllTimers(): void {
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer)
     debounceTimer = null
@@ -653,6 +654,11 @@ function teardownRemoteSync(): void {
     persistRetryTimer = null
   }
   resetRetry()
+}
+
+function teardownRemoteSync(): void {
+  generation += 1 // discard any in-flight push result
+  cancelAllTimers()
   unsubscribeSignal?.()
   unsubscribeSignal = null
   unsubscribeRestored?.()
@@ -667,6 +673,11 @@ function teardownRemoteSync(): void {
   unsubscribeOnline = null
   flushDebouncedPush = null
   activeNotebookId = null
+  // Null the per-notebook bookkeeping so it can't linger in module memory between
+  // teardown and the next start (start re-seeds it). Hardens #135 re-login /
+  // multi-notebook against reading another notebook's state (review opus L6).
+  syncState = null
+  previousCellIds = new Set()
 }
 
 /**
@@ -676,19 +687,9 @@ function teardownRemoteSync(): void {
  * a 401 itself — only this explicit signal pauses it.
  */
 export function pauseRemoteSync(): void {
+  console.info('remoteSync: paused (session expired) — re-login required')
   pausedAtom.set(true)
   generation += 1
-  if (debounceTimer !== null) {
-    clearTimeout(debounceTimer)
-    debounceTimer = null
-  }
-  // Also cancel a pending metadata-persist retry (C-7 / F-B-1): otherwise it fires
-  // while paused. The generation bump above already makes its write a no-op, but
-  // not arming it at all is cleaner.
-  if (persistRetryTimer !== null) {
-    clearTimeout(persistRetryTimer)
-    persistRetryTimer = null
-  }
-  resetRetry()
+  cancelAllTimers()
   setStatus('paused')
 }
