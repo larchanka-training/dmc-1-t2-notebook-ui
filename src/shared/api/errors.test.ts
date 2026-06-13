@@ -1,10 +1,11 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   ApiError,
   BadRequestError,
   ConflictError,
   NetworkError,
   NotFoundError,
+  parseRetryAfter,
   UnauthorizedError,
   toApiError,
 } from './errors'
@@ -80,5 +81,44 @@ describe('NetworkError', () => {
     const err = new NetworkError('offline', cause)
     expect(err.message).toBe('offline')
     expect(err.cause).toBe(cause)
+  })
+})
+
+describe('parseRetryAfter', () => {
+  const NOW = Date.parse('2026-06-13T12:00:00Z')
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('delta-seconds: a non-negative integer is returned (trimmed)', () => {
+    expect(parseRetryAfter('120')).toBe(120)
+    expect(parseRetryAfter('0')).toBe(0)
+    expect(parseRetryAfter('  30  ')).toBe(30)
+  })
+
+  test('a future HTTP-date is converted to a delay in seconds from now', () => {
+    expect(parseRetryAfter('Sat, 13 Jun 2026 12:02:00 GMT')).toBe(120)
+  })
+
+  test('a past HTTP-date clamps to 0 (retry now)', () => {
+    expect(parseRetryAfter('Sat, 13 Jun 2026 11:59:00 GMT')).toBe(0)
+  })
+
+  test('a far-future HTTP-date and a huge delta-seconds value are both capped', () => {
+    expect(parseRetryAfter('Fri, 01 Jan 2100 00:00:00 GMT')).toBe(86_400)
+    expect(parseRetryAfter('999999999')).toBe(86_400)
+  })
+
+  test('absent or unparseable values yield undefined', () => {
+    expect(parseRetryAfter(null)).toBeUndefined()
+    expect(parseRetryAfter(undefined)).toBeUndefined()
+    expect(parseRetryAfter('')).toBeUndefined()
+    expect(parseRetryAfter('soon')).toBeUndefined()
   })
 })

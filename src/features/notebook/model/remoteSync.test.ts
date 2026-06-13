@@ -386,6 +386,89 @@ describe('remote sync engine', () => {
     expect(serializedBody).toBe(false)
   })
 
+  test('does NOT attribute a token-present/user-null save after the token is replaced (review gpt-v-11)', async () => {
+    // Save made while token A is present but the user is unknown; then the token is
+    // replaced A→B WITHOUT a null boundary (session replacement) and user B
+    // hydrates. The save must NOT be attributed to B — it was captured against
+    // token A, which is no longer current.
+    accessTokenAtom.set('token-A')
+    userAtom.set(null)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await commitAndFlush()
+    expect(createSpy).not.toHaveBeenCalled()
+
+    accessTokenAtom.set('token-B') // different session, no sign-out in between
+    userAtom.set(user(BOB))
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    expect(createSpy).not.toHaveBeenCalled() // never uploaded under the wrong account
+  })
+
+  test('a stale metadata load resolving after a same-id restart does not mutate the new engine (review gpt-v-11)', async () => {
+    // First load held; restart the singleton for the same notebook id (clean load);
+    // then the first load resolves dirty + tombstoned. With the shared id the
+    // restart keeps activeNotebookId the same, so only the epoch guard discards it.
+    const firstLoad = deferred<NotebookSyncState | undefined>()
+    getSyncStateSpy.mockReturnValueOnce(firstLoad.promise).mockResolvedValue(undefined)
+
+    const stopA = startRemoteSync(LOCAL_NOTEBOOK_ID) // engine A: getSyncState held
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // restart → engine B (clean load)
+    await vi.advanceTimersByTimeAsync(0)
+
+    firstLoad.resolve({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      ownerId: OWNER,
+      deletedCells: [{ id: CELL_C, deletedAt: 1 }],
+    })
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // The stale dirty/tombstoned state belongs to engine A — it must not push or
+    // persist into engine B.
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+
+    stopA()
+  })
+
+  test('preserves tombstonesOverflow raised during an in-flight push (review gpt-v-11)', async () => {
+    // 1000 durable tombstones (at the cap, push allowed). A delete committed WHILE
+    // the PATCH is in flight pushes the buffer to 1001 → overflow + truncation. The
+    // success path must keep the overflow flag, so the re-push fails terminally
+    // instead of silently sending the capped, incomplete tombstone set.
+    const tombs = Array.from({ length: 1000 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      deletedAt: i + 1,
+    }))
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      ownerId: OWNER,
+      deletedCells: tombs,
+      lastSyncedUpdatedAt: 5,
+    })
+    const firstPatch = deferred<notebookApi.Notebook>()
+    patchSpy.mockReturnValueOnce(firstPatch.promise)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // previousCellIds = { CELL_A }
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1) // first PATCH in flight (1000 tombstones)
+
+    // Delete CELL_A while the PATCH is in flight → 1001 tombstones → overflow.
+    cellsAtom.set([reatomCell('x', 'code', CELL_B)])
+    localSaveCommittedAtom.set(localSaveCommittedAtom() + 1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    firstPatch.resolve(serverResponse([cell(CELL_B)]))
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    expect(remoteSyncStatusAtom()).toBe('failed') // overflow flag survived → terminal
+    expect(patchSpy).toHaveBeenCalledTimes(1) // no second, incomplete PATCH
+  })
+
   test('pushes a queued change that belongs to the current account', async () => {
     getSyncStateSpy.mockResolvedValue({
       notebookId: LOCAL_NOTEBOOK_ID,

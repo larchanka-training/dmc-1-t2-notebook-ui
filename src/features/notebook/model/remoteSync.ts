@@ -82,12 +82,15 @@ let primedToken = false
 let previousToken: string | null = null
 let unsubscribeUser: (() => void) | null = null
 let primedUser = false
-// A-1 (review gpt-v-7): a local save committed while the access token is present
-// but `userAtom` has not hydrated yet is stamped with no ownerId. This flags that
-// the in-memory queue is awaiting attribution, so the userAtom-hydration handler
-// can stamp the now-known owner of the SAME session. Cleared on sign-out (a queue
-// that outlived a sign-out is genuinely ambiguous) and reset on (re)start.
-let ownerHydrationPending = false
+// A-1: a local save committed while the access token is present but `userAtom`
+// has not hydrated yet is stamped with no ownerId. We record the EXACT access
+// token in flight at that moment; the userAtom-hydration handler then attributes
+// the queue only if that same token is still current — binding the pending
+// attribution to one session. If the token rotated or was replaced (a different
+// account) in between, we do NOT stamp (so content is never uploaded under the
+// wrong account); the save self-heals on the next edit. `null` when nothing is
+// awaiting attribution. Cleared on sign-out and reset on (re)start.
+let ownerHydrationToken: string | null = null
 let unsubscribeOnline: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -517,6 +520,11 @@ async function runOnePush(): Promise<void> {
       lastSyncedUpdatedAt: syncState.lastSyncedUpdatedAt,
       // Drop only the tombstones we actually sent; keep any added in flight.
       deletedCells: dropAckedTombstones(syncState.deletedCells, sentTombstoneIds),
+      // Preserve an overflow flag — including one raised by delete churn DURING
+      // this push (the live `syncState`, not the sent snapshot). Clearing it on the
+      // rebuild would let the next push send the capped, incomplete tombstone set
+      // instead of failing terminally, silently resurrecting the dropped deletes.
+      tombstonesOverflow: sentState.tombstonesOverflow || syncState.tombstonesOverflow,
     }
     await wrap(persistSyncState())
 
@@ -640,10 +648,18 @@ function scheduleLoadRetry(notebookId: string): void {
 }
 
 async function loadStateAndFlush(notebookId: string): Promise<void> {
+  // Bind this load to the engine instance that started it. With the shared
+  // LOCAL_NOTEBOOK_ID a teardown+restart keeps `activeNotebookId` the same, so an
+  // in-flight getSyncState resolving after a restart would otherwise merge stale
+  // durable state into the NEW engine (re-mark dirty, resurrect tombstones, flip
+  // remoteCreated, push in the wrong lifecycle). `startEpoch` bumps only on
+  // (re)start, so it tells a restart apart from a mere pause.
+  const myEpoch = startEpoch
   let loaded: NotebookSyncState | undefined
   try {
     loaded = await wrap(notebookStorage.getSyncState(notebookId))
   } catch (error) {
+    if (myEpoch !== startEpoch) return
     // A read FAILURE (not a clean absent record) leaves the durable queue unknown.
     // Do NOT proceed with a fresh provisional state — a later save persisting it
     // would clobber the unread durable dirty/tombstones/remoteCreated/ownerId
@@ -653,7 +669,7 @@ async function loadStateAndFlush(notebookId: string): Promise<void> {
     scheduleLoadRetry(notebookId)
     return
   }
-  if (activeNotebookId !== notebookId) return
+  if (myEpoch !== startEpoch || activeNotebookId !== notebookId) return
   // Merge, don't clobber: a local save during the load window already recorded
   // dirty/tombstones into the provisional state — union them with the loaded
   // record instead of letting a clean record overwrite the change (H-2).
@@ -675,7 +691,7 @@ async function loadStateAndFlush(notebookId: string): Promise<void> {
   if (syncState.remoteCreated && !syncState.dirty) {
     try {
       const stored = await wrap(notebookStorage.get(notebookId))
-      if (activeNotebookId !== notebookId) return
+      if (myEpoch !== startEpoch || activeNotebookId !== notebookId) return
       if (stored && stored.updatedAt > (syncState.lastSyncedUpdatedAt ?? 0)) {
         syncState = { ...syncState, dirty: true }
       }
@@ -718,10 +734,11 @@ function onLocalSaveCommitted(): void {
     // A-1: a save made with the token present but the user not hydrated yet gets
     // no ownerId; without this the owner-gate would strand it until the next edit
     // (the userAtom-hydration retry only re-runs pushNow, never re-attributes).
-    // Flag it for stamping once identity arrives. A truly signed-out save (no
-    // token) stays unattributed by #136 device-mode design.
+    // Capture the in-flight token so hydration attributes the queue ONLY if the
+    // same session is still current. A truly signed-out save (no token) stays
+    // unattributed by #136 device-mode design.
     if (syncState.ownerId === undefined && isAuthenticated()) {
-      ownerHydrationPending = true
+      ownerHydrationToken = accessTokenAtom()
     }
     if (syncState.tombstonesOverflow) {
       console.warn(
@@ -759,7 +776,7 @@ export function startRemoteSync(notebookId: string): () => void {
   metadataLoaded = false
   pushInFlight = false
   pushAgain = false
-  ownerHydrationPending = false
+  ownerHydrationToken = null
   previousCellIds = new Set(cellsAtom().map((c) => c.id))
   retryDelay = INITIAL_RETRY_MS
   setStatus('idle')
@@ -825,7 +842,7 @@ export function startRemoteSync(notebookId: string): () => void {
         abortCurrentPush()
         // A-1: a pending-attribution queue that has now outlived a sign-out is
         // genuinely ambiguous — never auto-attribute it to whoever signs in next.
-        ownerHydrationPending = false
+        ownerHydrationToken = null
       }
     }),
   )
@@ -835,8 +852,10 @@ export function startRemoteSync(notebookId: string): () => void {
   // arrives: (A-3) a durable queue already attributed to this user just needs a
   // re-flush; (A-1) an in-memory save made in the token-present/user-null window
   // got no ownerId and must be attributed now, or the gate strands it until the
-  // next edit. Stamp the now-known owner (same session — sign-out clears the flag),
-  // then flush.
+  // next edit. For A-1, attribute ONLY if the access token is still the exact one
+  // captured at save time — a rotated/replaced token means a different session
+  // (possibly a different account), so we leave the save unattributed (it
+  // self-heals on the next edit) rather than risk an upload under the wrong user.
   primedUser = false
   unsubscribeUser = userAtom.subscribe(
     wrap(() => {
@@ -847,13 +866,14 @@ export function startRemoteSync(notebookId: string): () => void {
       if (userAtom() === null) return
       const ownerNow = currentOwnerId()
       if (
-        ownerHydrationPending &&
+        ownerHydrationToken !== null &&
+        ownerHydrationToken === accessTokenAtom() &&
         ownerNow !== undefined &&
         syncState !== null &&
         syncState.ownerId === undefined &&
         !syncState.ownerConflict
       ) {
-        ownerHydrationPending = false
+        ownerHydrationToken = null
         syncState = { ...syncState, ownerId: ownerNow }
         if (metadataLoaded) void persistSyncState()
       }
