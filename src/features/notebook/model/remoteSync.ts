@@ -81,6 +81,9 @@ let primed = false
 // Bumped on teardown/pause and on each (re)start; an in-flight push compares it
 // after every await and discards its result if it changed (cancellation guard).
 let generation = 0
+// Bumped ONLY on (re)start (not pause/teardown), so a teardown handle can tell
+// "my engine is still the active one" apart from a pause (C-8).
+let startEpoch = 0
 let flushDebouncedPush: (() => void) | null = null
 
 function initialSyncState(notebookId: string): NotebookSyncState {
@@ -367,6 +370,11 @@ async function runOnePush(): Promise<void> {
         return
       }
       adoptedToServer = true
+      // C-10: adoption reloaded the editor from the server merge, so the cell set
+      // may differ from what the delete-detection diff last saw. Re-seed it from the
+      // adopted cells, or a future cross-device merge (#137) would mis-detect
+      // deletions on the next commit.
+      previousCellIds = new Set(cellsAtom().map((c) => c.id))
     }
     if (myGeneration !== generation) return
 
@@ -487,6 +495,8 @@ export function startRemoteSync(notebookId: string): () => void {
   syncState = initialSyncState(notebookId) // provisional until the load resolves
   pausedAtom.set(false)
   generation += 1
+  startEpoch += 1
+  const myEpoch = startEpoch
   primed = false
   pushInFlight = false
   pushAgain = false
@@ -535,7 +545,13 @@ export function startRemoteSync(notebookId: string): () => void {
       }
     }),
   )
-  return teardownRemoteSync
+  // Generation-bound (by start epoch) so a stale handle from a PREVIOUS start
+  // (e.g. #135 re-login re-calls startRemoteSync) cannot tear down the current
+  // engine. A pause does not bump the epoch, so the legitimate handle still tears
+  // down after a pause (C-8).
+  return () => {
+    if (myEpoch === startEpoch) teardownRemoteSync()
+  }
 }
 
 function teardownRemoteSync(): void {

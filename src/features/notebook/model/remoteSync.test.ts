@@ -551,6 +551,19 @@ describe('remote sync engine', () => {
     expect(pausedAtom()).toBe(true)
   })
 
+  test('a stale teardown handle does not tear down a newer engine (review C-8)', async () => {
+    const stop1 = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // restart (e.g. #135 re-login)
+    await vi.advanceTimersByTimeAsync(0)
+
+    stop1() // stale handle from the first start — must be a no-op
+
+    // The current engine is still live: a committed save still pushes.
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy.mock.calls.length + patchSpy.mock.calls.length).toBe(1)
+  })
+
   test('pauseRemoteSync stops pushes without wiping local data', async () => {
     const clearAllSpy = vi.spyOn(notebookStorage, 'clearAll')
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
