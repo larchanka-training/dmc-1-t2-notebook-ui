@@ -284,6 +284,22 @@ describe('remote sync engine', () => {
     expect(remoteSyncStatusAtom()).toBe('error')
   })
 
+  test('refuses a server response whose id does not match the notebook (review C-6)', async () => {
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'local', 5)]))
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    // The (otherwise valid) response echoes a different id.
+    patchSpy.mockResolvedValue({ ...serverResponse([cell(CELL_A, 'server', 10)]), id: CELL_B })
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // No phantom record written under the wrong id; the local notebook is untouched.
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
+    expect(cellsAtom()[0].code()).toBe('local')
+  })
+
   test('refuses baseline adoption when storage holds a newer version (M-1 CAS)', async () => {
     getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'local', 5)]))
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })

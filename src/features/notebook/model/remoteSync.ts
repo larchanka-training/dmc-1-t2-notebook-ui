@@ -205,6 +205,13 @@ async function applyServerBaseline(
   base: number,
   pushedNonEmpty: boolean,
 ): Promise<AdoptResult> {
+  // C-6: the response is untrusted (§11). Reject an id that is not the notebook we
+  // pushed BEFORE mapping/writing — otherwise a misbehaving 2xx echoing a different
+  // id would write a phantom record keyed by that id.
+  if (merged.id !== notebookId) {
+    console.warn('remoteSync: server response id does not match the notebook; keeping local')
+    return 'rejected'
+  }
   const json = serverNotebookToJSON(merged)
   if (!isNotebookJSON(json)) {
     console.warn('remoteSync: server response is not a valid notebook; keeping local')
