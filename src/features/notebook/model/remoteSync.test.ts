@@ -386,11 +386,12 @@ describe('remote sync engine', () => {
     expect(serializedBody).toBe(false)
   })
 
-  test('does NOT attribute a token-present/user-null save after the token is replaced (review gpt-v-11)', async () => {
-    // Save made while token A is present but the user is unknown; then the token is
-    // replaced A→B WITHOUT a null boundary (session replacement) and user B
-    // hydrates. The save must NOT be attributed to B — it was captured against
-    // token A, which is no longer current.
+  test('attributes a token-present/user-null save across a token rotation before hydration (review gpt-v-13)', async () => {
+    // Save captured under token A; refreshMiddleware rotates A→B (same session, no
+    // null boundary) before /auth/me hydrates the user. The pending attribution must
+    // survive the rotation and still stamp + push, not strand the queue until the
+    // next edit. (A real cross-account switch goes through a null token — covered by
+    // the sign-out test above, where the pending attribution is cleared.)
     accessTokenAtom.set('token-A')
     userAtom.set(null)
 
@@ -398,11 +399,12 @@ describe('remote sync engine', () => {
     await commitAndFlush()
     expect(createSpy).not.toHaveBeenCalled()
 
-    accessTokenAtom.set('token-B') // different session, no sign-out in between
-    userAtom.set(user(BOB))
-    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    accessTokenAtom.set('token-B') // rotation within the same session
+    userAtom.set(user(ALICE)) // identity hydrates (Alice's session)
+    await vi.advanceTimersByTimeAsync(0)
 
-    expect(createSpy).not.toHaveBeenCalled() // never uploaded under the wrong account
+    expect(createSpy).toHaveBeenCalledTimes(1) // attributed + pushed, not stranded
+    expect(lastPersistedState(putSyncStateSpy).ownerId).toBe(ALICE)
   })
 
   test('a stale metadata load resolving after a same-id restart does not mutate the new engine (review gpt-v-11)', async () => {

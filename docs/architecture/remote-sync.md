@@ -246,6 +246,16 @@ same pattern autosave uses.
   the sync-metadata persist already skips a write for a torn-down/paused engine and
   `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /
   versioned write discipline for storage-I/O should be revisited then.
+- **Cross-tab sync-metadata CAS (#136).** `putSyncState` is an unconditional
+  last-write-wins put, so two tabs editing the same local notebook can clobber each
+  other's durable `dirty` flag / tombstone queue (a tab finishing an older in-flight
+  push overwrites another tab's newer queue). Narrow window — each tab re-persists
+  its own in-memory state on its next commit, so loss needs no further commit before
+  a reload — but it is data-loss-class. The fix is a transactional get+merge+put in
+  the storage adapter (preserve `dirty`, union tombstones, keep conflict/overflow,
+  drop only acked tombstones still present). Deferred to #136, which owns the
+  coherent cross-tab story (BroadcastChannel, memory backend, device mode). Flagged
+  by review gpt-v-13.
 - **First-create crash durability (#135).** A never-created notebook whose dirty
   marker is lost to a crash syncs only on the next edit (see "Crash recovery"). An
   atomic content + dirty-marker write would close the window.

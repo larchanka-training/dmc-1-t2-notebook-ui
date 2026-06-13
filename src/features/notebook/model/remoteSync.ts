@@ -245,12 +245,14 @@ class RemoteSyncEngine {
   private primedToken = false
   private primedUser = false
   private previousToken: string | null = null
-  // A-1: the access token captured when a save was made in the token-present /
-  // user-null window. The userAtom-hydration handler attributes the queue only if
-  // this token is still current — binding the pending attribution to one session.
-  // If the token rotated or was replaced (a different account) in between, we do
-  // NOT stamp (so content is never uploaded under the wrong account); the save
-  // self-heals on the next edit. `null` when nothing is awaiting attribution.
+  // A-1 / v13: the access token captured when a save was made in the
+  // token-present / user-null window. The userAtom-hydration handler attributes the
+  // queue only if this token is still current. A same-session token ROTATION
+  // (refreshMiddleware) re-binds it to the new token (see the token subscription),
+  // so a refresh that lands before /auth/me finishes does not strand the queue. An
+  // account switch always goes through a null token first (the sign-out branch
+  // clears this), so the pending attribution never crosses accounts. `null` when
+  // nothing is awaiting attribution.
   private ownerHydrationToken: string | null = null
 
   // False until the durable sync metadata has been read (or confirmed absent). While
@@ -879,6 +881,14 @@ class RemoteSyncEngine {
           // A-1: a pending-attribution queue that has now outlived a sign-out is
           // genuinely ambiguous — never auto-attribute it to whoever signs in next.
           this.ownerHydrationToken = null
+        } else if (token !== null && was !== null && token !== was) {
+          // Token rotation within one session (refreshMiddleware rotated the access
+          // token): re-bind a pending attribution from the old token to the new one
+          // so it survives the rotation (review gpt-v-13). A different account always
+          // arrives via a null boundary (handled above, which clears the pending
+          // token), so this only ever re-binds within the SAME session — it never
+          // attributes a save across accounts.
+          if (this.ownerHydrationToken === was) this.ownerHydrationToken = token
         }
       }),
     )
@@ -888,10 +898,11 @@ class RemoteSyncEngine {
     // arrives: (A-3) a durable queue already attributed to this user just needs a
     // re-flush; (A-1) an in-memory save made in the token-present/user-null window
     // got no ownerId and must be attributed now, or the gate strands it until the
-    // next edit. For A-1, attribute ONLY if the access token is still the exact one
-    // captured at save time — a rotated/replaced token means a different session
-    // (possibly a different account), so we leave the save unattributed (it
-    // self-heals on the next edit) rather than risk an upload under the wrong user.
+    // next edit. For A-1, attribute ONLY if the access token is still the one bound
+    // to the pending save. A same-session rotation re-binds that token (token
+    // subscription), so this stays current through a refresh; a cross-account switch
+    // goes through a null token first and clears it, so attribution never crosses
+    // accounts.
     this.unsubscribeUser = userAtom.subscribe(
       wrap(() => {
         if (!this.primedUser) {
