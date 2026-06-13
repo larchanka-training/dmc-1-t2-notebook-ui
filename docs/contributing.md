@@ -164,9 +164,11 @@ No configuration file needs updating — docs are just markdown files.
 
 ## Checklist before opening a PR
 
+- [ ] `pnpm typecheck` passes
 - [ ] `pnpm build` passes with no TypeScript errors
 - [ ] `pnpm lint` passes with no warnings
 - [ ] `pnpm test` passes
+- [ ] `pnpm api:check` passes — if the OpenAPI snapshot changed, the regenerated client types are committed
 - [ ] The feature works in the browser (visit the page, test the interaction)
 - [ ] New components are showcased in `CustomComponentsPage` or `ShadcnComponentsPage`
 - [ ] New docs are added if the change introduces a new concept

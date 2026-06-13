@@ -13,6 +13,15 @@ import { startRemoteSync } from './remoteSync'
 // document — the central local-first contract the unit tests mock around. Real
 // timers (fake-indexeddb schedules on macrotasks; autosave 500ms + remote 1500ms).
 
+/** Poll until `predicate` holds (or time out) — avoids a fixed wall-clock sleep. */
+async function waitFor(predicate: () => boolean, timeoutMs = 5000, stepMs = 25): Promise<void> {
+  const start = Date.now()
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor: timed out')
+    await new Promise((resolve) => setTimeout(resolve, stepMs))
+  }
+}
+
 describe('autosave → storage → remote-sync integration', () => {
   let stopAutosave: (() => void) | undefined
   let stopSync: (() => void) | undefined
@@ -49,8 +58,9 @@ describe('autosave → storage → remote-sync integration', () => {
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'integration-edit')
 
-    // Wait out the local autosave (500ms) and the remote debounce (1500ms).
-    await new Promise((resolve) => setTimeout(resolve, 2500))
+    // The autosave (500ms) then the remote debounce (1500ms) drive the push; poll
+    // for it instead of a fixed sleep.
+    await waitFor(() => createSpy.mock.calls.length > 0)
 
     expect(createSpy).toHaveBeenCalledTimes(1)
     const body = createSpy.mock.calls[0][0]

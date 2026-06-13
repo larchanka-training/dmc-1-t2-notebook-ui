@@ -92,6 +92,7 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 let persistRetryTimer: ReturnType<typeof setTimeout> | null = null
 let loadRetryTimer: ReturnType<typeof setTimeout> | null = null
 let retryDelay = INITIAL_RETRY_MS
+let retryDueAt = 0 // Date.now()+delay of the pending retry, so a later 429 can extend it
 // False until the durable sync metadata has been read (or confirmed absent). While
 // false, nothing persists or pushes — a read FAILURE leaves the durable queue
 // unknown, and writing a fresh provisional state would clobber it (review A-1).
@@ -138,6 +139,7 @@ function cancelRetryTimer(): void {
     clearTimeout(retryTimer)
     retryTimer = null
   }
+  retryDueAt = 0
 }
 
 /** Cancel a pending retry AND reset the backoff — only on a successful push / fresh session. */
@@ -153,12 +155,17 @@ function resetRetry(): void {
  * connection can't hammer a throttling server.
  */
 function scheduleRetry(delayOverride?: number): void {
-  // Known follow-ups (#135, low priority, tracked in the issue): a retry timer
-  // that fires while offline re-arms here and grows the backoff with no server
-  // contact (opus L3); and a later, larger 429 Retry-After cannot extend an
-  // already-armed shorter retry because of the early-return below (opus L4).
-  if (retryTimer !== null) return // one pending retry at a time
+  // Known follow-up (#135, low priority): a retry timer that fires while offline
+  // re-arms here and grows the backoff with no server contact (opus L3).
   const delay = Math.max(delayOverride ?? 0, retryDelay)
+  const dueAt = Date.now() + delay
+  if (retryTimer !== null) {
+    // One pending retry, but a later server-requested delay (a larger 429
+    // Retry-After) extends it rather than being dropped (review opus L4 / gpt).
+    if (dueAt <= retryDueAt) return
+    clearTimeout(retryTimer)
+  }
+  retryDueAt = dueAt
   retryTimer = setTimeout(
     wrap(() => {
       retryTimer = null
