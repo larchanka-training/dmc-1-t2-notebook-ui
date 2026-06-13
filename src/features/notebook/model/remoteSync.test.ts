@@ -611,6 +611,34 @@ describe('remote sync engine', () => {
     expect(remoteSyncStatusAtom()).toBe('failed')
   })
 
+  test('refuses a push whose title exceeds the backend limit (review B-3)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockResolvedValue({ ...storedDoc(5, [cell(CELL_A)]), title: 'x'.repeat(256) })
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('failed')
+  })
+
+  test('does not report synced when the editor reload fails during adoption (review A-2)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+    // Push read succeeds; the adoption reload read then fails.
+    getSpy
+      .mockResolvedValueOnce(storedDoc(5, [cell(CELL_A, 'local', 5)]))
+      .mockRejectedValue(new Error('blocked db'))
+    patchSpy.mockResolvedValue(serverResponse([cell(CELL_A, 'merged', 10)]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    // Adoption deferred (reload failed) — never reports a false 'synced'.
+    expect(remoteSyncStatusAtom()).not.toBe('synced')
+  })
+
   test('does NOT loop on a permanent 4xx; keeps the queue and goes terminal (review M-2)', async () => {
     // A shared-id 403 (C0) lands here: the body is rejected every time.
     createSpy.mockRejectedValue(new ApiError(403, 'forbidden'))

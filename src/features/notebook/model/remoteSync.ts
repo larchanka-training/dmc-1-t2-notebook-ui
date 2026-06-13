@@ -58,8 +58,16 @@ export const INITIAL_RETRY_MS = 2000
 const MAX_RETRY_MS = 60_000
 /** Backoff for re-attempting a failed sync-metadata write (queue durability). */
 export const PERSIST_RETRY_MS = 2000
-/** Backend `cells` cap (OpenAPI `maxItems: 500`); a larger notebook would 422. */
-const MAX_SYNCABLE_CELLS = 500
+// Backend request limits (vendored OpenAPI): a larger payload deterministically
+// 422s, which `isRetryable` treats as a silent terminal `failed`. Preflighted so
+// the reason is diagnosable and local stays intact (review opus M3 + veai B-3).
+const MAX_SYNCABLE_CELLS = 500 // `cells` maxItems
+const MAX_TITLE_LEN = 255 // `title` maxLength
+const MAX_CELL_CONTENT_LEN = 262144 // `content` maxLength
+// Diagnostic threshold for the unbounded tombstone buffer (review veai B-4): heavy
+// offline add/delete churn can grow it without bound. A real cap / full-replace
+// compaction is a #135 follow-up; for now log when it gets pathological.
+const MAX_DELETED_CELLS_WARN = 1000
 
 /** Coarse status for the UI (#135 surfaces it; the engine only needs internal state). */
 export const remoteSyncStatusAtom = atom<RemoteSyncStatus>('idle', 'notebook.remoteSync.status')
@@ -278,7 +286,11 @@ async function applyServerBaseline(
       notebookBaseUpdatedAtAtom.set(json.updatedAt)
       return 'deferred'
     }
-    await wrap(reloadFromStorage())
+    // A-2: if the editor reload fails (storage read error / newer-format), the open
+    // editor still shows the pre-merge state — don't claim 'applied'; keep it
+    // dirty/retryable so sync doesn't report a false 'synced'.
+    const reloaded = await wrap(reloadFromStorage())
+    if (!reloaded) return 'deferred'
   }
   return 'applied'
 }
@@ -348,15 +360,18 @@ async function runOnePush(): Promise<void> {
     setStatus('idle')
     return
   }
-  // The backend caps `cells` at MAX_SYNCABLE_CELLS (OpenAPI `maxItems: 500`); a
-  // larger notebook would 422 → terminal `failed` with no surface. Refuse the push
-  // up front with a distinct log so it is diagnosable, and keep local intact
-  // (review opus M3). Single-notebook MVP makes >500 unlikely.
-  if (stored.cells.length > MAX_SYNCABLE_CELLS) {
-    console.warn(
-      `remoteSync: notebook has ${stored.cells.length} cells (> ${MAX_SYNCABLE_CELLS}); ` +
-        'not pushing — the server would reject it',
-    )
+  // Preflight the backend request limits — a larger payload would 422 → silent
+  // terminal `failed`. Refuse up front with a distinct log; keep local intact.
+  const overLimit =
+    stored.cells.length > MAX_SYNCABLE_CELLS
+      ? `${stored.cells.length} cells (> ${MAX_SYNCABLE_CELLS})`
+      : stored.title.length > MAX_TITLE_LEN
+        ? `title length ${stored.title.length} (> ${MAX_TITLE_LEN})`
+        : stored.cells.some((c) => c.content.length > MAX_CELL_CONTENT_LEN)
+          ? `a cell over ${MAX_CELL_CONTENT_LEN} chars`
+          : null
+  if (overLimit !== null) {
+    console.warn(`remoteSync: payload exceeds a backend limit (${overLimit}); not pushing`)
     setStatus('failed')
     return
   }
@@ -618,6 +633,12 @@ function onLocalSaveCommitted(): void {
       // pushed under another account (keep a prior owner if signed out now).
       ownerId: currentOwnerId() ?? syncState.ownerId,
       deletedCells: retractTombstones(withAdded, currentIds),
+    }
+    if (syncState.deletedCells.length > MAX_DELETED_CELLS_WARN) {
+      console.warn(
+        `remoteSync: deletedCells buffer is large (${syncState.deletedCells.length}) — ` +
+          'offline delete churn; compaction is a #135 follow-up',
+      )
     }
     // Hold off persisting until the durable metadata has been read — otherwise this
     // fresh provisional state would clobber an unread durable queue (A-1). The

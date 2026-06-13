@@ -221,14 +221,14 @@ describe('notebook autosave', () => {
     // The "Reload" button and the cross-tab pull both call this; get() runs
     // applyMigrations, so a newer-format record reaches here as a rejection.
     vi.spyOn(notebookStorage, 'get').mockRejectedValue(new NewerFormatError(99, 1))
-    await expect(reloadFromStorage()).resolves.toBeUndefined()
+    await expect(reloadFromStorage()).resolves.toBe(false)
     expect(storageCompatibilityAtom()).toBe('newer-format')
     expect(saveStatusAtom()).toBe('outdated')
   })
 
   test('reloadFromStorage surfaces a generic storage failure as error', async () => {
     vi.spyOn(notebookStorage, 'get').mockRejectedValue(new Error('blocked DB'))
-    await expect(reloadFromStorage()).resolves.toBeUndefined()
+    await expect(reloadFromStorage()).resolves.toBe(false)
     expect(saveStatusAtom()).toBe('error')
   })
 

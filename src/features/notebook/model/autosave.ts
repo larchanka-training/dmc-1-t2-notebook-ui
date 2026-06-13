@@ -135,15 +135,21 @@ export async function saveNow(): Promise<void> {
   }
 }
 
-/** Reload the latest stored notebook, discarding this tab's local version. */
-export async function reloadFromStorage(): Promise<void> {
+/**
+ * Reload the latest stored notebook, discarding this tab's local version. Returns
+ * `true` only when the editor was actually restored, so a caller (remote-sync
+ * baseline adoption) can avoid reporting `synced` when the in-memory restore failed
+ * (review veai A-2).
+ */
+export async function reloadFromStorage(): Promise<boolean> {
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
-    if (!stored) return
+    if (!stored) return false
     restoreNotebook(stored)
     acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
+    return true
   } catch (error) {
     // `get()` runs `applyMigrations`, so a notebook saved by a newer build
     // surfaces here too (this is reachable from the "Reload" button and from a
@@ -155,6 +161,7 @@ export async function reloadFromStorage(): Promise<void> {
     } else {
       saveStatusAtom.set('error')
     }
+    return false
   }
 }
 
