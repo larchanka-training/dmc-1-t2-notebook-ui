@@ -135,6 +135,10 @@ function resetRetry(): void {
  * connection can't hammer a throttling server.
  */
 function scheduleRetry(delayOverride?: number): void {
+  // Known follow-ups (#135, low priority, tracked in the issue): a retry timer
+  // that fires while offline re-arms here and grows the backoff with no server
+  // contact (opus L3); and a later, larger 429 Retry-After cannot extend an
+  // already-armed shorter retry because of the early-return below (opus L4).
   if (retryTimer !== null) return // one pending retry at a time
   const delay = Math.max(delayOverride ?? 0, retryDelay)
   retryTimer = setTimeout(
@@ -485,6 +489,10 @@ async function pushNow(): Promise<void> {
     do {
       pushAgain = false
       await wrap(runOnePush())
+      // Known follow-up (#135, cosmetic): under continuous typing this loops a new
+      // full-document push per server round-trip instead of re-arming the 1500ms
+      // debounce for the `newerLocal` case (the 409→PATCH recovery should stay
+      // immediate). Bounded and data-safe (opus L7).
     } while (pushAgain && !pausedAtom() && isAuthenticated() && isOnlineAtom())
   } finally {
     pushInFlight = false
