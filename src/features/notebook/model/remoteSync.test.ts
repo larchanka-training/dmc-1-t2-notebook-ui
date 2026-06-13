@@ -49,6 +49,9 @@ const existingRemoteState: NotebookSyncState = {
   remoteCreated: true,
   dirty: false,
   deletedCells: [],
+  // Matches the stored docs these tests use (updatedAt 5), so the C-4 boot
+  // detection does not fire a spurious extra push; C-4's own tests override it.
+  lastSyncedUpdatedAt: 5,
 }
 
 function lastPersistedState(spy: ReturnType<typeof vi.spyOn>): NotebookSyncState {
@@ -130,6 +133,33 @@ describe('remote sync engine', () => {
     // The provisional dirty change survived the merge and was pushed (old code
     // let the clean loaded record clobber it → no push).
     expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('re-pushes on boot when stored content is newer than the synced watermark (review C-4)', async () => {
+    // Previously synced at updatedAt 5, but local storage holds newer content (10)
+    // and the dirty flag was lost (crash before it persisted).
+    getSyncStateSpy.mockResolvedValue({
+      ...existingRemoteState,
+      lastSyncedUpdatedAt: 5,
+    })
+    getSpy.mockResolvedValue(storedDoc(10, [cell(CELL_A, 'unsynced', 10)]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    // No edit/commit — boot detection alone must trigger the push.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('does not boot-push when stored content matches the synced watermark', async () => {
+    getSyncStateSpy.mockResolvedValue({
+      ...existingRemoteState,
+      lastSyncedUpdatedAt: 10,
+    })
+    getSpy.mockResolvedValue(storedDoc(10, [cell(CELL_A, 'synced', 10)]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(patchSpy).not.toHaveBeenCalled()
   })
 
   test('does not push when no user is signed in', async () => {

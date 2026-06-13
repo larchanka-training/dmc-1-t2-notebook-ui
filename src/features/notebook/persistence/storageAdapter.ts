@@ -69,6 +69,13 @@ export interface NotebookSyncState {
   dirty: boolean
   /** Tombstones for cells deleted locally, not yet acked by the server's merge. */
   deletedCells: CellTombstoneJSON[]
+  /**
+   * `updatedAt` of the local doc at the last successful sync. Boot compares the
+   * stored doc against this to detect content newer than what was synced even when
+   * the `dirty` flag was lost to a crash before it persisted (review C-4). Absent
+   * until the first successful sync.
+   */
+  lastSyncedUpdatedAt?: number
 }
 
 function isSyncObject(value: unknown): value is Record<string, unknown> {
@@ -97,7 +104,10 @@ export function isNotebookSyncState(value: unknown): value is NotebookSyncState 
     typeof value['remoteCreated'] === 'boolean' &&
     typeof value['dirty'] === 'boolean' &&
     Array.isArray(value['deletedCells']) &&
-    value['deletedCells'].every(isCellTombstoneJSON)
+    value['deletedCells'].every(isCellTombstoneJSON) &&
+    (value['lastSyncedUpdatedAt'] === undefined ||
+      (typeof value['lastSyncedUpdatedAt'] === 'number' &&
+        Number.isFinite(value['lastSyncedUpdatedAt'])))
   )
 }
 

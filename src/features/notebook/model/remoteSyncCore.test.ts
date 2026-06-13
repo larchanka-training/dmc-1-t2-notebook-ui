@@ -135,6 +135,23 @@ describe('mergeSyncState', () => {
       ],
     })
   })
+
+  test('carries the max lastSyncedUpdatedAt watermark (review C-4)', () => {
+    const base: NotebookSyncState = {
+      notebookId: A,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+    }
+    expect(
+      mergeSyncState({ ...base, lastSyncedUpdatedAt: 5 }, { ...base, lastSyncedUpdatedAt: 9 })
+        .lastSyncedUpdatedAt,
+    ).toBe(9)
+    expect(
+      mergeSyncState({ ...base, lastSyncedUpdatedAt: 5 }, { ...base }).lastSyncedUpdatedAt,
+    ).toBe(5)
+    expect(mergeSyncState({ ...base }, { ...base }).lastSyncedUpdatedAt).toBeUndefined()
+  })
 })
 
 describe('serverNotebookToJSON', () => {

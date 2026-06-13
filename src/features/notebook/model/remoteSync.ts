@@ -346,6 +346,7 @@ async function runOnePush(): Promise<void> {
     // INV-3: adopt the merged server doc as the new baseline ONLY when the
     // in-memory notebook is clean and nothing newer committed — otherwise the
     // user's fresher edits would be clobbered.
+    let adoptedToServer = false
     if (!hasLocalChangesAtom() && !newerLocal) {
       const result = await wrap(
         applyServerBaseline(notebookId, merged, stored.updatedAt, stored.cells.length > 0),
@@ -365,6 +366,7 @@ async function runOnePush(): Promise<void> {
         }
         return
       }
+      adoptedToServer = true
     }
     if (myGeneration !== generation) return
 
@@ -372,6 +374,12 @@ async function runOnePush(): Promise<void> {
       setStatus('syncing')
       pushAgain = true
     } else {
+      // Synced: record the watermark of the version storage now holds (the adopted
+      // server merge, or the doc we pushed) so a crash that loses the dirty flag is
+      // still detected on the next boot (C-4).
+      const syncedUpdatedAt = adoptedToServer ? merged.updatedAt : stored.updatedAt
+      syncState = { ...syncState, lastSyncedUpdatedAt: syncedUpdatedAt }
+      await wrap(persistSyncState())
       setStatus('synced')
     }
   } catch (error) {
@@ -422,6 +430,21 @@ async function loadStateAndFlush(notebookId: string): Promise<void> {
   // record instead of letting a clean record overwrite the change (H-2).
   const provisional = syncState ?? initialSyncState(notebookId)
   syncState = loaded ? mergeSyncState(loaded, provisional) : provisional
+  // C-4: a previously-synced notebook whose stored doc is newer than the last
+  // synced watermark has unsynced content even if the dirty flag was lost to a
+  // crash before it persisted — mark it dirty so the change is not stranded.
+  if (syncState.remoteCreated && !syncState.dirty) {
+    try {
+      const stored = await wrap(notebookStorage.get(notebookId))
+      if (activeNotebookId !== notebookId) return
+      if (stored && stored.updatedAt > (syncState.lastSyncedUpdatedAt ?? 0)) {
+        syncState = { ...syncState, dirty: true }
+      }
+    } catch {
+      // Unreadable / newer-format stored doc — skip boot-detection; the normal
+      // edit-driven path still syncs. Never let this reject loadStateAndFlush.
+    }
+  }
   if (syncState.dirty || syncState.deletedCells.length > 0) void pushNow()
 }
 

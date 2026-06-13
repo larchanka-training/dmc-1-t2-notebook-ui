@@ -99,7 +99,15 @@ export function mergeSyncState(
     remoteCreated: loaded.remoteCreated || provisional.remoteCreated,
     dirty: loaded.dirty || provisional.dirty,
     deletedCells: mergeTombstones(loaded.deletedCells, provisional.deletedCells),
+    lastSyncedUpdatedAt: maxDefined(loaded.lastSyncedUpdatedAt, provisional.lastSyncedUpdatedAt),
   }
+}
+
+/** Max of two possibly-undefined numbers; `undefined` only when both are. */
+function maxDefined(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b
+  if (b === undefined) return a
+  return Math.max(a, b)
 }
 
 /**
