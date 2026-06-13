@@ -88,6 +88,11 @@ beforeEach(() => {
   remoteSyncStatusAtom.set('idle')
   cellsAtom.set([reatomCell('x', 'code', CELL_A)])
 
+  // Failure-path tests intentionally log; suppress the expected warn/info noise so
+  // CI output stays readable (review veai C3). Tests that assert a log spy locally.
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+
   getSyncStateSpy = vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
   putSyncStateSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
   getSpy = vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedDoc(5, [cell(CELL_A)]))
@@ -323,6 +328,21 @@ describe('remote sync engine', () => {
     await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS)
     expect(patchSpy).toHaveBeenCalledTimes(2)
     expect(lastPersistedState(putSyncStateSpy).deletedCells).toEqual([])
+  })
+
+  test('persists the lastSyncedUpdatedAt watermark after a successful push (review veai C4)', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined) // first push → POST
+    getSpy.mockResolvedValue(storedDoc(7, [cell(CELL_A)]))
+    // create returns the merged doc with updatedAt 999 (serverResponse default).
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    // The watermark boot-detection relies on this being persisted from the merged
+    // response — a refactor dropping it would otherwise pass the (injected) boot tests.
+    expect(lastPersistedState(putSyncStateSpy).lastSyncedUpdatedAt).toBe(999)
   })
 
   test('adopts the merged server response as the new baseline when local is clean', async () => {
