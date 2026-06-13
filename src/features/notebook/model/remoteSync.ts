@@ -165,9 +165,14 @@ function retryAfterMs(error: unknown): number | undefined {
  */
 async function persistSyncState(): Promise<void> {
   if (!syncState) return
+  const myGeneration = generation
   try {
     await wrap(notebookStorage.putSyncState(syncState))
   } catch (error) {
+    // Don't reschedule for a torn-down / paused engine — a stale write-after-clear
+    // must not be resurrected (matters once #136 wires clearLocalNotebookData to
+    // sign-out; C-7).
+    if (myGeneration !== generation) return
     console.error('remoteSync: failed to persist sync metadata; scheduling a retry', error)
     if (persistRetryTimer === null) {
       persistRetryTimer = setTimeout(
@@ -371,6 +376,9 @@ async function runOnePush(): Promise<void> {
     }
   } catch (error) {
     if (myGeneration !== generation) return
+    // Log every push failure (C-14): the queue is never lost, but a silent
+    // terminal 'failed' would make a stuck sync invisible to support.
+    console.warn('remoteSync: push failed', error)
     // Never parse 401 / never refresh here (refreshMiddleware owns that). The queue
     // (dirty + tombstones) is kept on EVERY failure, so nothing is ever lost. It is
     // never treated as end-of-session — only onSessionExpired pauses.
@@ -544,6 +552,13 @@ export function pauseRemoteSync(): void {
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer)
     debounceTimer = null
+  }
+  // Also cancel a pending metadata-persist retry (C-7 / F-B-1): otherwise it fires
+  // while paused. The generation bump above already makes its write a no-op, but
+  // not arming it at all is cleaner.
+  if (persistRetryTimer !== null) {
+    clearTimeout(persistRetryTimer)
+    persistRetryTimer = null
   }
   resetRetry()
   setStatus('paused')
