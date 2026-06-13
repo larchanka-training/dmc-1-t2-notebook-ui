@@ -29,13 +29,13 @@ export const NotebookHeader = reatomComponent(() => {
     if (el && el.textContent !== title) el.textContent = title
   }, [title])
 
-  // Live-sync every keystroke into the title atom so the sidebar entry tracks
-  // the edit in real time. This sets the atom directly (no revision bump) to
-  // avoid spamming autosave on each key; the final commit below bumps once.
-  const onInput = wrap(() => {
-    notebookTitleAtom.set(ref.current?.textContent ?? '')
-  })
-
+  // The title atom is written ONLY here, on commit (blur / Enter), never per
+  // keystroke. Typing just mutates the contenteditable DOM; we read it back on
+  // commit and route the change through setNotebookTitle, which bumps the
+  // revision so autosave picks up a title-only edit. (A previous live-sync wrote
+  // the atom on every keystroke, which made setNotebookTitle's equality guard
+  // see no change at commit time and skip the bump — so a title-only edit was
+  // never persisted. See NotebookHeader.test.tsx regression.)
   const commit = wrap(() => {
     const next = ref.current?.textContent?.trim() ?? ''
     // Empty title falls back to the placeholder text, mirrored into the model.
@@ -44,9 +44,10 @@ export const NotebookHeader = reatomComponent(() => {
     committedRef.current = notebookTitleAtom()
   })
 
-  // Restore the pre-edit title (live-sync mutated the atom while typing).
+  // Escape restores the title shown when editing began. The atom is untouched
+  // while typing, so there is nothing reactive to roll back — resetting the DOM
+  // text is enough; the follow-up blur re-commits it as a no-op.
   const cancel = wrap(() => {
-    notebookTitleAtom.set(committedRef.current)
     if (ref.current) ref.current.textContent = committedRef.current
   })
 
@@ -84,7 +85,6 @@ export const NotebookHeader = reatomComponent(() => {
         onFocus={() => {
           committedRef.current = notebookTitleAtom()
         }}
-        onInput={onInput}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -92,8 +92,8 @@ export const NotebookHeader = reatomComponent(() => {
             e.currentTarget.blur()
           } else if (e.key === 'Escape') {
             e.preventDefault()
-            // Roll back the live-synced edit, then drop focus (blur re-commits
-            // the now-restored title, which is a no-op).
+            // Restore the pre-edit title, then drop focus (the follow-up blur
+            // re-commits the restored title, which is a no-op).
             cancel()
             e.currentTarget.blur()
           }
