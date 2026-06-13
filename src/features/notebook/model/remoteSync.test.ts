@@ -51,6 +51,9 @@ function serverResponse(cells: notebookApi.NotebookCell[]): notebookApi.Notebook
 
 const ALICE = '11111111-1111-4111-8111-111111111111'
 const BOB = '22222222-2222-4222-8222-222222222222'
+// Default signed-in user for the common tests (the owner-gate now requires a
+// concrete attributable user; account-specific tests override userAtom).
+const OWNER = '33333333-3333-4333-8333-333333333333'
 
 function user(id: string): ReturnType<typeof userAtom> {
   return { id, roles: [] }
@@ -60,6 +63,7 @@ const existingRemoteState: NotebookSyncState = {
   notebookId: LOCAL_NOTEBOOK_ID,
   remoteCreated: true,
   dirty: false,
+  ownerId: OWNER, // attributed to the default signed-in user
   deletedCells: [],
   // Matches the stored docs these tests use (updatedAt 5), so the C-4 boot
   // detection does not fire a spurious extra push; C-4's own tests override it.
@@ -81,7 +85,7 @@ let patchSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.useFakeTimers()
   accessTokenAtom.set('token')
-  userAtom.set(null)
+  userAtom.set(user(OWNER))
   isOnlineAtom.set(true)
   pausedAtom.set(false)
   localSaveCommittedAtom.set(0)
@@ -249,20 +253,39 @@ describe('remote sync engine', () => {
     expect(createSpy).toHaveBeenCalledTimes(1)
   })
 
-  test('flushes the queued change when the user signs in (review issue-1)', async () => {
-    accessTokenAtom.set(null) // signed out
+  test('flushes a queue attributed to the signing-in user on re-login (review issue-1)', async () => {
+    // Alice's attributed queue, session expired (token + user cleared).
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true, ownerId: ALICE })
+    accessTokenAtom.set(null)
+    userAtom.set(null)
+
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
     await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).not.toHaveBeenCalled() // signed out
 
-    // A signed-out edit commits → queued, but not pushed (engine idle).
-    localSaveCommittedAtom.set(1)
+    // Re-login as Alice → her attributed queue flushes.
+    userAtom.set(user(ALICE))
+    accessTokenAtom.set('fresh-token')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('does NOT auto-upload a signed-out (unattributed) edit on sign-in (review gpt High)', async () => {
+    accessTokenAtom.set(null)
+    userAtom.set(null) // truly signed out — no identity to attribute the edit to
+    getSyncStateSpy.mockResolvedValue(undefined)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    localSaveCommittedAtom.set(1) // signed-out edit → ownerId stays undefined
     await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
     expect(createSpy).not.toHaveBeenCalled()
 
-    // Signing in flushes the queue automatically.
-    accessTokenAtom.set('fresh-token')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(createSpy).toHaveBeenCalledTimes(1)
+    // A DIFFERENT user signs in — the unattributed queue must not upload under them.
+    userAtom.set(user(BOB))
+    accessTokenAtom.set('bob-token')
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).not.toHaveBeenCalled()
   })
 
   test('PATCHes an existing notebook and sends a tombstone for a deleted cell', async () => {
@@ -337,6 +360,7 @@ describe('remote sync engine', () => {
       notebookId: LOCAL_NOTEBOOK_ID,
       remoteCreated: true,
       dirty: true,
+      ownerId: OWNER,
       deletedCells: [{ id: CELL_B, deletedAt: 100 }],
       lastSyncedUpdatedAt: 5,
     })

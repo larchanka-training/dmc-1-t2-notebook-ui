@@ -311,13 +311,16 @@ async function runOnePush(): Promise<void> {
     setStatus('idle')
     return
   }
-  // Cross-account safety: never upload a queue that belongs to a DIFFERENT account
-  // (e.g. another user signed in on a shared device — the persisted queue survives
-  // logout). Refuse the push; the proper resolution (wipe/keep/import) is #136's
-  // device-mode flow. (`ownerId` undefined = a legacy/signed-out record we cannot
-  // attribute — allowed through as best-effort.)
-  if (syncState.ownerId !== undefined && syncState.ownerId !== currentOwnerId()) {
-    console.warn('remoteSync: queued change belongs to another account; not pushing')
+  // Cross-account safety: auto-upload ONLY a queue we can positively attribute to
+  // the current signed-in user. A queue with no `ownerId` (made while signed out)
+  // or a different owner is never auto-pushed on a shared device — anonymous /
+  // previous-user content must not land in whoever signs in next; the explicit
+  // import/keep/discard flow for unattributed local data is #136's device-mode job.
+  // A concrete `userAtom().id` is required (not just a token); the userAtom
+  // subscription re-attempts once identity hydrates (A-3).
+  const owner = currentOwnerId()
+  if (owner === undefined || syncState.ownerId !== owner) {
+    console.warn('remoteSync: queued change is not attributable to the current user; not pushing')
     setStatus('idle')
     return
   }

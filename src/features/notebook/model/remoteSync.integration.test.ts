@@ -20,7 +20,8 @@ describe('autosave → storage → remote-sync integration', () => {
   beforeEach(async () => {
     await notebookStorage.clearAll()
     accessTokenAtom.set('token')
-    userAtom.set(null)
+    // A concrete signed-in user — the owner-gate requires an attributable owner.
+    userAtom.set({ id: '33333333-3333-4333-8333-333333333333', roles: [] })
     isOnlineAtom.set(true)
   })
 
