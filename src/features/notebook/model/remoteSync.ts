@@ -58,6 +58,8 @@ export const INITIAL_RETRY_MS = 2000
 const MAX_RETRY_MS = 60_000
 /** Backoff for re-attempting a failed sync-metadata write (queue durability). */
 export const PERSIST_RETRY_MS = 2000
+/** Backend `cells` cap (OpenAPI `maxItems: 500`); a larger notebook would 422. */
+const MAX_SYNCABLE_CELLS = 500
 
 /** Coarse status for the UI (#135 surfaces it; the engine only needs internal state). */
 export const remoteSyncStatusAtom = atom<RemoteSyncStatus>('idle', 'notebook.remoteSync.status')
@@ -322,6 +324,18 @@ async function runOnePush(): Promise<void> {
   if (myGeneration !== generation) return
   if (!stored) {
     setStatus('idle')
+    return
+  }
+  // The backend caps `cells` at MAX_SYNCABLE_CELLS (OpenAPI `maxItems: 500`); a
+  // larger notebook would 422 → terminal `failed` with no surface. Refuse the push
+  // up front with a distinct log so it is diagnosable, and keep local intact
+  // (review opus M3). Single-notebook MVP makes >500 unlikely.
+  if (stored.cells.length > MAX_SYNCABLE_CELLS) {
+    console.warn(
+      `remoteSync: notebook has ${stored.cells.length} cells (> ${MAX_SYNCABLE_CELLS}); ` +
+        'not pushing — the server would reject it',
+    )
+    setStatus('failed')
     return
   }
 

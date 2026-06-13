@@ -531,6 +531,24 @@ describe('remote sync engine', () => {
     expect(lastPersistedState(putSyncStateSpy).remoteCreated).toBe(true)
   })
 
+  test('refuses to push a notebook exceeding the 500-cell server cap (review opus M3)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockResolvedValue(
+      storedDoc(
+        5,
+        Array.from({ length: 501 }, (_, i) => cell(`c-${i}`)),
+      ),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Refused client-side (a distinct 'failed'), never sent to be 422'd and wedged.
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('failed')
+  })
+
   test('does NOT loop on a permanent 4xx; keeps the queue and goes terminal (review M-2)', async () => {
     // A shared-id 403 (C0) lands here: the body is rejected every time.
     createSpy.mockRejectedValue(new ApiError(403, 'forbidden'))
