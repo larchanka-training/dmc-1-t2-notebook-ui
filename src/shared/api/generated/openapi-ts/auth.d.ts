@@ -184,6 +184,15 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
+        /** @description Upstream dependency (e.g. OTP email delivery) is unavailable */
+        ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ApiErrorResponse"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -223,6 +232,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             422: components["responses"]["ValidationError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     verifyOtp: {
