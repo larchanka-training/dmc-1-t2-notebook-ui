@@ -67,6 +67,15 @@ export interface NotebookSyncState {
   remoteCreated: boolean
   /** True when the locally-persisted doc has changes not yet acked by the server. */
   dirty: boolean
+  /**
+   * Id of the account that owns this queued state (`userAtom().id` when the dirty
+   * change was recorded). The engine refuses to push a queue whose `ownerId` does
+   * not match the current user — so a queue left by one account on a shared device
+   * is never uploaded under another account's token (cross-account safety). Absent
+   * on records written before this field existed and on changes made while signed
+   * out (which cannot be attributed).
+   */
+  ownerId?: string
   /** Tombstones for cells deleted locally, not yet acked by the server's merge. */
   deletedCells: CellTombstoneJSON[]
   /**
@@ -78,6 +87,12 @@ export interface NotebookSyncState {
   lastSyncedUpdatedAt?: number
 }
 
+// Tombstone ids are RFC 4122 UUIDs (backend `CellTombstone.id` is `format: uuid`),
+// matching the cell-id contract in `schema.ts`. Validating the shape here keeps a
+// non-UUID id or a negative timestamp out of a PATCH body (which the backend would
+// reject with a deterministic 422, wedging the queue).
+const TOMBSTONE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function isSyncObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -86,8 +101,10 @@ function isCellTombstoneJSON(value: unknown): value is CellTombstoneJSON {
   return (
     isSyncObject(value) &&
     typeof value['id'] === 'string' &&
+    TOMBSTONE_UUID_RE.test(value['id']) &&
     typeof value['deletedAt'] === 'number' &&
-    Number.isFinite(value['deletedAt'])
+    Number.isFinite(value['deletedAt']) &&
+    value['deletedAt'] >= 0
   )
 }
 
@@ -103,6 +120,7 @@ export function isNotebookSyncState(value: unknown): value is NotebookSyncState 
     typeof value['notebookId'] === 'string' &&
     typeof value['remoteCreated'] === 'boolean' &&
     typeof value['dirty'] === 'boolean' &&
+    (value['ownerId'] === undefined || typeof value['ownerId'] === 'string') &&
     Array.isArray(value['deletedCells']) &&
     value['deletedCells'].every(isCellTombstoneJSON) &&
     (value['lastSyncedUpdatedAt'] === undefined ||

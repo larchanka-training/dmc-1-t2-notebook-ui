@@ -98,6 +98,8 @@ export function mergeSyncState(
     notebookId: loaded.notebookId,
     remoteCreated: loaded.remoteCreated || provisional.remoteCreated,
     dirty: loaded.dirty || provisional.dirty,
+    // Prefer the persisted owner; fall back to a provisional one recorded during load.
+    ownerId: loaded.ownerId ?? provisional.ownerId,
     deletedCells: mergeTombstones(loaded.deletedCells, provisional.deletedCells),
     lastSyncedUpdatedAt: maxDefined(loaded.lastSyncedUpdatedAt, provisional.lastSyncedUpdatedAt),
   }

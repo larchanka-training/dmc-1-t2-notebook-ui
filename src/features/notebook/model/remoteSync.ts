@@ -25,7 +25,7 @@
 
 import { atom, wrap } from '@reatom/core'
 import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'
-import { accessTokenAtom } from '@/entities/session'
+import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { isNotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
@@ -92,6 +92,11 @@ function initialSyncState(notebookId: string): NotebookSyncState {
 
 function isAuthenticated(): boolean {
   return accessTokenAtom() !== null
+}
+
+/** The current signed-in account id, or `undefined` if not known yet. */
+function currentOwnerId(): string | undefined {
+  return userAtom()?.id
 }
 
 function setStatus(status: RemoteSyncStatus): void {
@@ -266,6 +271,16 @@ async function runOnePush(): Promise<void> {
     setStatus('idle')
     return
   }
+  // Cross-account safety: never upload a queue that belongs to a DIFFERENT account
+  // (e.g. another user signed in on a shared device — the persisted queue survives
+  // logout). Refuse the push; the proper resolution (wipe/keep/import) is #136's
+  // device-mode flow. (`ownerId` undefined = a legacy/signed-out record we cannot
+  // attribute — allowed through as best-effort.)
+  if (syncState.ownerId !== undefined && syncState.ownerId !== currentOwnerId()) {
+    console.warn('remoteSync: queued change belongs to another account; not pushing')
+    setStatus('idle')
+    return
+  }
   if (!isOnlineAtom()) {
     setStatus('offline')
     scheduleRetry()
@@ -321,7 +336,12 @@ async function runOnePush(): Promise<void> {
         // a terminal 409 forever — the create-ack/409 family (review C-1/C-2).
         if (error instanceof ApiError && error.status === 409) {
           if (myGeneration !== generation) return
-          syncState = { ...syncState, remoteCreated: true, dirty: true }
+          syncState = {
+            ...syncState,
+            remoteCreated: true,
+            dirty: true,
+            ownerId: currentOwnerId() ?? syncState.ownerId,
+          }
           await wrap(persistSyncState())
           pushAgain = true
           return
@@ -341,6 +361,8 @@ async function runOnePush(): Promise<void> {
       notebookId,
       remoteCreated: true,
       dirty: newerLocal,
+      ownerId: sentState.ownerId ?? currentOwnerId(),
+      lastSyncedUpdatedAt: syncState.lastSyncedUpdatedAt,
       // Drop only the tombstones we actually sent; keep any added in flight.
       deletedCells: dropAckedTombstones(syncState.deletedCells, sentTombstoneIds),
     }
@@ -473,6 +495,9 @@ function onLocalSaveCommitted(): void {
     syncState = {
       ...syncState,
       dirty: true,
+      // Stamp the current account so a queue left on a shared device is never
+      // pushed under another account (keep a prior owner if signed out now).
+      ownerId: currentOwnerId() ?? syncState.ownerId,
       deletedCells: retractTombstones(withAdded, currentIds),
     }
     void persistSyncState() // self-handles errors + retry

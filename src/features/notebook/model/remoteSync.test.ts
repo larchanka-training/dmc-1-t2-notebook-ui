@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, NetworkError, notebook as notebookApi, RateLimitedError } from '@/shared/api'
-import { accessTokenAtom } from '@/entities/session'
+import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
@@ -44,6 +44,13 @@ function serverResponse(cells: notebookApi.NotebookCell[]): notebookApi.Notebook
   }
 }
 
+const ALICE = '11111111-1111-4111-8111-111111111111'
+const BOB = '22222222-2222-4222-8222-222222222222'
+
+function user(id: string): ReturnType<typeof userAtom> {
+  return { id, roles: [] }
+}
+
 const existingRemoteState: NotebookSyncState = {
   notebookId: LOCAL_NOTEBOOK_ID,
   remoteCreated: true,
@@ -69,6 +76,7 @@ let patchSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.useFakeTimers()
   accessTokenAtom.set('token')
+  userAtom.set(null)
   isOnlineAtom.set(true)
   pausedAtom.set(false)
   localSaveCommittedAtom.set(0)
@@ -170,6 +178,43 @@ describe('remote sync engine', () => {
 
     expect(createSpy).not.toHaveBeenCalled()
     expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  test('does NOT push a queued change that belongs to another account (review veai Critical)', async () => {
+    // A persisted dirty queue left by Alice (e.g. she edited offline then logged
+    // out — the queue survives logout)...
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: false,
+      dirty: true,
+      ownerId: ALICE,
+      deletedCells: [],
+    })
+    // ...but Bob is the one signed in now.
+    userAtom.set(user(BOB))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // The boot-flush is refused — Alice's notebook is never uploaded under Bob.
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  test('pushes a queued change that belongs to the current account', async () => {
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: false,
+      dirty: true,
+      ownerId: ALICE,
+      deletedCells: [],
+    })
+    userAtom.set(user(ALICE)) // same account
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
   })
 
   test('flushes the queued change when the user signs in (review issue-1)', async () => {

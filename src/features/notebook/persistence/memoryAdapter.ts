@@ -16,7 +16,12 @@
 // IndexedDB, localStorage or sessionStorage.
 
 import type { NotebookJSON } from './schema'
-import { isStaleWrite, type NotebookStorageAdapter, type NotebookSyncState } from './storageAdapter'
+import {
+  isNotebookSyncState,
+  isStaleWrite,
+  type NotebookStorageAdapter,
+  type NotebookSyncState,
+} from './storageAdapter'
 
 // Snapshot on every boundary, matching IndexedDB's structured-clone semantics:
 // store a copy on write, hand back a copy on read. Otherwise the Map would hold
@@ -73,9 +78,13 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
     },
     async getSyncState(notebookId) {
       const state = syncStore.get(notebookId)
+      if (state === undefined) return undefined
+      // Validate on read for parity with the disk backend (treat an invalid record
+      // as absent), even though this store only ever holds typed in-session writes.
+      if (!isNotebookSyncState(state)) return undefined
       // Snapshot on the boundary, matching the notebook store: a held reference
       // would let a caller retro-mutate the persisted bookkeeping.
-      return state && structuredClone(state)
+      return structuredClone(state)
     },
     async putSyncState(state) {
       syncStore.set(state.notebookId, structuredClone(state))
