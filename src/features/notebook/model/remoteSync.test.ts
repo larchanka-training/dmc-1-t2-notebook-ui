@@ -551,6 +551,29 @@ describe('remote sync engine', () => {
     expect(pausedAtom()).toBe(true)
   })
 
+  test('discards an in-flight push on sign-out (review C-11)', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined)
+    let resolveCreate!: (nb: notebookApi.Notebook) => void
+    createSpy.mockReturnValue(
+      new Promise<notebookApi.Notebook>((r) => {
+        resolveCreate = r
+      }),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).toHaveBeenCalledTimes(1) // in flight
+
+    putSyncStateSpy.mockClear()
+    accessTokenAtom.set(null) // sign out mid-request
+    resolveCreate(serverResponse([cell(CELL_A)])) // response arrives after logout
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(putSyncStateSpy).not.toHaveBeenCalled() // discarded — no write after logout
+  })
+
   test('a stale teardown handle does not tear down a newer engine (review C-8)', async () => {
     const stop1 = startRemoteSync(LOCAL_NOTEBOOK_ID)
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID) // restart (e.g. #135 re-login)

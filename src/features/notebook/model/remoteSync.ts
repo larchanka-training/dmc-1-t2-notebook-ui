@@ -542,6 +542,12 @@ export function startRemoteSync(notebookId: string): () => void {
         pausedAtom.set(false)
         resetRetry()
         void pushNow()
+      } else if (token === null && was !== null) {
+        // Sign-out (C-11): discard any in-flight push so a response arriving after
+        // logout can't write/adopt. New pushes are already blocked by the
+        // isAuthenticated() guard. A pause is NOT used — logout is not a session
+        // expiry, and #136 owns any local-data wipe.
+        generation += 1
       }
     }),
   )
