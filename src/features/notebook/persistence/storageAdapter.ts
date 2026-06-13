@@ -85,6 +85,12 @@ export interface NotebookSyncState {
   /** Tombstones for cells deleted locally, not yet acked by the server's merge. */
   deletedCells: CellTombstoneJSON[]
   /**
+   * Set when local delete churn exceeded the durable tombstone cap. The stored
+   * array stays bounded, while the engine keeps the queue terminally failed until
+   * a future compaction/full-replace flow resolves the missing tombstones.
+   */
+  tombstonesOverflow?: boolean
+  /**
    * `updatedAt` of the local doc at the last successful sync. Boot compares the
    * stored doc against this to detect content newer than what was synced even when
    * the `dirty` flag was lost to a crash before it persisted (review C-4). Absent
@@ -129,6 +135,8 @@ export function isNotebookSyncState(value: unknown): value is NotebookSyncState 
     typeof value['dirty'] === 'boolean' &&
     (value['ownerId'] === undefined || typeof value['ownerId'] === 'string') &&
     (value['ownerConflict'] === undefined || typeof value['ownerConflict'] === 'boolean') &&
+    (value['tombstonesOverflow'] === undefined ||
+      typeof value['tombstonesOverflow'] === 'boolean') &&
     Array.isArray(value['deletedCells']) &&
     value['deletedCells'].length <= MAX_DELETED_CELLS &&
     value['deletedCells'].every(isCellTombstoneJSON) &&

@@ -709,21 +709,18 @@ describe('remote sync engine', () => {
     expect(remoteSyncStatusAtom()).toBe('failed')
   })
 
-  test('refuses to push when the tombstone buffer exceeds the cap (review gpt B-2)', async () => {
-    const manyTombstones = Array.from({ length: 1001 }, (_, i) => ({
-      id: `tombstone-${i}`,
-      deletedAt: i + 1,
-    }))
+  test('refuses to push when the tombstone overflow marker is set (review gpt B-2)', async () => {
     getSyncStateSpy.mockResolvedValue({
       ...existingRemoteState,
       dirty: true,
-      deletedCells: manyTombstones,
+      deletedCells: [],
+      tombstonesOverflow: true,
     })
 
     teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
     await vi.advanceTimersByTimeAsync(0)
 
-    // Refused client-side (terminal) instead of building a pathological PATCH body.
+    // Refused client-side (terminal) instead of sending an incomplete tombstone set.
     expect(patchSpy).not.toHaveBeenCalled()
     expect(remoteSyncStatusAtom()).toBe('failed')
   })
@@ -745,6 +742,28 @@ describe('remote sync engine', () => {
     expect(patchSpy).not.toHaveBeenCalled()
     expect(createSpy).not.toHaveBeenCalled()
     expect(remoteSyncStatusAtom()).toBe('failed')
+  })
+
+  test('accepts astral Unicode up to the title character limit', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockResolvedValue({ ...storedDoc(5, [cell(CELL_A)]), title: '😀'.repeat(255) })
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('synced')
+  })
+
+  test('accepts astral Unicode by character count, not UTF-16 code units', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, '😀'.repeat(131_073))]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('synced')
   })
 
   test('refuses a push whose title exceeds the backend limit (review B-3)', async () => {

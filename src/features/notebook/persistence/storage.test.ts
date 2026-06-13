@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { FORMAT_VERSION, type NotebookJSON } from './schema'
-import { clear, get, list, put, putIfNewer, remove } from './storage'
+import { MAX_DELETED_CELLS, type NotebookSyncState } from './storageAdapter'
+import { clear, get, getSyncState, list, put, putIfNewer, putSyncState, remove } from './storage'
 
 // Cell id must be a UUID (schema validates `format: uuid`); notebooks here are
 // keyed/asserted by their own id, so a single fixed cell UUID is enough.
@@ -112,5 +113,24 @@ describe('notebook IndexedDB storage', () => {
     const all = await list()
     expect(all).toHaveLength(1)
     expect(all[0].id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  })
+
+  test('sync state round-trips a bounded tombstone queue with an overflow marker', async () => {
+    const state: NotebookSyncState = {
+      notebookId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      remoteCreated: true,
+      dirty: true,
+      ownerId: '33333333-3333-4333-8333-333333333333',
+      deletedCells: Array.from({ length: MAX_DELETED_CELLS }, (_, i) => ({
+        id: `00000000-0000-4000-8000-${i.toString().padStart(12, '0')}`,
+        deletedAt: i + 1,
+      })),
+      tombstonesOverflow: true,
+      lastSyncedUpdatedAt: 10,
+    }
+
+    await putSyncState(state)
+
+    expect(await getSyncState(state.notebookId)).toEqual(state)
   })
 })

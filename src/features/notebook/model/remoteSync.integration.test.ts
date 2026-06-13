@@ -38,6 +38,7 @@ describe('autosave → storage → remote-sync integration', () => {
     stopSync?.()
     stopAutosave?.()
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   test('a real edit autosaves locally then pushes the persisted snapshot', async () => {

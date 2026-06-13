@@ -113,6 +113,7 @@ export function mergeSyncState(
     // Prefer the persisted owner; fall back to a provisional one recorded during load.
     ownerId: loaded.ownerId ?? provisional.ownerId,
     ownerConflict: loaded.ownerConflict || provisional.ownerConflict,
+    tombstonesOverflow: loaded.tombstonesOverflow || provisional.tombstonesOverflow,
     deletedCells: mergeTombstones(loaded.deletedCells, provisional.deletedCells),
     lastSyncedUpdatedAt: maxDefined(loaded.lastSyncedUpdatedAt, provisional.lastSyncedUpdatedAt),
   }

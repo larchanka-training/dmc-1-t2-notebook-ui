@@ -211,6 +211,10 @@ function autosyncPayloadBytes(payload: unknown): number {
   return new Blob([JSON.stringify(payload)]).size
 }
 
+function codePointLength(value: string): number {
+  return Array.from(value).length
+}
+
 /**
  * Write the in-memory sync-state through to the active backend's sync partition.
  * Never rejects: a failed write (quota / blocked DB) is logged and a retry is
@@ -391,14 +395,14 @@ async function runOnePush(): Promise<void> {
   const overLimit =
     stored.cells.length > MAX_SYNCABLE_CELLS
       ? `${stored.cells.length} cells (> ${MAX_SYNCABLE_CELLS})`
-      : stored.title.length > MAX_TITLE_LEN
-        ? `title length ${stored.title.length} (> ${MAX_TITLE_LEN})`
-        : stored.cells.some((c) => c.content.length > MAX_CELL_CONTENT_LEN)
+      : codePointLength(stored.title) > MAX_TITLE_LEN
+        ? `title length ${codePointLength(stored.title)} (> ${MAX_TITLE_LEN})`
+        : stored.cells.some((c) => codePointLength(c.content) > MAX_CELL_CONTENT_LEN)
           ? `a cell over ${MAX_CELL_CONTENT_LEN} chars`
           : // Hard cap on the tombstone buffer (review gpt B-2): fail with a diagnosable
             // terminal state instead of building a pathological PATCH body on offline
             // delete churn. A real compaction / per-backend contract is a #135 follow-up.
-            syncState.deletedCells.length > MAX_DELETED_CELLS
+            syncState.tombstonesOverflow || syncState.deletedCells.length > MAX_DELETED_CELLS
             ? `${syncState.deletedCells.length} tombstones (> ${MAX_DELETED_CELLS})`
             : null
   if (overLimit !== null) {
@@ -658,13 +662,19 @@ function onLocalSaveCommitted(): void {
     // whose id is present again (delete→undo restores the same id) — otherwise
     // the next PATCH would carry the cell AND a tombstone for it.
     const withAdded = addTombstones(syncState.deletedCells, removed, Date.now())
+    const nextDeletedCells = retractTombstones(withAdded, currentIds)
+    const tombstonesOverflow =
+      syncState.tombstonesOverflow || nextDeletedCells.length > MAX_DELETED_CELLS
     syncState = {
       ...syncState,
       dirty: true,
       // Stamp the current account so a queue left on a shared device is never
       // pushed under another account (keep a prior owner if signed out now).
       ownerId: currentOwnerId() ?? syncState.ownerId,
-      deletedCells: retractTombstones(withAdded, currentIds),
+      deletedCells: tombstonesOverflow
+        ? nextDeletedCells.slice(0, MAX_DELETED_CELLS)
+        : nextDeletedCells,
+      tombstonesOverflow,
     }
     // A-1: a save made with the token present but the user not hydrated yet gets
     // no ownerId; without this the owner-gate would strand it until the next edit
@@ -674,9 +684,9 @@ function onLocalSaveCommitted(): void {
     if (syncState.ownerId === undefined && isAuthenticated()) {
       ownerHydrationPending = true
     }
-    if (syncState.deletedCells.length > MAX_DELETED_CELLS) {
+    if (syncState.tombstonesOverflow) {
       console.warn(
-        `remoteSync: deletedCells buffer over cap (${syncState.deletedCells.length} > ` +
+        `remoteSync: deletedCells buffer over cap (${syncState.deletedCells.length} stored, cap ` +
           `${MAX_DELETED_CELLS}) — push will fail terminally until compaction (#135)`,
       )
     }
