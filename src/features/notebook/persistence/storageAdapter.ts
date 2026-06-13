@@ -76,6 +76,12 @@ export interface NotebookSyncState {
    * out (which cannot be attributed).
    */
   ownerId?: string
+  /**
+   * Set when two different concrete accounts have contested the shared local
+   * notebook (a load-race on a shared device): the engine refuses to auto-push such
+   * a queue under either account. Cleared only by the #136 device-mode resolution.
+   */
+  ownerConflict?: boolean
   /** Tombstones for cells deleted locally, not yet acked by the server's merge. */
   deletedCells: CellTombstoneJSON[]
   /**
@@ -121,6 +127,7 @@ export function isNotebookSyncState(value: unknown): value is NotebookSyncState 
     typeof value['remoteCreated'] === 'boolean' &&
     typeof value['dirty'] === 'boolean' &&
     (value['ownerId'] === undefined || typeof value['ownerId'] === 'string') &&
+    (value['ownerConflict'] === undefined || typeof value['ownerConflict'] === 'boolean') &&
     Array.isArray(value['deletedCells']) &&
     value['deletedCells'].every(isCellTombstoneJSON) &&
     (value['lastSyncedUpdatedAt'] === undefined ||

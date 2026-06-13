@@ -194,6 +194,40 @@ describe('remote sync engine', () => {
     expect(patchSpy).not.toHaveBeenCalled()
   })
 
+  test('flags an owner conflict on a cross-owner load race and never auto-pushes it (review gpt A-1)', async () => {
+    // Alice's durable dirty queue resolves slowly...
+    let resolveGet!: (v: NotebookSyncState | undefined) => void
+    getSyncStateSpy.mockReturnValue(
+      new Promise<NotebookSyncState | undefined>((r) => {
+        resolveGet = r
+      }),
+    )
+    userAtom.set(user(BOB)) // ...while Bob is signed in and commits during the load.
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    localSaveCommittedAtom.set(1) // Bob's provisional edit → ownerId BOB
+    await vi.advanceTimersByTimeAsync(0)
+
+    resolveGet({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      ownerId: ALICE,
+      deletedCells: [],
+    })
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+
+    // The merge flags a conflict; nothing is uploaded under Bob.
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(lastPersistedState(putSyncStateSpy).ownerConflict).toBe(true)
+
+    // The conflict is persistent — even Alice signing in cannot auto-push it.
+    userAtom.set(user(ALICE))
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
   test('does NOT push a queued change that belongs to another account (review veai Critical)', async () => {
     // A persisted dirty queue left by Alice (e.g. she edited offline then logged
     // out — the queue survives logout)...
@@ -632,6 +666,25 @@ describe('remote sync engine', () => {
     // Refused client-side (a distinct 'failed'), never sent to be 422'd and wedged.
     expect(patchSpy).not.toHaveBeenCalled()
     expect(createSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('failed')
+  })
+
+  test('refuses to push when the tombstone buffer exceeds the cap (review gpt B-2)', async () => {
+    const manyTombstones = Array.from({ length: 1001 }, (_, i) => ({
+      id: `tombstone-${i}`,
+      deletedAt: i + 1,
+    }))
+    getSyncStateSpy.mockResolvedValue({
+      ...existingRemoteState,
+      dirty: true,
+      deletedCells: manyTombstones,
+    })
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Refused client-side (terminal) instead of building a pathological PATCH body.
+    expect(patchSpy).not.toHaveBeenCalled()
     expect(remoteSyncStatusAtom()).toBe('failed')
   })
 

@@ -64,10 +64,11 @@ export const PERSIST_RETRY_MS = 2000
 const MAX_SYNCABLE_CELLS = 500 // `cells` maxItems
 const MAX_TITLE_LEN = 255 // `title` maxLength
 const MAX_CELL_CONTENT_LEN = 262144 // `content` maxLength
-// Diagnostic threshold for the unbounded tombstone buffer (review veai B-4): heavy
-// offline add/delete churn can grow it without bound. A real cap / full-replace
-// compaction is a #135 follow-up; for now log when it gets pathological.
-const MAX_DELETED_CELLS_WARN = 1000
+// Hard cap on the tombstone buffer (review veai B-4 / gpt B-2): heavy offline
+// add/delete churn can grow it without bound. Over this, the push fails terminally
+// (preflight) instead of sending a pathological body; a real compaction /
+// full-replace protocol is a #135 follow-up.
+const MAX_DELETED_CELLS = 1000
 
 /** Coarse status for the UI (#135 surfaces it; the engine only needs internal state). */
 export const remoteSyncStatusAtom = atom<RemoteSyncStatus>('idle', 'notebook.remoteSync.status')
@@ -325,6 +326,13 @@ async function runOnePush(): Promise<void> {
   // import/keep/discard flow for unattributed local data is #136's device-mode job.
   // A concrete `userAtom().id` is required (not just a token); the userAtom
   // subscription re-attempts once identity hydrates (A-3).
+  // Two accounts contested the shared local notebook (detected during merge) — never
+  // auto-push it under either; #136 device-mode resolves which content belongs to whom.
+  if (syncState.ownerConflict) {
+    console.warn('remoteSync: local notebook has an unresolved owner conflict; not pushing')
+    setStatus('failed')
+    return
+  }
   const owner = currentOwnerId()
   if (owner === undefined || syncState.ownerId !== owner) {
     console.warn('remoteSync: queued change is not attributable to the current user; not pushing')
@@ -332,8 +340,10 @@ async function runOnePush(): Promise<void> {
     return
   }
   if (!isOnlineAtom()) {
+    // Don't arm a retry timer while offline — it would re-enter this branch and grow
+    // the backoff with no server contact. The `online` event flushes on reconnect and
+    // the next committed edit re-triggers (review gpt B-3 / opus L3).
     setStatus('offline')
-    scheduleRetry()
     return
   }
   if (!syncState.dirty && syncState.deletedCells.length === 0) {
@@ -379,7 +389,12 @@ async function runOnePush(): Promise<void> {
         ? `title length ${stored.title.length} (> ${MAX_TITLE_LEN})`
         : stored.cells.some((c) => c.content.length > MAX_CELL_CONTENT_LEN)
           ? `a cell over ${MAX_CELL_CONTENT_LEN} chars`
-          : null
+          : // Hard cap on the tombstone buffer (review gpt B-2): fail with a diagnosable
+            // terminal state instead of building a pathological PATCH body on offline
+            // delete churn. A real compaction / per-backend contract is a #135 follow-up.
+            syncState.deletedCells.length > MAX_DELETED_CELLS
+            ? `${syncState.deletedCells.length} tombstones (> ${MAX_DELETED_CELLS})`
+            : null
   if (overLimit !== null) {
     console.warn(`remoteSync: payload exceeds a backend limit (${overLimit}); not pushing`)
     setStatus('failed')
@@ -644,10 +659,10 @@ function onLocalSaveCommitted(): void {
       ownerId: currentOwnerId() ?? syncState.ownerId,
       deletedCells: retractTombstones(withAdded, currentIds),
     }
-    if (syncState.deletedCells.length > MAX_DELETED_CELLS_WARN) {
+    if (syncState.deletedCells.length > MAX_DELETED_CELLS) {
       console.warn(
-        `remoteSync: deletedCells buffer is large (${syncState.deletedCells.length}) — ` +
-          'offline delete churn; compaction is a #135 follow-up',
+        `remoteSync: deletedCells buffer over cap (${syncState.deletedCells.length} > ` +
+          `${MAX_DELETED_CELLS}) — push will fail terminally until compaction (#135)`,
       )
     }
     // Hold off persisting until the durable metadata has been read — otherwise this

@@ -94,12 +94,25 @@ export function mergeSyncState(
   loaded: NotebookSyncState,
   provisional: NotebookSyncState,
 ): NotebookSyncState {
+  // Two DIFFERENT concrete owners contesting the shared local notebook (a load-race
+  // on a shared device): durable queue is one account's, an in-memory edit another's.
+  // Merging would contaminate one owner's queue with the other's edits (and attribute
+  // the result to one of them), so instead flag a conflict and keep the durable queue
+  // un-uploadable — the engine refuses to auto-push either way. Resolution is #136.
+  if (
+    loaded.ownerId !== undefined &&
+    provisional.ownerId !== undefined &&
+    loaded.ownerId !== provisional.ownerId
+  ) {
+    return { ...loaded, ownerConflict: true }
+  }
   return {
     notebookId: loaded.notebookId,
     remoteCreated: loaded.remoteCreated || provisional.remoteCreated,
     dirty: loaded.dirty || provisional.dirty,
     // Prefer the persisted owner; fall back to a provisional one recorded during load.
     ownerId: loaded.ownerId ?? provisional.ownerId,
+    ownerConflict: loaded.ownerConflict || provisional.ownerConflict,
     deletedCells: mergeTombstones(loaded.deletedCells, provisional.deletedCells),
     lastSyncedUpdatedAt: maxDefined(loaded.lastSyncedUpdatedAt, provisional.lastSyncedUpdatedAt),
   }
