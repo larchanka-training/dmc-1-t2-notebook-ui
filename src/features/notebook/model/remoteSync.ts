@@ -160,7 +160,11 @@ function isRetryable(error: unknown): boolean {
     const s = error.status
     return s >= 500 || s === 408 || s === 429 || s === 401
   }
-  return true // unknown error shape — retry rather than get permanently stuck
+  // Unknown error shape (e.g. a programming TypeError): retry rather than get
+  // permanently stuck. Deliberate MVP trade-off — a real code bug would loop under
+  // backoff (logged each attempt via the push-failed warn) instead of surfacing.
+  // A retry cap / terminal-on-non-ApiError is a documented follow-up (#135).
+  return true
 }
 
 /** The server-requested delay (ms) for a 429, if present. */
@@ -506,6 +510,12 @@ async function loadStateAndFlush(notebookId: string): Promise<void> {
   // C-4: a previously-synced notebook whose stored doc is newer than the last
   // synced watermark has unsynced content even if the dirty flag was lost to a
   // crash before it persisted — mark it dirty so the change is not stranded.
+  //
+  // Deliberately scoped to `remoteCreated`: a NEVER-created notebook whose dirty
+  // flag was lost to a crash also lost its `ownerId`, so boot-pushing it would risk
+  // uploading content under the wrong account (the cross-account leak the owner-gate
+  // prevents). That stays a liveness gap only — no data loss, it syncs on the next
+  // edit (which re-records ownerId + dirty). Atomic content+marker write → #135.
   if (syncState.remoteCreated && !syncState.dirty) {
     try {
       const stored = await wrap(notebookStorage.get(notebookId))
