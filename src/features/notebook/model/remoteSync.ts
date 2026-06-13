@@ -599,8 +599,15 @@ class RemoteSyncEngine {
       if (myGeneration !== this.generation) return
 
       if (this.syncState.dirty) {
+        // Re-arm the remote debounce rather than looping immediately (review
+        // gpt-v-12): an ordinary follow-up (a save committed while this push was in
+        // flight) coalesces with continued typing into ONE delayed push, instead of
+        // a full-document upload per server round-trip. The change is already
+        // persisted dirty above, so nothing is lost if the timer is later cancelled
+        // (the next load re-detects it). Protocol recovery (POST-409 → PATCH) stays
+        // immediate via its own `pushAgain`.
         setStatus('syncing')
-        this.pushAgain = true
+        this.armDebounce()
       } else {
         // Synced: record the watermark of the version storage now holds (the adopted
         // server merge, or the doc we pushed) so a crash that loses the dirty flag is
@@ -658,10 +665,10 @@ class RemoteSyncEngine {
       do {
         this.pushAgain = false
         await wrap(this.runOnePush())
-        // Known follow-up (#135, cosmetic): under continuous typing this loops a new
-        // full-document push per server round-trip instead of re-arming the 1500ms
-        // debounce for the `newerLocal` case (the 409→PATCH recovery should stay
-        // immediate). Bounded and data-safe (opus L7).
+        // The loop now only re-iterates for protocol recovery that sets `pushAgain`
+        // (POST-409 → PATCH), which must stay immediate. An ordinary follow-up after a
+        // save committed in flight re-arms the 1500ms debounce instead (see runOnePush),
+        // so continuous typing coalesces into one delayed push (review gpt-v-12).
       } while (
         this.pushAgain &&
         this.isActive() &&
@@ -759,12 +766,24 @@ class RemoteSyncEngine {
       const nextDeletedCells = retractTombstones(withAdded, currentIds)
       const tombstonesOverflow =
         this.syncState.tombstonesOverflow || nextDeletedCells.length > MAX_DELETED_CELLS
+      // A concrete owner is sticky (review gpt-v-12): a DIFFERENT signed-in user
+      // editing a notebook already attributed to someone else is an owner conflict
+      // (Bob edits Alice's loaded notebook on a shared device), NOT a re-attribution
+      // — the `?? prior` fallback alone would overwrite Alice's ownerId with Bob and
+      // make her content eligible to upload under his account. Flag the conflict and
+      // refuse autosync under either until #136 resolves ownership; this mirrors
+      // mergeSyncState's load-race rule for the post-load edit path. Otherwise stamp
+      // the current account, keeping a prior owner when signed out.
+      const prevOwner = this.syncState.ownerId
+      const nowOwner = currentOwnerId()
+      const ownerConflict =
+        this.syncState.ownerConflict ||
+        (prevOwner !== undefined && nowOwner !== undefined && prevOwner !== nowOwner)
       this.syncState = {
         ...this.syncState,
         dirty: true,
-        // Stamp the current account so a queue left on a shared device is never
-        // pushed under another account (keep a prior owner if signed out now).
-        ownerId: currentOwnerId() ?? this.syncState.ownerId,
+        ownerId: ownerConflict ? prevOwner : (nowOwner ?? prevOwner),
+        ownerConflict,
         deletedCells: tombstonesOverflow
           ? nextDeletedCells.slice(0, MAX_DELETED_CELLS)
           : nextDeletedCells,

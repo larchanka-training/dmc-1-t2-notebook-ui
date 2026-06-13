@@ -469,6 +469,62 @@ describe('remote sync engine', () => {
     expect(patchSpy).toHaveBeenCalledTimes(1) // no second, incomplete PATCH
   })
 
+  test('a different signed-in user editing a loaded notebook flags an owner conflict and never uploads (review gpt-v-12)', async () => {
+    // Alice's CLEAN persisted queue is loaded; Bob is the signed-in user and edits
+    // the same visible local notebook. The edit must NOT overwrite Alice's ownerId
+    // (which would make her content eligible to upload under Bob) — it flags a
+    // conflict and refuses autosync.
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: false,
+      ownerId: ALICE,
+      deletedCells: [],
+      lastSyncedUpdatedAt: 5,
+    })
+    userAtom.set(user(BOB))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush() // Bob edits
+
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+    const persisted = lastPersistedState(putSyncStateSpy)
+    expect(persisted.ownerConflict).toBe(true)
+    expect(persisted.ownerId).toBe(ALICE) // Alice's attribution is preserved, not Bob's
+  })
+
+  test('coalesces saves committed during an in-flight push into one delayed follow-up (review gpt-v-12)', async () => {
+    // A PATCH is in flight; several saves commit while it runs. The follow-up must
+    // be debounced into ONE delayed request, not a full-document push per edit.
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      ownerId: OWNER,
+      deletedCells: [],
+      lastSyncedUpdatedAt: 5,
+    })
+    const firstPatch = deferred<notebookApi.Notebook>()
+    patchSpy.mockReturnValueOnce(firstPatch.promise)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1) // first PATCH in flight
+
+    for (let i = 0; i < 3; i++) {
+      localSaveCommittedAtom.set(localSaveCommittedAtom() + 1)
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    firstPatch.resolve(serverResponse([cell(CELL_A)]))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1) // no immediate full-document re-push
+
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(patchSpy).toHaveBeenCalledTimes(2) // exactly one coalesced follow-up
+  })
+
   test('pushes a queued change that belongs to the current account', async () => {
     getSyncStateSpy.mockResolvedValue({
       notebookId: LOCAL_NOTEBOOK_ID,
@@ -686,7 +742,8 @@ describe('remote sync engine', () => {
     await vi.advanceTimersByTimeAsync(0)
     await commitAndFlush()
 
-    // First push skips apply (stale) and re-pushes; the second applies cleanly.
+    // First push skips apply (stale) and re-arms the debounce; the follow-up applies.
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
     expect(patchSpy).toHaveBeenCalledTimes(2)
     expect(cellsAtom()[0].code()).toBe('server-2')
   })

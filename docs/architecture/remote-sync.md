@@ -165,8 +165,10 @@ must use the same id). Tracked as a #135 design item.
 Every POST/PATCH sends the **whole** document (full cell list + the entire
 `deletedCells` buffer) — required by the server's full-set LWW contract and fine
 for the single-notebook MVP, but a large notebook re-uploads fully on every
-debounce cycle while editing. A future delta / changed-cells PATCH is the
-mitigation.
+debounce cycle while editing. A save committed while a push is in flight re-arms
+the 1500 ms debounce rather than triggering an immediate follow-up, so continued
+typing coalesces into one delayed upload (only POST-409 → PATCH recovery loops
+immediately). A future delta / changed-cells PATCH would cut the per-cycle size.
 
 **Cell cap.** The backend caps `cells` at `maxItems: 500`. The engine refuses to
 push a notebook over `MAX_SYNCABLE_CELLS` (500) with a distinct log instead of
@@ -216,10 +218,14 @@ write, deferred to #135.
 - **Tombstone ↔ body consistency.** The sent `deletedCells` are filtered against
   the pushed document's cell ids, so a PATCH never carries a cell AND a tombstone
   for it (a deletion made in memory before its own save committed).
-- **Owner conflict.** If a load-race merges two different concrete owners (one
-  account's durable queue + another's in-memory edit on a shared device), the
-  sync-state is flagged `ownerConflict` (persisted) and the engine refuses to
-  auto-push under either — #136 device-mode resolves it.
+- **Owner conflict.** A concrete `ownerId` is sticky. If two different concrete
+  owners meet — a load-race merge (one account's durable queue + another's
+  in-memory edit) OR a local edit by a different signed-in user on a notebook
+  already attributed to someone else — the sync-state is flagged `ownerConflict`
+  (persisted) and the engine refuses to auto-push under either. The edit never
+  re-stamps the existing owner with the current user, so previous-account content
+  can't become eligible for upload under whoever edits next. #136 device-mode
+  resolves it.
 - **Payload caps.** The push is preflighted against the backend limits (cells 500,
   title 255, cell content 262144) and a client tombstone cap, failing terminally
   with a distinct log instead of a silent 422 or a pathological body.
