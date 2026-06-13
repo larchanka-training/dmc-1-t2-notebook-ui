@@ -202,9 +202,17 @@ write, deferred to #135.
   durable record.
 - **Auth hydration.** The owner-gate needs `userAtom().id`; if the token hydrates
   before the user, the flush is re-attempted when the user identity arrives.
+- **Engine lifecycle.** All per-run state lives on a `RemoteSyncEngine` instance,
+  and `active` points at the current one. A re-init (re-login / #135 slot switch)
+  tears down the prior instance and creates a fresh one, so a stale
+  request/load/timer that settles after a restart mutates only its own (dead)
+  instance and can never corrupt the live engine. `active === this` tells a
+  continuation whether its instance is still live.
 - **Cancellation.** Each push has an `AbortController`; pause / teardown / sign-out
-  abort the in-flight request (the `generation` guard still discards a late result),
-  so a hung request can't keep `pushInFlight` true and block later sync.
+  abort the in-flight request and bump the per-instance `generation`, which discards
+  a late result. The in-flight lock is per-instance, so a stale push can't keep the
+  live engine's `pushInFlight` true or release its lock (no overlapping POST/PATCH
+  under session churn).
 - **Tombstone ↔ body consistency.** The sent `deletedCells` are filtered against
   the pushed document's cell ids, so a PATCH never carries a cell AND a tombstone
   for it (a deletion made in memory before its own save committed).
@@ -232,14 +240,6 @@ same pattern autosave uses.
   the sync-metadata persist already skips a write for a torn-down/paused engine and
   `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /
   versioned write discipline for storage-I/O should be revisited then.
-- **`loadStateAndFlush` generation guard.** Boot load is guarded by
-  `activeNotebookId`; a `generation`-based guard (matching the push path) is a
-  latent hardening for the #135 re-login path.
 - **First-create crash durability (#135).** A never-created notebook whose dirty
   marker is lost to a crash syncs only on the next edit (see "Crash recovery"). An
   atomic content + dirty-marker write would close the window.
-- **Engine decomposition (#135).** `runOnePush` carries the whole push protocol in
-  one function and the lifecycle lives in ~20 module-level `let`s; a
-  behaviour-preserving extraction (`createOrRecover` / `handleAdoptResult`, one
-  lifecycle object) is worth doing before #135/#136 reuse the singleton — the
-  existing suite guards it.
