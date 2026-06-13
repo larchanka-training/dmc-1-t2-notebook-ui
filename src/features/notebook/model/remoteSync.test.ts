@@ -664,6 +664,37 @@ describe('remote sync engine', () => {
     expect(pausedAtom()).toBe(true)
   })
 
+  test('does not clobber the durable queue when sync-metadata read fails (review A-1)', async () => {
+    isOnlineAtom.set(false) // keep pushes out of the putSyncState count
+    const durable: NotebookSyncState = {
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      deletedCells: [{ id: CELL_B, deletedAt: 100 }],
+      lastSyncedUpdatedAt: 5,
+    }
+    // First metadata read fails; the retry succeeds with the durable record.
+    getSyncStateSpy.mockRejectedValueOnce(new Error('blocked db')).mockResolvedValue(durable)
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0) // load fails → retry armed, metadata not loaded
+
+    // A local save commits during the failure window — it must NOT persist a fresh
+    // provisional state over the unread durable queue.
+    putSyncStateSpy.mockClear()
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(putSyncStateSpy).not.toHaveBeenCalled()
+
+    // The load retry succeeds → merge preserves remoteCreated + the durable tombstone
+    // AND the new dirty flag (nothing lost).
+    await vi.advanceTimersByTimeAsync(INITIAL_RETRY_MS)
+    const persisted = lastPersistedState(putSyncStateSpy)
+    expect(persisted.remoteCreated).toBe(true)
+    expect(persisted.dirty).toBe(true)
+    expect(persisted.deletedCells).toEqual([{ id: CELL_B, deletedAt: 100 }])
+  })
+
   test('classifies a transient local-read failure as retryable, not unhandled (review veai High)', async () => {
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
     getSpy.mockRejectedValueOnce(new Error('blocked db'))

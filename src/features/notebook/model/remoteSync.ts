@@ -80,7 +80,12 @@ let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let persistRetryTimer: ReturnType<typeof setTimeout> | null = null
+let loadRetryTimer: ReturnType<typeof setTimeout> | null = null
 let retryDelay = INITIAL_RETRY_MS
+// False until the durable sync metadata has been read (or confirmed absent). While
+// false, nothing persists or pushes — a read FAILURE leaves the durable queue
+// unknown, and writing a fresh provisional state would clobber it (review A-1).
+let metadataLoaded = false
 let pushInFlight = false
 let pushAgain = false
 let primed = false
@@ -276,6 +281,10 @@ async function applyServerBaseline(
 async function runOnePush(): Promise<void> {
   const notebookId = activeNotebookId
   if (notebookId === null || syncState === null) return
+  // Hold off until the durable metadata is loaded — pushing the provisional state
+  // (without the real remoteCreated / ownerId / tombstones) would be wrong; the
+  // pending load retry flushes once it succeeds (A-1).
+  if (!metadataLoaded) return
   if (pausedAtom()) {
     setStatus('paused')
     return
@@ -499,22 +508,41 @@ async function pushNow(): Promise<void> {
   }
 }
 
+function scheduleLoadRetry(notebookId: string): void {
+  if (loadRetryTimer !== null) return
+  loadRetryTimer = setTimeout(
+    wrap(() => {
+      loadRetryTimer = null
+      void loadStateAndFlush(notebookId)
+    }),
+    INITIAL_RETRY_MS,
+  )
+}
+
 async function loadStateAndFlush(notebookId: string): Promise<void> {
   let loaded: NotebookSyncState | undefined
   try {
     loaded = await wrap(notebookStorage.getSyncState(notebookId))
   } catch (error) {
-    // A storage failure reading bookkeeping must not reject this fire-and-forget
-    // boot task — fall back to a fresh state (review veai High).
-    console.warn('remoteSync: failed to load sync metadata; using a fresh state', error)
-    loaded = undefined
+    // A read FAILURE (not a clean absent record) leaves the durable queue unknown.
+    // Do NOT proceed with a fresh provisional state — a later save persisting it
+    // would clobber the unread durable dirty/tombstones/remoteCreated/ownerId
+    // (review A-1). Retry the load; until it succeeds `metadataLoaded` stays false,
+    // so onLocalSaveCommitted holds off persisting and runOnePush holds off pushing.
+    console.warn('remoteSync: failed to load sync metadata; will retry', error)
+    scheduleLoadRetry(notebookId)
+    return
   }
   if (activeNotebookId !== notebookId) return
   // Merge, don't clobber: a local save during the load window already recorded
   // dirty/tombstones into the provisional state — union them with the loaded
   // record instead of letting a clean record overwrite the change (H-2).
   const provisional = syncState ?? initialSyncState(notebookId)
+  const hadProvisionalChanges = provisional.dirty || provisional.deletedCells.length > 0
   syncState = loaded ? mergeSyncState(loaded, provisional) : provisional
+  metadataLoaded = true
+  // If a save was held off during a prior failed load, persist the merged result now.
+  if (hadProvisionalChanges) void persistSyncState()
   // C-4: a previously-synced notebook whose stored doc is newer than the last
   // synced watermark has unsynced content even if the dirty flag was lost to a
   // crash before it persisted — mark it dirty so the change is not stranded.
@@ -561,7 +589,10 @@ function onLocalSaveCommitted(): void {
       ownerId: currentOwnerId() ?? syncState.ownerId,
       deletedCells: retractTombstones(withAdded, currentIds),
     }
-    void persistSyncState() // self-handles errors + retry
+    // Hold off persisting until the durable metadata has been read — otherwise this
+    // fresh provisional state would clobber an unread durable queue (A-1). The
+    // pending load's merge persists the union once it succeeds.
+    if (metadataLoaded) void persistSyncState() // self-handles errors + retry
   }
   armDebounce()
 }
@@ -585,6 +616,7 @@ export function startRemoteSync(notebookId: string): () => void {
   const myEpoch = startEpoch
   primed = false
   primedRestored = false
+  metadataLoaded = false
   pushInFlight = false
   pushAgain = false
   previousCellIds = new Set(cellsAtom().map((c) => c.id))
@@ -661,7 +693,7 @@ export function startRemoteSync(notebookId: string): () => void {
   }
 }
 
-/** Clear every lifecycle timer (debounce, metadata-persist retry, push retry). */
+/** Clear every lifecycle timer (debounce, metadata-load/persist retry, push retry). */
 function cancelAllTimers(): void {
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer)
@@ -670,6 +702,10 @@ function cancelAllTimers(): void {
   if (persistRetryTimer !== null) {
     clearTimeout(persistRetryTimer)
     persistRetryTimer = null
+  }
+  if (loadRetryTimer !== null) {
+    clearTimeout(loadRetryTimer)
+    loadRetryTimer = null
   }
   resetRetry()
 }
