@@ -211,6 +211,28 @@ describe('remote sync engine', () => {
     expect(patchSpy).not.toHaveBeenCalled()
   })
 
+  test('flushes a same-owner queue once the user identity hydrates (review A-3)', async () => {
+    // Token present (beforeEach), but user not hydrated yet (/auth/me in flight).
+    userAtom.set(null)
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      ownerId: ALICE,
+      deletedCells: [],
+    })
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    // Owner-gate rejected the push (currentOwnerId undefined ≠ ALICE).
+    expect(patchSpy).not.toHaveBeenCalled()
+
+    // The user hydrates to the queue's owner → the flush is re-attempted.
+    userAtom.set(user(ALICE))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('pushes a queued change that belongs to the current account', async () => {
     getSyncStateSpy.mockResolvedValue({
       notebookId: LOCAL_NOTEBOOK_ID,

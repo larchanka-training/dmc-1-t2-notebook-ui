@@ -75,6 +75,8 @@ let primedRestored = false
 let unsubscribeToken: (() => void) | null = null
 let primedToken = false
 let previousToken: string | null = null
+let unsubscribeUser: (() => void) | null = null
+let primedUser = false
 let unsubscribeOnline: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -684,6 +686,21 @@ export function startRemoteSync(notebookId: string): () => void {
       }
     }),
   )
+  // Auth hydration race (A-3): the owner-gate needs `userAtom().id`, but the token
+  // can hydrate before the user (e.g. a restored session whose /auth/me is still in
+  // flight, or `setSession` setting the token first). A push gated out as an owner
+  // mismatch while the user was unknown has no other retry, so re-attempt the flush
+  // when the user identity arrives.
+  primedUser = false
+  unsubscribeUser = userAtom.subscribe(
+    wrap(() => {
+      if (!primedUser) {
+        primedUser = true
+        return
+      }
+      if (userAtom() !== null) void pushNow()
+    }),
+  )
   // Generation-bound (by start epoch) so a stale handle from a PREVIOUS start
   // (e.g. #135 re-login re-calls startRemoteSync) cannot tear down the current
   // engine. A pause does not bump the epoch, so the legitimate handle still tears
@@ -719,6 +736,8 @@ function teardownRemoteSync(): void {
   unsubscribeRestored = null
   unsubscribeToken?.()
   unsubscribeToken = null
+  unsubscribeUser?.()
+  unsubscribeUser = null
   if (onlineHandler && typeof window !== 'undefined') {
     window.removeEventListener('online', onlineHandler)
   }
