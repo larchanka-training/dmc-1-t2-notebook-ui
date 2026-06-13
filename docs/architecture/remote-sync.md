@@ -44,6 +44,14 @@ A separate debounce (`REMOTE_DEBOUNCE_MS = 1500`, distinct from autosave's
 The server performs the last-write-wins merge per cell (`cell.updatedAt`; ties
 go to the server) and returns the merged notebook.
 
+**Lost create-ack recovery.** If the original `POST` committed server-side but its
+response was lost (offline), `remoteCreated` stays `false`; a later edit makes the
+re-`POST`ed content differ, and the backend answers `409` (same id, same owner,
+different payload). A 409 on the create path is treated as "already exists under
+us": the engine flips `remoteCreated` and re-pushes via `PATCH` (which LWW-merges,
+never 409s) instead of wedging on a terminal failure. This also recovers the case
+where the create succeeded but persisting `remoteCreated` failed before a reload.
+
 ## deletedCells (tombstones)
 
 A cell deletion is detected in the sync layer by diffing the previous cell-id
@@ -73,7 +81,10 @@ local data**:
 - **`deferred`** — a concurrent local edit (checked before _and_ after the
   storage write), or storage already holds a newer version than this push was
   based on (`putIfNewer` CAS, not an unconditional `put`, so another tab is not
-  clobbered). Local stays authoritative and is re-pushed.
+  clobbered). Local stays authoritative and is re-pushed. When a keystroke lands
+  _during_ the write, the autosave CAS base is advanced to the just-written server
+  version so the pending autosave persists the keystroke cleanly instead of a
+  false `conflict`.
 - **`rejected`** — a malformed/newer-format response, or a well-formed `cells: []`
   that would zero a non-empty notebook. Local is kept, the anomaly is logged, and
   the engine does **not** auto-loop on it.
@@ -134,10 +145,17 @@ mitigation.
 
 ## Persistence of sync state
 
-`{ remoteCreated, dirty, deletedCells }` per notebook lives in memory and is
-write-through-persisted to the storage adapter's `sync` partition (#133), so it
-survives a reload and is wiped in one call by `clearAll()` /
-`clearLocalNotebookData()`.
+`{ remoteCreated, dirty, deletedCells, lastSyncedUpdatedAt }` per notebook lives
+in memory and is write-through-persisted to the storage adapter's `sync` partition
+(#133), so it survives a reload and is wiped in one call by `clearAll()` /
+`clearLocalNotebookData()`. A failed write is logged and retried, not swallowed.
+
+**Crash recovery (boot detection).** `lastSyncedUpdatedAt` is the `updatedAt` of
+the doc at the last successful sync. If a content autosave landed durable but the
+`dirty` flag was lost to a crash before it persisted, the marker alone would miss
+the unsynced change. On boot, a previously-created notebook whose stored
+`updatedAt` is **newer** than `lastSyncedUpdatedAt` is marked dirty and pushed —
+so the change is not stranded until the next edit.
 
 ## Reatom notes
 
@@ -146,9 +164,19 @@ save-committed subscriber) is `wrap`-captured, and every await is
 `await wrap(promise)`, so atom reads/writes in continuations keep a stack — the
 same pattern autosave uses.
 
-## Known follow-up
+## Known follow-ups
 
-The notebook facade takes no `AbortSignal`, so a torn-down / paused engine
-discards an in-flight push's result via a `generation` guard rather than
-aborting the fetch. Threading a real `AbortSignal` through the facade is a
-follow-up.
+- The notebook facade takes no `AbortSignal`, so a torn-down / paused engine
+  discards an in-flight push's result via a `generation` guard rather than
+  aborting the fetch. Threading a real `AbortSignal` through the facade is a
+  follow-up.
+- **Per-user server id (#135).** The shared `LOCAL_NOTEBOOK_ID` only works for the
+  first user; a real per-account id must be designed with the #135 bootstrap (see
+  "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
+- **#136 (untrusted device).** Once `clearLocalNotebookData` is wired to sign-out,
+  the sync-metadata persist already skips a write for a torn-down/paused engine and
+  `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /
+  versioned write discipline for storage-I/O should be revisited then.
+- **`loadStateAndFlush` generation guard.** Boot load is guarded by
+  `activeNotebookId`; a `generation`-based guard (matching the push path) is a
+  latent hardening for the #135 re-login path.
