@@ -330,6 +330,26 @@ describe('remote sync engine', () => {
     ])
   })
 
+  test('does not send a tombstone for a cell still in the pushed document (review C-1)', async () => {
+    // A tombstone for B is queued, but the persisted doc still contains B (the
+    // deletion was made in-memory and its own save has not committed yet).
+    getSyncStateSpy.mockResolvedValue({
+      notebookId: LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: true,
+      deletedCells: [{ id: CELL_B, deletedAt: 100 }],
+      lastSyncedUpdatedAt: 5,
+    })
+    getSpy.mockResolvedValue(storedDoc(6, [cell(CELL_A), cell(CELL_B)]))
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).toHaveBeenCalledTimes(1)
+    // B is in the body, so no contradictory tombstone is sent for it.
+    expect(patchSpy.mock.calls[0][1].deletedCells).toEqual([])
+  })
+
   test('keeps deletedCells after a failed PATCH and drops them after success', async () => {
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
     cellsAtom.set([reatomCell('x', 'code', CELL_A), reatomCell('x', 'code', CELL_B)])
@@ -768,6 +788,35 @@ describe('remote sync engine', () => {
     localSaveCommittedAtom.set(1)
     await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
     expect(createSpy.mock.calls.length + patchSpy.mock.calls.length).toBe(1)
+  })
+
+  test('a hung push is aborted on pause and does not block re-login sync (review B-2)', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined)
+    // First push hangs until its AbortSignal fires.
+    createSpy.mockImplementationOnce(
+      (_input: unknown, signal?: AbortSignal) =>
+        new Promise<notebookApi.Notebook>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new NetworkError('aborted')))
+        }),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    localSaveCommittedAtom.set(1)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).toHaveBeenCalledTimes(1) // in flight, hung
+
+    // Session expires → pause aborts the hung request (pushInFlight is released).
+    pauseRemoteSync()
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Re-login: a fresh start + commit pushes — not stuck behind the dead request.
+    createSpy.mockResolvedValue(serverResponse([cell(CELL_A)]))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    localSaveCommittedAtom.set(2)
+    await vi.advanceTimersByTimeAsync(REMOTE_DEBOUNCE_MS)
+    expect(createSpy).toHaveBeenCalledTimes(2)
   })
 
   test('pauseRemoteSync stops pushes without wiping local data', async () => {

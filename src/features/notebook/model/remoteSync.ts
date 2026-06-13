@@ -90,6 +90,9 @@ let retryDelay = INITIAL_RETRY_MS
 let metadataLoaded = false
 let pushInFlight = false
 let pushAgain = false
+// Aborts the in-flight push's HTTP request on pause / teardown / sign-out, so a
+// hung request can't keep `pushInFlight` true and block all later sync (review B-2).
+let currentAbort: AbortController | null = null
 let primed = false
 // Bumped on teardown/pause and on each (re)start; an in-flight push compares it
 // after every await and discards its result if it changed (cancellation guard).
@@ -360,29 +363,45 @@ async function runOnePush(): Promise<void> {
 
   const sentSeq = localSaveCommittedAtom()
   const sentState = syncState
-  const sentTombstoneIds = sentState.deletedCells.map((t) => t.id)
+  // C-1: never send a tombstone for a cell that is still in the pushed document
+  // (a deletion made in-memory after this doc was persisted, before its own save
+  // committed) — body and tombstones must agree on the same persisted moment.
+  const storedCellIds = new Set(stored.cells.map((c) => c.id))
+  const sendableTombstones = retractTombstones(sentState.deletedCells, storedCellIds)
+  const sentTombstoneIds = sentState.remoteCreated
+    ? sendableTombstones.map((t) => t.id) // PATCH actually sent these
+    : sentState.deletedCells.map((t) => t.id) // create: pre-sync tombstones are moot, drop all
 
+  const myAbort = new AbortController()
+  currentAbort = myAbort
   setStatus('syncing')
   try {
     let merged: notebookApi.Notebook
     if (sentState.remoteCreated) {
       merged = await wrap(
-        notebookApi.patch(notebookId, {
-          title: stored.title,
-          formatVersion: stored.formatVersion,
-          cells: stored.cells,
-          deletedCells: sentState.deletedCells,
-        }),
+        notebookApi.patch(
+          notebookId,
+          {
+            title: stored.title,
+            formatVersion: stored.formatVersion,
+            cells: stored.cells,
+            deletedCells: sendableTombstones,
+          },
+          myAbort.signal,
+        ),
       )
     } else {
       try {
         merged = await wrap(
-          notebookApi.create({
-            id: stored.id,
-            title: stored.title,
-            formatVersion: stored.formatVersion,
-            cells: stored.cells,
-          }),
+          notebookApi.create(
+            {
+              id: stored.id,
+              title: stored.title,
+              formatVersion: stored.formatVersion,
+              cells: stored.cells,
+            },
+            myAbort.signal,
+          ),
         )
       } catch (error) {
         // A 409 on create means the notebook already exists under us: the POST
@@ -487,7 +506,16 @@ async function runOnePush(): Promise<void> {
       // 403 lands here — see docs/architecture/remote-sync.md "per-owner id".
       setStatus('failed')
     }
+  } finally {
+    // Clear the controller unless a newer push already replaced it.
+    if (currentAbort === myAbort) currentAbort = null
   }
+}
+
+/** Abort the in-flight push's HTTP request (its result is discarded by `generation`). */
+function abortCurrentPush(): void {
+  currentAbort?.abort()
+  currentAbort = null
 }
 
 async function pushNow(): Promise<void> {
@@ -677,12 +705,13 @@ export function startRemoteSync(notebookId: string): () => void {
         resetRetry()
         void pushNow()
       } else if (token === null && was !== null) {
-        // Sign-out (C-11): discard any in-flight push so a response arriving after
-        // logout can't write/adopt. New pushes are already blocked by the
-        // isAuthenticated() guard. A pause is NOT used — logout is not a session
-        // expiry, and #136 owns any local-data wipe.
+        // Sign-out (C-11): abort + discard any in-flight push so a response arriving
+        // after logout can't write/adopt and a hung request can't block re-login
+        // (B-2). New pushes are already blocked by the isAuthenticated() guard. A
+        // pause is NOT used — logout is not a session expiry, and #136 owns wipe.
         console.info('remoteSync: signed out, sync idle')
         generation += 1
+        abortCurrentPush()
       }
     }),
   )
@@ -729,6 +758,7 @@ function cancelAllTimers(): void {
 
 function teardownRemoteSync(): void {
   generation += 1 // discard any in-flight push result
+  abortCurrentPush()
   cancelAllTimers()
   unsubscribeSignal?.()
   unsubscribeSignal = null
@@ -763,6 +793,7 @@ export function pauseRemoteSync(): void {
   console.info('remoteSync: paused (session expired) — re-login required')
   pausedAtom.set(true)
   generation += 1
+  abortCurrentPush()
   cancelAllTimers()
   setStatus('paused')
 }
