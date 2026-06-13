@@ -205,6 +205,13 @@ write, deferred to #135.
 - **Tombstone ↔ body consistency.** The sent `deletedCells` are filtered against
   the pushed document's cell ids, so a PATCH never carries a cell AND a tombstone
   for it (a deletion made in memory before its own save committed).
+- **Owner conflict.** If a load-race merges two different concrete owners (one
+  account's durable queue + another's in-memory edit on a shared device), the
+  sync-state is flagged `ownerConflict` (persisted) and the engine refuses to
+  auto-push under either — #136 device-mode resolves it.
+- **Payload caps.** The push is preflighted against the backend limits (cells 500,
+  title 255, cell content 262144) and a client tombstone cap, failing terminally
+  with a distinct log instead of a silent 422 or a pathological body.
 
 ## Reatom notes
 
