@@ -157,6 +157,33 @@ describe('refresh middleware', () => {
     expect(refreshCallCount).toBe(1)
   })
 
+  test('does not apply stale refresh tokens after the refresh token was cleared', async () => {
+    let refreshToken: string | null = 'current-refresh'
+    setRefreshHandlers({
+      getRefreshToken: () => refreshToken,
+      onTokensRefreshed: onTokensRefreshed as (a: string, r: string) => void,
+      onSessionExpired: onSessionExpired as () => void,
+    })
+    let resolveRefresh!: (r: Response) => void
+    const refreshHeld = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve
+    })
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockReturnValueOnce(refreshHeld)
+
+    const promise = authClient.GET('/auth/me')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    refreshToken = null
+    resolveRefresh(jsonResponse(200, stubTokens))
+
+    const { response } = await promise
+    expect(response.status).toBe(401)
+    expect(onTokensRefreshed).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   test('on 401 + malformed refresh response: calls onSessionExpired', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, {}))

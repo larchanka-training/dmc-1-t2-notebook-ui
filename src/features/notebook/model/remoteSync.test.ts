@@ -728,6 +728,25 @@ describe('remote sync engine', () => {
     expect(remoteSyncStatusAtom()).toBe('failed')
   })
 
+  test('refuses a push whose aggregate payload exceeds the autosync budget', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
+    getSpy.mockResolvedValue(
+      storedDoc(
+        5,
+        Array.from({ length: 5 }, (_, i) =>
+          cell(`00000000-0000-4000-8000-${i.toString().padStart(12, '0')}`, 'x'.repeat(210_000)),
+        ),
+      ),
+    )
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(remoteSyncStatusAtom()).toBe('failed')
+  })
+
   test('refuses a push whose title exceeds the backend limit (review B-3)', async () => {
     getSyncStateSpy.mockResolvedValue({ ...existingRemoteState, dirty: true })
     getSpy.mockResolvedValue({ ...storedDoc(5, [cell(CELL_A)]), title: 'x'.repeat(256) })

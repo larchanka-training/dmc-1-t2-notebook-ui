@@ -29,7 +29,7 @@ import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { isNotebookJSON, type NotebookJSON } from '../persistence/schema'
-import type { NotebookSyncState } from '../persistence/storageAdapter'
+import { MAX_DELETED_CELLS, type NotebookSyncState } from '../persistence/storageAdapter'
 import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
 import { notebookRestoredAtom } from './revision'
 import { hasLocalChangesAtom, localSaveCommittedAtom, reloadFromStorage } from './autosave'
@@ -64,11 +64,7 @@ export const PERSIST_RETRY_MS = 2000
 const MAX_SYNCABLE_CELLS = 500 // `cells` maxItems
 const MAX_TITLE_LEN = 255 // `title` maxLength
 const MAX_CELL_CONTENT_LEN = 262144 // `content` maxLength
-// Hard cap on the tombstone buffer (review veai B-4 / gpt B-2): heavy offline
-// add/delete churn can grow it without bound. Over this, the push fails terminally
-// (preflight) instead of sending a pathological body; a real compaction /
-// full-replace protocol is a #135 follow-up.
-const MAX_DELETED_CELLS = 1000
+const MAX_AUTOSYNC_PAYLOAD_BYTES = 1_000_000
 
 /** Coarse status for the UI (#135 surfaces it; the engine only needs internal state). */
 export const remoteSyncStatusAtom = atom<RemoteSyncStatus>('idle', 'notebook.remoteSync.status')
@@ -209,6 +205,10 @@ function retryAfterMs(error: unknown): number | undefined {
     return error.retryAfter * 1000
   }
   return undefined
+}
+
+function autosyncPayloadBytes(payload: unknown): number {
+  return new Blob([JSON.stringify(payload)]).size
 }
 
 /**
@@ -417,6 +417,28 @@ async function runOnePush(): Promise<void> {
   const sentTombstoneIds = sentState.remoteCreated
     ? sendableTombstones.map((t) => t.id) // PATCH actually sent these
     : sentState.deletedCells.map((t) => t.id) // create: pre-sync tombstones are moot, drop all
+  const requestBody = sentState.remoteCreated
+    ? {
+        title: stored.title,
+        formatVersion: stored.formatVersion,
+        cells: stored.cells,
+        deletedCells: sendableTombstones,
+      }
+    : {
+        id: stored.id,
+        title: stored.title,
+        formatVersion: stored.formatVersion,
+        cells: stored.cells,
+      }
+  const payloadBytes = autosyncPayloadBytes(requestBody)
+  if (payloadBytes > MAX_AUTOSYNC_PAYLOAD_BYTES) {
+    console.warn(
+      `remoteSync: autosync payload is too large (${payloadBytes} bytes > ` +
+        `${MAX_AUTOSYNC_PAYLOAD_BYTES}); not pushing`,
+    )
+    setStatus('failed')
+    return
+  }
 
   const myAbort = new AbortController()
   currentAbort = myAbort
@@ -424,31 +446,10 @@ async function runOnePush(): Promise<void> {
   try {
     let merged: notebookApi.Notebook
     if (sentState.remoteCreated) {
-      merged = await wrap(
-        notebookApi.patch(
-          notebookId,
-          {
-            title: stored.title,
-            formatVersion: stored.formatVersion,
-            cells: stored.cells,
-            deletedCells: sendableTombstones,
-          },
-          myAbort.signal,
-        ),
-      )
+      merged = await wrap(notebookApi.patch(notebookId, requestBody, myAbort.signal))
     } else {
       try {
-        merged = await wrap(
-          notebookApi.create(
-            {
-              id: stored.id,
-              title: stored.title,
-              formatVersion: stored.formatVersion,
-              cells: stored.cells,
-            },
-            myAbort.signal,
-          ),
-        )
+        merged = await wrap(notebookApi.create(requestBody, myAbort.signal))
       } catch (error) {
         // A 409 on create means the notebook already exists under us: the POST
         // committed server-side but its ack was lost, then an edit made the

@@ -86,6 +86,10 @@ async function doRefresh(): Promise<void> {
     throw new Error('malformed_refresh_response')
   }
   const data = raw as { accessToken: string; refreshToken: string }
+  // A sign-out / session-expiry cleanup can clear or rotate the refresh token
+  // while this request is in flight. A stale response must not repopulate a
+  // session the app has already torn down.
+  if (getRefreshToken() !== token) throw new Error('stale_refresh_response')
   onTokensRefreshed(data.accessToken, data.refreshToken)
 }
 

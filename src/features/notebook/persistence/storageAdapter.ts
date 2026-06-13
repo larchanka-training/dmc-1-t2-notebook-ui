@@ -98,6 +98,7 @@ export interface NotebookSyncState {
 // non-UUID id or a negative timestamp out of a PATCH body (which the backend would
 // reject with a deterministic 422, wedging the queue).
 const TOMBSTONE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const MAX_DELETED_CELLS = 1000
 
 function isSyncObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -129,6 +130,7 @@ export function isNotebookSyncState(value: unknown): value is NotebookSyncState 
     (value['ownerId'] === undefined || typeof value['ownerId'] === 'string') &&
     (value['ownerConflict'] === undefined || typeof value['ownerConflict'] === 'boolean') &&
     Array.isArray(value['deletedCells']) &&
+    value['deletedCells'].length <= MAX_DELETED_CELLS &&
     value['deletedCells'].every(isCellTombstoneJSON) &&
     (value['lastSyncedUpdatedAt'] === undefined ||
       (typeof value['lastSyncedUpdatedAt'] === 'number' &&
