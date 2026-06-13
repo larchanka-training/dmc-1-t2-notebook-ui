@@ -29,7 +29,7 @@ import { accessTokenAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { isNotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
-import { cellsAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
 import { hasLocalChangesAtom, localSaveCommittedAtom, reloadFromStorage } from './autosave'
 import { isOnlineAtom, startOnlineTracking } from './online'
 import {
@@ -225,7 +225,15 @@ async function applyServerBaseline(
   if (notebookId === LOCAL_NOTEBOOK_ID) {
     // Re-check after the write: a keystroke during the put must not be clobbered
     // by the wholesale reload (it survives in the editor; autosave reconciles).
-    if (hasLocalChangesAtom()) return 'deferred'
+    if (hasLocalChangesAtom()) {
+      // C-3: storage now holds the server baseline (`json.updatedAt`), but the
+      // editor is newer. Advance the autosave CAS base to the written version so
+      // the pending autosave saves the keystroke cleanly on top — without this the
+      // next `putIfNewer(snapshot, staleBase)` would false-`conflict` against the
+      // version we just wrote. The keystroke is preserved and re-pushed.
+      notebookBaseUpdatedAtAtom.set(json.updatedAt)
+      return 'deferred'
+    }
     await wrap(reloadFromStorage())
   }
   return 'applied'

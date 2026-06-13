@@ -5,7 +5,8 @@ import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
 import { reatomCell } from '../domain/cell'
-import { cellsAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
+import { bumpNotebookRevision, notebookRevisionAtom } from './revision'
 import { localSaveCommittedAtom } from './autosave'
 import { isOnlineAtom } from './online'
 import {
@@ -302,6 +303,32 @@ describe('remote sync engine', () => {
     // server doc, and the change stays dirty for a re-push.
     expect(cellsAtom()[0].code()).toBe('local')
     expect(lastPersistedState(putSyncStateSpy).dirty).toBe(true)
+  })
+
+  test('advances the autosave base when a keystroke lands during adoption (review C-3)', async () => {
+    getSyncStateSpy.mockResolvedValue({ ...existingRemoteState })
+    getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'local', 5)]))
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+    patchSpy.mockResolvedValue(serverResponse([cell(CELL_A, 'server', 10)])) // updatedAt 999
+    notebookBaseUpdatedAtAtom.set(5)
+    // Clean on entry (revision == savedRevision); restore it afterwards so the
+    // bump below does not leak hasLocalChanges into the next test.
+    const cleanRevision = notebookRevisionAtom()
+    // Simulate a keystroke landing during the storage write.
+    putIfNewerSpy.mockImplementation(async () => {
+      bumpNotebookRevision()
+      return { ok: true }
+    })
+
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // Base advanced to the written server version (999) so the pending autosave
+    // saves the keystroke cleanly instead of a false CAS conflict.
+    expect(notebookBaseUpdatedAtAtom()).toBe(999)
+
+    notebookRevisionAtom.set(cleanRevision)
   })
 
   test('does not push while offline and flushes on reconnect', async () => {
