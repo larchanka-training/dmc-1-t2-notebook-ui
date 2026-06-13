@@ -133,10 +133,15 @@ the newer local version re-pushed — local edits are never clobbered.
 survive `clearSession()` (offline-first on a trusted device), so on a **shared**
 device a queue left by account A must not be uploaded under account B. The
 sync-state records an `ownerId` (`userAtom().id` when the dirty change is made),
-and the engine refuses to push a queue whose `ownerId` does not match the current
-user. This closes the auto-flush leak; full per-account **content** isolation (B
-still _sees_ A's local notebook in the editor) is #136's device-mode job, and a
-real per-account server id is #135's (see "Notebook id scoping").
+and the engine auto-pushes **only** a queue it can positively attribute to the
+current user: a concrete `userAtom().id` is required (not just a token), and
+`syncState.ownerId` must equal it. A queue with **no** `ownerId` (made while signed
+out) or a different owner is **never** auto-uploaded — anonymous / previous-user
+content cannot land in whoever signs in next. An edit made while signed in becomes
+attributed and syncs normally; an unattributed edit syncs only once the user edits
+it again while signed in. The explicit import/keep/discard flow for unattributed
+local data, full per-account **content** isolation (B still _sees_ A's local
+notebook in the editor), and a real per-account server id are #135/#136's job.
 
 ## Notebook id scoping (single-notebook MVP) — known limitation
 
