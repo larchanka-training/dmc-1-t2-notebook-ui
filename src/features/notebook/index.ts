@@ -2,6 +2,7 @@ export { NotebookView } from './ui/NotebookView'
 export { NotebookCell } from './ui/NotebookCell'
 export { NotebookToolbar } from './ui/NotebookToolbar'
 export { SaveIndicator } from './ui/SaveIndicator'
+export { SyncIndicator } from './ui/SyncIndicator'
 export { ShortcutsHelp, shortcutsOpenAtom } from './ui/ShortcutsHelp'
 export { RenameNotebookDialog } from './ui/RenameNotebookDialog'
 export { DeleteNotebookDialog } from './ui/DeleteNotebookDialog'
@@ -37,7 +38,12 @@ export {
   saveNow,
 } from './model/autosave'
 export type { SaveStatus } from './model/autosave'
-export { startRemoteSync, pauseRemoteSync, remoteSyncStatusAtom } from './model/remoteSync'
+export {
+  startRemoteSync,
+  pauseRemoteSync,
+  remoteSyncStatusAtom,
+  pausedAtom,
+} from './model/remoteSync'
 export type { RemoteSyncStatus } from './model/remoteSync'
 export {
   runCell,
