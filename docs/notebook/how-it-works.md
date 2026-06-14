@@ -127,9 +127,12 @@ instead of the engine's internal `{"type":"rejected",…}` state object. Detecti
 uses QuickJS's `getPromiseState`, not the lossy `vm.dump`.
 
 Known limitation: a Promise **nested inside** a logged container
-(`console.log([Promise.resolve(1)])`) or returned as the cell result still goes
-through `vm.dump` and can show the raw `{"type":…}` form — recursive
-promise-aware rendering of nested values is deferred.
+(`console.log([Promise.reject(1)])`) or returned as the cell result goes through
+`vm.dump`, which special-cases promise-state only for a top-level handle. A
+nested Promise therefore renders as an opaque `{}` (e.g. `[{}]`) — the raw
+`{"type":…}` state object does **not** leak there; it is just printed without the
+`Promise { … }` form. Recursive promise-aware rendering of nested values is
+deferred.
 
 ### Rich output: `display()`
 

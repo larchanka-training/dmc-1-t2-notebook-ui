@@ -545,6 +545,18 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     expect(onlyStdout(r.items)).toBe('{"a":1}')
   })
 
+  // Documented limitation: formatPromise only catches a TOP-LEVEL promise. A
+  // nested one falls through to vm.dump, which special-cases promise-state only
+  // for top-level handles — so it prints as an opaque `{}`, NOT the raw
+  // `{"type":…}` state object. Pin that so the limitation can't silently worsen.
+  test('a Promise nested in a logged container prints as {} (no raw state leak)', async () => {
+    const text = onlyStdout(
+      (await runFresh('console.log([Promise.reject(new TypeError("x"))])')).items,
+    )
+    expect(text).toBe('[{}]')
+    expect(text).not.toContain('"type":"rejected"')
+  })
+
   // The `result` leak path: a trailing rejected Promise must surface as a
   // structured error (never raw JSON) and carry the "forgot await?" hint.
   function onlyError(items: OutputItem[]): Extract<OutputItem, { type: 'error' }> {
