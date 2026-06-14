@@ -53,6 +53,12 @@ const VM_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 const VM_MAX_STACK_BYTES = 1024 * 1024
 
 /**
+ * Diagnostic attached to the `error` item when a cell's trailing expression
+ * evaluated to a rejected Promise (the most common "forgot to await" mistake).
+ */
+const PROMISE_HINT = 'Promise rejected; did you forget await?'
+
+/**
  * Output accumulator shared by console / display capture and the result
  * push. Tracks the cumulative byte size so the kernel can abort a run that
  * blows past the output budget *while it is still producing output* — the
@@ -64,6 +70,13 @@ interface Sink {
   /** Number of items accepted so far this run (capped by OUTPUT_ITEM_LIMIT). */
   count: number
   budgetHit: boolean
+  /**
+   * Set by the injected `__nbTrailing` marker when this run's trailing
+   * expression evaluated to a Promise. Read on the rejection branch to attach
+   * the "did you forget await?" hint, distinguishing a rejected trailing
+   * Promise from an ordinary throw (both reach `awaited.error`). Reset per run.
+   */
+  trailingWasPromise: boolean
   /**
    * Optional per-run streaming hook. Invoked synchronously the moment an item
    * is accepted into `items`, so the worker can post it to the host BEFORE the
@@ -154,9 +167,10 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   vm.runtime.setMaxStackSize(VM_MAX_STACK_BYTES)
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
-  const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false }
+  const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false, trailingWasPromise: false }
   installConsole(vm, sink)
   installDisplay(vm, sink)
+  installTrailingMarker(vm, sink)
 
   return {
     async run(code, runOptions = {}): Promise<RuntimeResult> {
@@ -188,6 +202,7 @@ async function runOne(
   sink.bytes = 0
   sink.count = 0
   sink.budgetHit = false
+  sink.trailingWasPromise = false
   // Bind the streaming hook for this run so every pushItem also forwards the
   // item to the host immediately. Rebound on each run (undefined clears it),
   // and pushItem only fires while VM code executes — between runs nothing
@@ -239,7 +254,14 @@ async function runOne(
       vm.runtime.executePendingJobs().dispose()
       const awaited = await resolved
       if (awaited.error) {
-        pushAbortAware(sink, abort.cause, () => toErrorItem(vm, awaited.error))
+        // A rejected trailing Promise and an ordinary throw both land here; the
+        // `__nbTrailing` marker tells them apart so the hint targets only the
+        // former. `pushAbortAware` runs makeItem only when cause === 'none'.
+        pushAbortAware(sink, abort.cause, () => {
+          const item = toErrorItem(vm, awaited.error)
+          if (sink.trailingWasPromise) item.hint = PROMISE_HINT
+          return item
+        })
         awaited.error.dispose()
         status = classifyAbort(abort.cause)
       } else {
@@ -342,6 +364,35 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
     return { type: 'image', mime: p.mime, data: p.data }
   }
   return null
+}
+
+/**
+ * Inject `__nbTrailing(v)` — an identity function the transform wraps around a
+ * cell's trailing expression. It records (in `sink.trailingWasPromise`) whether
+ * `v` is a Promise, then returns `v` unchanged so the async IIFE still adopts
+ * (auto-awaits) it. The flag lets the kernel attach the "did you forget await?"
+ * hint when that trailing Promise rejects, without tagging ordinary throws.
+ *
+ * Returning the borrowed argument handle is safe here (quickjs-emscripten copies
+ * the return value before freeing arg handles — verified). `getPromiseState`
+ * allocates `value`/`error` handles for a real Promise that must be disposed; a
+ * non-Promise reports `notAPromise` and its `value` is the same borrowed handle,
+ * which must NOT be disposed.
+ */
+function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
+  const fn = vm.newFunction('__nbTrailing', (handle) => {
+    try {
+      const state = vm.getPromiseState(handle)
+      if (!(state.type === 'fulfilled' && state.notAPromise)) sink.trailingWasPromise = true
+      if (state.type === 'fulfilled' && !state.notAPromise) state.value.dispose()
+      else if (state.type === 'rejected') state.error.dispose()
+    } catch {
+      // Detection is best-effort; never let it break the run.
+    }
+    return handle
+  })
+  vm.setProp(vm.global, '__nbTrailing', fn)
+  fn.dispose()
 }
 
 /** Inject a minimal console object that pushes into the host-side `items`. */

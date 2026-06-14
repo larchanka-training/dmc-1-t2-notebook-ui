@@ -544,4 +544,50 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     const r = await runFresh('console.log({ a: 1 })')
     expect(onlyStdout(r.items)).toBe('{"a":1}')
   })
+
+  // The `result` leak path: a trailing rejected Promise must surface as a
+  // structured error (never raw JSON) and carry the "forgot await?" hint.
+  function onlyError(items: OutputItem[]): Extract<OutputItem, { type: 'error' }> {
+    const err = items.find((it) => it.type === 'error')
+    expect(err).toBeDefined()
+    return err as Extract<OutputItem, { type: 'error' }>
+  }
+
+  test('trailing rejected Promise → structured error with hint, not raw JSON', async () => {
+    const r = await runFresh('Promise.reject(new TypeError("not a function"))')
+    expect(r.status).toBe('error')
+    const err = onlyError(r.items)
+    expect(err.name).toBe('TypeError')
+    expect(err.message).toBe('not a function')
+    expect(err.hint).toBe('Promise rejected; did you forget await?')
+    expect(r.items.some((it) => it.type === 'result')).toBe(false)
+    expect(JSON.stringify(r.items)).not.toContain('"type":"rejected"')
+  })
+
+  test('trailing rejected Promise from an async function carries the hint', async () => {
+    const r = await runFresh('async function f(n){ return n.nope() }\nf(5)')
+    expect(r.status).toBe('error')
+    expect(onlyError(r.items).hint).toBe('Promise rejected; did you forget await?')
+  })
+
+  test('an ordinary thrown error gets NO promise hint (unchanged)', async () => {
+    const r = await runFresh('throw new TypeError("not a function")')
+    expect(r.status).toBe('error')
+    const err = onlyError(r.items)
+    expect(err.message).toBe('not a function')
+    expect(err.hint).toBeUndefined()
+  })
+
+  test('a trailing fulfilled Promise still resolves to its value (unchanged)', async () => {
+    const r = await runFresh('Promise.resolve(42)')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 42 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
+
+  test('a trailing non-Promise value is a plain result, no hint', async () => {
+    const r = await runFresh('1 + 1')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
 })

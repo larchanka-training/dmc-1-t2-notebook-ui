@@ -78,9 +78,9 @@ describe('transformCellCode — no prelude / re-run safety', () => {
 })
 
 describe('transformCellCode — trailing expression statement', () => {
-  test('rewrites trailing ExpressionStatement into a return', () => {
+  test('rewrites trailing ExpressionStatement into a return (wrapped in __nbTrailing)', () => {
     const out = transformCellCode('1 + 2').code
-    expect(out).toMatch(/return\s+1 \+ 2/)
+    expect(out).toMatch(/return\s+__nbTrailing\(1 \+ 2\)/)
   })
 
   test('does not add return if the last statement is not an expression', () => {
@@ -156,6 +156,6 @@ describe('transformCellCode — function hoisting', () => {
 
   test('a lone string literal is still treated as the trailing result, not a directive', () => {
     const out = transformCellCode('"hello"').code
-    expect(out).toMatch(/return\s+"hello"/)
+    expect(out).toMatch(/return\s+__nbTrailing\("hello"\)/)
   })
 })
