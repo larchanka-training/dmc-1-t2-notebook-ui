@@ -116,6 +116,12 @@ mistake, rendered as a muted line near the error rather than folded into
 `message`. Today it carries `"Promise rejected; did you forget await?"` when a
 cell's trailing expression evaluates to a rejected Promise.
 
+A Promise that reaches output (e.g. `console.log(somePromise)`) renders
+Node-style — `Promise { <pending> }`, `Promise { 42 }`,
+`Promise { <rejected> TypeError: … }` — never the engine's internal
+`{"type":"rejected",…}` state object. Detection uses QuickJS's
+`getPromiseState`, not the lossy `vm.dump`.
+
 ### Rich output: `display()`
 
 Inside the sandbox the user calls an explicit Jupyter-style function:

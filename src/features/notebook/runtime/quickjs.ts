@@ -375,7 +375,10 @@ function installConsole(vm: QuickJSContext, sink: Sink): void {
  * Best-effort: pulls name/message/stack if shaped like an Error,
  * otherwise serializes the dumped value into the message.
  */
-function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem {
+function toErrorItem(
+  vm: QuickJSContext,
+  errorHandle: QuickJSHandle,
+): Extract<OutputItem, { type: 'error' }> {
   let dumped: unknown
   try {
     dumped = vm.dump(errorHandle) as unknown
@@ -417,10 +420,56 @@ function safeToString(value: unknown): string {
 }
 
 /**
+ * Render a QuickJS Promise handle Node-style (`Promise { <pending> }`,
+ * `Promise { 42 }`, `Promise { <rejected> TypeError: ... }`), or return null if
+ * the handle is not a Promise. Uses `getPromiseState` — the precise primitive —
+ * instead of `vm.dump`, which leaks QuickJS-emscripten's internal state object
+ * (`{"type":"rejected",...}`) into output.
+ *
+ * Disposal contract (verified empirically against quickjs-emscripten 0.32):
+ *   - non-Promise → `{ type:'fulfilled', notAPromise:true, value }` where
+ *     `value` IS the borrowed input handle (`eq` true) — must NOT be disposed.
+ *   - fulfilled Promise → `value` is a fresh dup — dispose it.
+ *   - rejected Promise → `error` is a fresh dup — dispose it.
+ *   - pending Promise → nothing to dispose; `error` is a throwing getter, untouched.
+ */
+function formatPromise(vm: QuickJSContext, handle: QuickJSHandle): string | null {
+  let state: ReturnType<QuickJSContext['getPromiseState']>
+  try {
+    state = vm.getPromiseState(handle)
+  } catch {
+    return null
+  }
+  if (state.type === 'fulfilled' && state.notAPromise) return null
+  switch (state.type) {
+    case 'pending':
+      return 'Promise { <pending> }'
+    case 'fulfilled':
+      try {
+        return `Promise { ${stringifyArg(vm, state.value)} }`
+      } finally {
+        state.value.dispose()
+      }
+    case 'rejected':
+      try {
+        const err = toErrorItem(vm, state.error)
+        return `Promise { <rejected> ${err.name}: ${err.message} }`
+      } finally {
+        state.error.dispose()
+      }
+  }
+}
+
+/**
  * Stringify a single console.log argument. The argument handle is borrowed
  * from quickjs-emscripten; do NOT dispose it here.
  */
 function stringifyArg(vm: QuickJSContext, handle: QuickJSHandle): string {
+  // Promise-aware FIRST: a bare `vm.dump` of a Promise leaks the engine's
+  // internal `{"type":"rejected"|"fulfilled"|"pending",...}` state object.
+  const asPromise = formatPromise(vm, handle)
+  if (asPromise !== null) return asPromise
+
   let dumped: unknown
   try {
     dumped = vm.dump(handle) as unknown

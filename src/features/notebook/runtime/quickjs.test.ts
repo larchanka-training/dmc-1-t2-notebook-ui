@@ -507,3 +507,41 @@ describe('kernel.run — incremental output streaming (onItem)', () => {
     }
   }, 10_000)
 })
+
+describe('kernel.run — promise output (TARDIS-65)', () => {
+  // Regression: a Promise passed to console.log must NOT leak QuickJS's
+  // internal promise-state object (`{"type":"rejected",...}`) into stdout.
+  // It renders Node-style: `Promise { ... }`. This is the `stdout` leak path.
+  function onlyStdout(items: OutputItem[]): string {
+    const out = items.filter((it) => it.type === 'stdout')
+    expect(out).toHaveLength(1)
+    return (out[0] as Extract<OutputItem, { type: 'stdout' }>).text
+  }
+
+  test('console.log(rejected) renders Promise { <rejected> … }, not raw JSON', async () => {
+    const r = await runFresh('console.log(Promise.reject(new TypeError("not a function")))')
+    expect(r.status).toBe('done')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { <rejected> TypeError: not a function }')
+    expect(text).not.toContain('"type":"rejected"')
+  })
+
+  test('console.log(fulfilled) renders Promise { value }, not raw JSON', async () => {
+    const r = await runFresh('console.log(Promise.resolve(42))')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { 42 }')
+    expect(text).not.toContain('"type":"fulfilled"')
+  })
+
+  test('console.log(pending) renders Promise { <pending> }, not raw JSON', async () => {
+    const r = await runFresh('console.log(new Promise(() => {}))')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { <pending> }')
+    expect(text).not.toContain('"type":"pending"')
+  })
+
+  test('a non-Promise object is unaffected by promise-aware stringify', async () => {
+    const r = await runFresh('console.log({ a: 1 })')
+    expect(onlyStdout(r.items)).toBe('{"a":1}')
+  })
+})
