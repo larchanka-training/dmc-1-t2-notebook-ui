@@ -95,6 +95,10 @@ export function outputsDigest(outputs: OutputItem[]): string {
       case 'stderr':
         return `[stderr] ${item.text}`
       case 'error':
+        // `error.hint` (e.g. "Promise rejected; did you forget await?") is a
+        // UI-only affordance and is intentionally omitted from the LLM digest —
+        // name + message carry the error. Surfacing it to the model is a
+        // deferred follow-up, not part of TARDIS-65.
         return `[error] ${item.name}: ${item.message}`
       case 'result':
         return `[result] ${serializedValueLabel(item.value)}`
