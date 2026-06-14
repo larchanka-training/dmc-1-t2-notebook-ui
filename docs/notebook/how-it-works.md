@@ -2,8 +2,10 @@
 
 ## Overview
 
-Each code cell runs in an **isolated QuickJS VM** that lives inside a
-dedicated **Web Worker**. Two layers of isolation, one path of data:
+A notebook's code cells run inside a **persistent QuickJS VM** that lives in a
+dedicated **Web Worker** — one VM per worker, shared across all of that
+notebook's cells (Jupyter-style; see [Shared scope](#shared-scope-jupyter-style)).
+Two layers of isolation **from the page**, one path of data:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
