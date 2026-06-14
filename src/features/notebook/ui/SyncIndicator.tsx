@@ -41,9 +41,20 @@ export const SyncIndicator = reatomComponent(() => {
     )
   }
 
-  // 'error' (transient, a retry is armed) and 'failed' (terminal) both read as a
-  // sync problem to the user; the engine owns the retry policy difference.
-  if (status === 'error' || status === 'failed') {
+  // Distinguish transient from terminal (CL-13): 'error' has a retry armed, so it
+  // reads as a soft "retrying" hint (muted), while 'failed' is terminal — no
+  // auto-retry — and reads as a hard error (destructive). Collapsing them hid
+  // "stuck" behind "will recover".
+  if (status === 'error') {
+    return (
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <CircleAlert className="size-3.5" />
+        Sync issue — retrying…
+      </span>
+    )
+  }
+
+  if (status === 'failed') {
     return (
       <span className="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert className="size-3.5" />

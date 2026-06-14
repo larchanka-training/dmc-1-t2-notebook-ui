@@ -43,12 +43,17 @@ describe('SyncIndicator', () => {
     expect(screen.getByText(/offline/i)).toBeInTheDocument()
   })
 
-  test('shows a sync failure for transient error and terminal failed alike', () => {
+  test('distinguishes a transient error (retrying) from a terminal failure (CL-13)', () => {
+    // Transient 'error' — a retry is armed — reads as a soft retrying hint, NOT the
+    // hard "Sync failed".
     renderWith('error')
-    expect(screen.getByText(/sync failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/retrying/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^sync failed$/i)).toBeNull()
     cleanup()
+    // Terminal 'failed' — no auto-retry — reads as the hard error.
     renderWith('failed')
     expect(screen.getByText(/sync failed/i)).toBeInTheDocument()
+    expect(screen.queryByText(/retrying/i)).toBeNull()
   })
 
   test('prioritises the re-login prompt when paused, over any status', () => {
