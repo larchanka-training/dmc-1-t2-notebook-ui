@@ -624,3 +624,26 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     expect(err.hint).toBe(PROMISE_HINT)
   })
 })
+
+describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
+  test('user code cannot reassign the marker away (hint survives the session)', async () => {
+    const kernel = await createKernel()
+    try {
+      // Reassigning the internal marker is silently ignored (non-writable, sloppy
+      // mode). The persistent VM must keep detecting trailing promises afterward.
+      const clobber = await kernel.run('globalThis.__nbTrailing = 123')
+      expect(clobber.status).toBe('done')
+      const r = await kernel.run('Promise.reject(new TypeError("x"))')
+      expect(r.status).toBe('error')
+      const err = r.items.find((it) => it.type === 'error')
+      expect(err?.type === 'error' && err.hint).toBe(PROMISE_HINT)
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('the marker is not enumerable on globalThis', async () => {
+    const r = await runFresh('console.log(Object.keys(globalThis).includes("__nbTrailing"))')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'false' })
+  })
+})

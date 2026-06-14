@@ -376,13 +376,21 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * Returning the borrowed argument handle is safe here (quickjs-emscripten copies
  * the return value before freeing arg handles — verified). Promise detection and
  * its handle-disposal contract live in `isPromise`/`inspectPromise`.
+ *
+ * Defined non-writable / non-configurable / non-enumerable: user declarations
+ * publish to the same `globalThis` (and the VM is persistent), so a plain
+ * writable prop could be reassigned or deleted from a cell and silently break
+ * trailing detection for the rest of the session. A value descriptor with
+ * `configurable: false` is read-only in QuickJS (verified), so `globalThis.<m>
+ * = …` is ignored in sloppy mode; non-enumerable keeps it out of the user's
+ * `Object.keys(globalThis)`.
  */
 function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
   const fn = vm.newFunction(TRAILING_MARKER, (handle) => {
     if (isPromise(vm, handle)) sink.trailingWasPromise = true
     return handle
   })
-  vm.setProp(vm.global, TRAILING_MARKER, fn)
+  vm.defineProp(vm.global, TRAILING_MARKER, { value: fn, configurable: false, enumerable: false })
   fn.dispose()
 }
 
