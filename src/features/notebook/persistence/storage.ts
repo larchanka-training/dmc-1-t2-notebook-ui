@@ -57,6 +57,30 @@ function getDB(): Promise<IDBPDatabase<NotebookDB>> {
           db.createObjectStore(SYNC_STORE, { keyPath: 'notebookId' })
         }
       },
+      // This tab is holding an OLD-version connection open while ANOTHER tab tries
+      // to upgrade (e.g. a new build adding a store). Without closing, the other
+      // tab's `openDB` hangs (its `blocked` fires) until this tab is closed. Close
+      // our handle so the upgrade can proceed and drop the cached promise so the
+      // next call here transparently reopens at the new version. Location: #135
+      // follow-up (cross-tab #134 v2 upgrade). `db.close()` does NOT fire
+      // `terminated`, so clearing `dbPromise` here is the only reset needed.
+      blocking(_currentVersion, _blockedVersion, event) {
+        console.warn('notebook storage: closing the DB so another tab can upgrade it')
+        dbPromise = undefined
+        ;(event.target as IDBDatabase | null)?.close()
+      },
+      // The reverse: ANOTHER tab is holding an old connection open, blocking THIS
+      // tab's upgrade. Surface it instead of hanging silently; the open stays
+      // pending until the other tab yields (its `blocking` closes it).
+      blocked() {
+        console.warn('notebook storage: DB upgrade is blocked by another open tab')
+      },
+      // The browser force-closed the connection (e.g. storage pressure). Drop the
+      // cached handle so the next call reopens rather than reusing a dead one.
+      terminated() {
+        console.warn('notebook storage: DB connection was terminated by the browser')
+        dbPromise = undefined
+      },
     }).catch((err) => {
       // Don't cache a rejected open (blocked DB, private mode): otherwise every
       // later call reuses the failed promise and a "Save failed — retry" can
