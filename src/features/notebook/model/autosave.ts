@@ -82,6 +82,11 @@ function snapshotAfter(minUpdatedAt: number): ReturnType<typeof notebookSnapshot
 
 let saveInFlight = false
 let saveAgainAfterCurrent = false
+// The currently running save loop, or null when idle. Exposed via `drainAutosave`
+// so the slot controller (#135) can await an in-flight write before switching the
+// active notebook id — otherwise the flip could retarget a mid-flight write to the
+// new id.
+let currentSave: Promise<void> | null = null
 
 async function runConditionalSave(): Promise<void> {
   const base = notebookBaseUpdatedAtAtom()
@@ -111,9 +116,21 @@ export async function saveNow(): Promise<void> {
   }
   if (saveInFlight) {
     saveAgainAfterCurrent = true
+    // Await the running loop instead of resolving early, so a caller that needs
+    // the write to land (e.g. `drainAutosave` on a slot switch) actually waits.
+    if (currentSave) await currentSave
     return
   }
 
+  currentSave = runSaveLoop()
+  try {
+    await currentSave
+  } finally {
+    currentSave = null
+  }
+}
+
+async function runSaveLoop(): Promise<void> {
   saveInFlight = true
   saveStatusAtom.set('saving')
   try {
@@ -218,6 +235,23 @@ export function markBootRestored(): void {
  */
 let channel: ReturnType<typeof openCrossTabChannel> | null = null
 
+// Set by the active autosave subscription: synchronously promotes a pending
+// debounced save so it runs now instead of 500 ms later. `drainAutosave` calls it
+// before a slot switch; null while autosave is not running.
+let flushPendingSave: (() => void) | null = null
+
+/**
+ * Flush a pending debounced save and await any in-flight write. The slot
+ * controller (#135) awaits this BEFORE flipping `activeNotebookIdAtom`, so the
+ * previous notebook's edits are persisted under its own id and no write is still
+ * running across the id change. Safe to call when autosave is stopped (no pending
+ * flush, no in-flight save) — it then resolves immediately.
+ */
+export async function drainAutosave(): Promise<void> {
+  flushPendingSave?.()
+  if (currentSave) await currentSave
+}
+
 async function handleExternalSave(updatedAt: number): Promise<void> {
   if (storageCompatibilityAtom() === 'newer-format') {
     saveStatusAtom.set('outdated')
@@ -310,14 +344,27 @@ export function startAutosave(): () => void {
   )
   const unsubscribeFocusChecks = subscribeToFocusChecks()
 
-  // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
-  // but does NOT cancel a save already in flight — that storage write runs to
-  // completion by design (a sub-ms IndexedDB op). In-flight cancellation lives in
-  // #134's remoteSync layer instead (a `generation` guard that discards a stale
-  // push's result; the notebook facade takes no AbortSignal yet), where the
-  // network push has a window long enough to matter.
+  // Expose a synchronous flush of the pending debounce so a slot switch can force
+  // the last edit to persist now (via `drainAutosave`) rather than lose it to the
+  // teardown's `clearTimeout`. No pending timer / newer-format / clean editor are
+  // all no-ops, mirroring the subscription's own guards.
+  flushPendingSave = () => {
+    if (timer === null) return
+    clearTimeout(timer)
+    timer = null
+    if (storageCompatibilityAtom() === 'newer-format') return
+    if (!hasLocalChangesAtom()) return
+    void saveNow()
+  }
+
+  // Teardown drops the debounce timer, subscriptions and the cross-tab channel.
+  // It no longer silently discards a pending edit: a slot switch first calls
+  // `drainAutosave` (flush + await) so the write lands under the old id. A bare
+  // teardown without a drain still cancels the timer (the unflushed edit stays in
+  // the editor and re-arms on the next change), matching the pre-#135 behaviour.
   return () => {
     if (timer !== null) clearTimeout(timer)
+    flushPendingSave = null
     unsubscribe()
     unsubscribeFocusChecks()
     channel?.close()

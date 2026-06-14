@@ -26,6 +26,7 @@ export {
 } from './model/notebook'
 export {
   startAutosave,
+  drainAutosave,
   markBootRestored,
   saveStatusAtom,
   lastSavedAtAtom,
@@ -68,6 +69,7 @@ export {
 } from './model/notebookSettings'
 export type { RenameTarget } from './model/notebookSettings'
 export { notebookListResource, createNotebookAction } from './model/notebookList'
+export { openNotebookInSlot, startSlot, stopSlot } from './model/slot'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'
 export {
   searchOpenAtom,
