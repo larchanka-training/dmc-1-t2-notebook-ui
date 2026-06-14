@@ -21,6 +21,7 @@ export {
   storageCompatibilityAtom,
   restoreNotebook,
   LOCAL_NOTEBOOK_ID,
+  activeNotebookIdAtom,
   SEED_CODE,
 } from './model/notebook'
 export {
