@@ -59,6 +59,16 @@ const VM_MAX_STACK_BYTES = 1024 * 1024
 export const PROMISE_HINT = 'Promise rejected; did you forget await?'
 
 /**
+ * Depth cap for the recursive promise-rejection-reason formatter
+ * (`formatPromise` → `toErrorItem` → `formatPromise`). `Promise.reject(x)` does
+ * not unwrap `x`, so a self-rejected or cyclic promise would otherwise recurse
+ * until the host worker stack overflows — which both breaks the "run never
+ * throws" invariant and can abort the VM on teardown. Past this many nested
+ * rejected promises the reason renders as a bounded `[nested promise]` marker.
+ */
+const MAX_PROMISE_DEPTH = 8
+
+/**
  * Output accumulator shared by console / display capture and the result
  * push. Tracks the cumulative byte size so the kernel can abort a run that
  * blows past the output budget *while it is still producing output* — the
@@ -428,14 +438,18 @@ function installConsole(vm: QuickJSContext, sink: Sink): void {
 function toErrorItem(
   vm: QuickJSContext,
   errorHandle: QuickJSHandle,
+  depth = 0,
 ): Extract<OutputItem, { type: 'error' }> {
   // A rejection reason can itself be a Promise — `Promise.reject(x)` does NOT
   // unwrap x. `vm.dump` on a Promise both LEAKS its internal state object
   // (`{"type":"rejected",...}`) into the message AND disposes the handle, which
   // the caller then disposes again → double-free (TARDIS-65 H-1). Render it
   // promise-aware first; `formatPromise` never dumps or disposes `errorHandle`.
-  const asPromise = formatPromise(vm, errorHandle)
+  // `depth` is threaded so the formatPromise↔toErrorItem recursion stays bounded.
+  const asPromise = formatPromise(vm, errorHandle, depth)
   if (asPromise !== null) {
+    // `name` is intentionally generic here: a Promise reason has no Error class;
+    // the rendered `message` (`Promise { … }`) carries the actual information.
     return { type: 'error', name: 'Error', message: asPromise }
   }
   let dumped: unknown
@@ -546,7 +560,7 @@ function isPromise(vm: QuickJSContext, handle: QuickJSHandle): boolean {
  * never `vm.dump`, which leaks the engine's internal state object and disposes
  * the handle.
  */
-function formatPromise(vm: QuickJSContext, handle: QuickJSHandle): string | null {
+function formatPromise(vm: QuickJSContext, handle: QuickJSHandle, depth = 0): string | null {
   // Cheap gate: only objects can be Promises. Skips the `getPromiseState`
   // round-trip (a WASM call + allocation) for primitives on the hot console path.
   if (vm.typeof(handle) !== 'object') return null
@@ -555,10 +569,15 @@ function formatPromise(vm: QuickJSContext, handle: QuickJSHandle): string | null
     onPending: () => 'Promise { <pending> }',
     onFulfilled: (value) => `Promise { ${stringifyArg(vm, value)} }`,
     onRejected: (error) => {
-      // The reason is usually an Error, but `Promise.reject(x)` does not unwrap
-      // x — it can be a Promise (rendered promise-aware by toErrorItem, which
-      // never dumps/disposes a Promise reason) or any other value.
-      const err = toErrorItem(vm, error)
+      // Bound the formatPromise → toErrorItem → formatPromise recursion: a
+      // self-rejected or cyclic promise (`Promise.reject(x)` does not unwrap x)
+      // would otherwise overflow the host worker stack. Past the cap, stop and
+      // render a bounded marker instead of recursing into the reason.
+      if (depth >= MAX_PROMISE_DEPTH) return 'Promise { <rejected> [nested promise] }'
+      // The reason is usually an Error, but it can be a Promise (rendered
+      // promise-aware by toErrorItem, which never dumps/disposes a Promise
+      // reason) or any other value.
+      const err = toErrorItem(vm, error, depth + 1)
       return `Promise { <rejected> ${err.name}: ${err.message} }`
     },
   })

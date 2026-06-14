@@ -623,6 +623,36 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     expect(err.name).not.toBe('QuickJSUseAfterFree')
     expect(err.hint).toBe(PROMISE_HINT)
   })
+
+  // A self-rejected / cyclic promise must stay bounded: the formatPromise ↔
+  // toErrorItem recursion is depth-capped, so there is no host stack overflow,
+  // no RangeError rejecting the run, and no VM teardown abort. `run` never throws.
+  const SELF_REJECTED = 'let rej; const p = new Promise((_, r) => { rej = r }); rej(p)'
+
+  test('a self-rejected trailing promise renders bounded, not a stack overflow', async () => {
+    const r = await runFresh(`${SELF_REJECTED}; p`)
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    const err = onlyError(r.items)
+    expect(err.message).toContain('[nested promise]')
+    expect(err.message).not.toContain('Maximum call stack')
+  })
+
+  test('console.log of a self-rejected promise renders bounded, no crash', async () => {
+    const r = await runFresh(`${SELF_REJECTED}; console.log(p)`)
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyStdout(r.items)).toContain('[nested promise]')
+  })
+
+  test('a deep Promise.reject chain stays bounded', async () => {
+    const r = await runFresh(
+      'let p = Promise.reject(0); for (let i = 0; i < 4000; i++) { p = Promise.reject(p) } p',
+    )
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyError(r.items).message).toContain('[nested promise]')
+  })
 })
 
 describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
