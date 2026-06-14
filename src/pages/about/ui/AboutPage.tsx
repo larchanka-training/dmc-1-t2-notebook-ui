@@ -2,10 +2,11 @@ import { KeyRound, Play, Save, Sparkles, Type } from 'lucide-react'
 
 // Real, shipped features only. AI generation is surfaced separately as
 // "In progress" (epic 07). Autosave persists locally to IndexedDB; for a
-// signed-in user it also pushes to the server in the background (#134). Full
-// cross-device sync (server bootstrap + status UI, #135) is not live yet, so the
-// cards below stay conservative and do not promise "see your notebooks on another
-// device".
+// signed-in user it also pushes to the server in the background (#134), the
+// notebook list loads from the server on sign-in, and a sync-status indicator
+// shows progress (#135). The copy stays honest about the async nature of sync
+// (offline / expired token leave edits queued locally) and does not promise
+// instant or guaranteed cross-device delivery.
 const FEATURES = [
   {
     icon: Play,
@@ -21,9 +22,9 @@ const FEATURES = [
   },
   {
     icon: Save,
-    title: 'Autosaved locally',
+    title: 'Autosaved & synced',
     description:
-      'Notebooks autosave to your browser (IndexedDB) as you type. Reopen the app and pick up exactly where you left off.',
+      'Notebooks autosave to your browser (IndexedDB) as you type. Once you sign in, edits also sync to the server in the background and your notebooks load back on sign-in — a status indicator shows where each save is.',
   },
   {
     icon: KeyRound,
