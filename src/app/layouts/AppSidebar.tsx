@@ -27,6 +27,7 @@ import {
   createNotebookAction,
   notebookListResource,
   notebookTitleAtom,
+  openNotebookInSlot,
   renameTargetAtom,
   activeNotebookIdAtom,
   shortcutsOpenAtom,
@@ -334,7 +335,18 @@ const NotebooksGroup = reatomComponent(() => {
             ) : null}
             {filtered.map((nb) => (
               <SidebarMenuItem key={nb.id} className="group/nb">
-                <SidebarMenuButton className="pr-8">
+                {/* Open-into-slot (#135): clicking a backend row loads it into the
+                    single editor slot (lazy GET /notebooks/{id}) and navigates to
+                    the notebook route so the editor is on screen. Once open it
+                    becomes the active id and is shown as the synthetic current-row
+                    above (filtered out of this list), so no URL state per id. */}
+                <SidebarMenuButton
+                  className="pr-8"
+                  onClick={wrap(() => {
+                    void openNotebookInSlot(nb.id)
+                    urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+                  })}
+                >
                   <span className="truncate">{nb.title}</span>
                 </SidebarMenuButton>
                 <NotebookRowMenu
