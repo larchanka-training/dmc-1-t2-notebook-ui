@@ -31,7 +31,12 @@ export type OutputItem =
   | { type: 'stdout'; text: string }
   | { type: 'stderr'; text: string }
   | { type: 'result'; value: SerializedValue }
-  | { type: 'error'; name: string; message: string; stack?: string }
+  /**
+   * A runtime error. `hint` carries an optional human-readable diagnostic for a
+   * specific class of mistake (set, e.g., when the error originates from a
+   * rejected Promise) — rendered near the error, never folded into `message`.
+   */
+  | { type: 'error'; name: string; message: string; stack?: string; hint?: string }
   /** HTML to render inside a sandboxed iframe. Provided by user code via `display({ type: 'html', value })`. */
   | { type: 'html'; html: string }
   /** Base64-encoded image. MIME like `image/png` / `image/svg+xml`. */

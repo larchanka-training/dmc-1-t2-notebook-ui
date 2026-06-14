@@ -103,13 +103,18 @@ type OutputItem =
   | { type: 'stdout'; text: string }
   | { type: 'stderr'; text: string } // also: console.warn → '[warn] …'
   | { type: 'result'; value: SerializedValue }
-  | { type: 'error'; name: string; message: string; stack?: string }
+  | { type: 'error'; name: string; message: string; stack?: string; hint?: string }
   | { type: 'html'; html: string } // → sandboxed iframe
   | { type: 'image'; mime: string; data: string } // base64 → <img>
 ```
 
 `SerializedValue` is recursion-safe up to depth 5; anything deeper, or a
 cyclic reference, becomes `{ kind: 'truncated', placeholder: '[Object]' }`.
+
+`error.hint` is an optional human-readable diagnostic for a specific class of
+mistake, rendered as a muted line near the error rather than folded into
+`message`. Today it carries `"Promise rejected; did you forget await?"` when a
+cell's trailing expression evaluates to a rejected Promise.
 
 ### Rich output: `display()`
 

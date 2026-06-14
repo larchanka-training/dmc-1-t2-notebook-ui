@@ -47,3 +47,30 @@ describe('OutputView — order preservation', () => {
     expect(container.firstChild).toBeNull()
   })
 })
+
+describe('OutputView — error hint', () => {
+  test('renders the diagnostic hint near the error when present', () => {
+    const items: OutputItem[] = [
+      {
+        type: 'error',
+        name: 'TypeError',
+        message: 'not a function',
+        hint: 'Promise rejected; did you forget await?',
+      },
+    ]
+    const { container } = render(<OutputView items={items} />)
+    const text = container.textContent ?? ''
+    expect(text).toContain('not a function')
+    expect(text).toContain('Promise rejected; did you forget await?')
+    // The hint follows the message, not the other way round.
+    expect(text.indexOf('not a function')).toBeLessThan(
+      text.indexOf('Promise rejected; did you forget await?'),
+    )
+  })
+
+  test('renders no hint node when the error has none', () => {
+    const items: OutputItem[] = [{ type: 'error', name: 'Error', message: 'boom' }]
+    const { container } = render(<OutputView items={items} />)
+    expect(container.textContent).not.toContain('did you forget await')
+  })
+})

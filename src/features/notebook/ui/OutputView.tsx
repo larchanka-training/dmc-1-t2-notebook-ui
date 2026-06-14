@@ -96,6 +96,7 @@ function SingleItem({ item }: { item: OutputItem }) {
         <div className="px-4 py-3 font-mono text-sm whitespace-pre-wrap bg-[color-mix(in_oklch,var(--destructive)_9%,var(--card))] text-destructive">
           <span className="font-semibold">{item.name}</span>: {item.message}
           {item.stack ? `\n${item.stack}` : null}
+          {item.hint ? <div className="mt-2 text-muted-foreground">{item.hint}</div> : null}
         </div>
       )
     default:
