@@ -653,6 +653,36 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     assertNoLeakNoCrash(r.items)
     expect(onlyError(r.items).message).toContain('[nested promise]')
   })
+
+  test('console.warn / console.error render promises with the stderr prefix, no raw JSON', async () => {
+    const warn = await runFresh('console.warn(Promise.reject(new TypeError("x")))')
+    expect(warn.items).toContainEqual({
+      type: 'stderr',
+      text: '[warn] Promise { <rejected> TypeError: x }',
+    })
+    const error = await runFresh('console.error(Promise.reject(new TypeError("x")))')
+    expect(error.items).toContainEqual({
+      type: 'stderr',
+      text: '[error] Promise { <rejected> TypeError: x }',
+    })
+    expect(JSON.stringify([warn.items, error.items])).not.toContain('"type":"rejected"')
+  })
+
+  test('a primitive rejection reason renders as `Error: <value>` (pinned contract)', async () => {
+    // Promise.reject(x) accepts any value as the reason; a non-Error reason is
+    // surfaced through the generic `Error:` prefix (deliberate — not Node-exact).
+    expect(onlyStdout((await runFresh('console.log(Promise.reject(2))')).items)).toBe(
+      'Promise { <rejected> Error: 2 }',
+    )
+    expect(onlyStdout((await runFresh('console.log(Promise.reject("oops"))')).items)).toBe(
+      'Promise { <rejected> Error: oops }',
+    )
+  })
+
+  test('a pending rejection reason renders Promise { <pending> }', async () => {
+    const r = await runFresh('console.log(Promise.reject(new Promise(() => {})))')
+    expect(onlyStdout(r.items)).toBe('Promise { <rejected> Error: Promise { <pending> } }')
+  })
 })
 
 describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
@@ -675,6 +705,17 @@ describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
   test('the marker is not enumerable on globalThis', async () => {
     const r = await runFresh('console.log(Object.keys(globalThis).includes("__nbTrailing"))')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'false' })
+  })
+
+  test('in strict mode, reassigning the marker throws a contained TypeError', async () => {
+    // The sloppy-mode case silently ignores the write; a strict-mode cell (the
+    // directive is preserved by the transform) throws read-only, surfaced as an
+    // ordinary error item — the marker still survives for later runs.
+    const r = await runFresh('"use strict"; globalThis.__nbTrailing = 1')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('TypeError')
+    expect(err?.type === 'error' && err.message).toContain('read-only')
   })
 
   test('a stale hint does not leak to a later plain throw on the same kernel', async () => {
