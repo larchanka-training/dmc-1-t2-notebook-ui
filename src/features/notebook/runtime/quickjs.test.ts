@@ -646,4 +646,22 @@ describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
     const r = await runFresh('console.log(Object.keys(globalThis).includes("__nbTrailing"))')
     expect(r.items).toContainEqual({ type: 'stdout', text: 'false' })
   })
+
+  test('a stale hint does not leak to a later plain throw on the same kernel', async () => {
+    // trailingWasPromise is a per-run flag reset at the top of runOne. On the
+    // persistent VM (one kernel per worker) a hint from a trailing rejected
+    // promise must not survive into the next run's ordinary throw.
+    const kernel = await createKernel()
+    try {
+      const first = await kernel.run('Promise.reject(new TypeError("x"))')
+      const firstErr = first.items.find((it) => it.type === 'error')
+      expect(firstErr?.type === 'error' && firstErr.hint).toBe(PROMISE_HINT)
+
+      const second = await kernel.run('throw new Error("plain")')
+      const secondErr = second.items.find((it) => it.type === 'error')
+      expect(secondErr?.type === 'error' && secondErr.hint).toBeUndefined()
+    } finally {
+      kernel.dispose()
+    }
+  })
 })
