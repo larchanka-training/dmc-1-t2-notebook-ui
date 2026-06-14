@@ -118,11 +118,12 @@ function isRetryable(error: unknown): boolean {
     const s = error.status
     return s >= 500 || s === 408 || s === 429 || s === 401
   }
-  // Unknown error shape (e.g. a programming TypeError): retry rather than get
-  // permanently stuck. Deliberate MVP trade-off — a real code bug would loop under
-  // backoff (logged each attempt via the push-failed warn) instead of surfacing.
-  // A retry cap / terminal-on-non-ApiError is a documented follow-up (#135).
-  return true
+  // Unknown error shape (e.g. a programming TypeError): treat as terminal (#135).
+  // The previous MVP behaviour retried it forever under backoff, which hid a real
+  // code bug behind an endless loop (logged every attempt). The queue is kept on a
+  // terminal `failed` too, so nothing is lost — a later trigger (edit / boot) still
+  // re-pushes once the underlying bug is fixed, without the silent busy-loop.
+  return false
 }
 
 /** The server-requested delay (ms) for a 429, if present. */

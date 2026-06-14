@@ -888,6 +888,22 @@ describe('remote sync engine', () => {
     expect(createSpy).toHaveBeenCalledTimes(2)
   })
 
+  test('treats an unknown error (e.g. a TypeError) as terminal, not an endless retry (#135)', async () => {
+    // A non-ApiError/non-NetworkError (a programming bug) used to retry forever
+    // under backoff. It is now terminal: status 'failed', no retry armed.
+    createSpy.mockRejectedValue(new TypeError('boom'))
+    teardown = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(remoteSyncStatusAtom()).toBe('failed')
+
+    // Well past the backoff window: no retry fired (would be 'error' + re-POST).
+    await vi.advanceTimersByTimeAsync(MAX_RETRY_WAIT)
+    expect(createSpy).toHaveBeenCalledTimes(1)
+  })
+
   test('recovers from a lost create-ack: a 409 on re-POST switches to PATCH (review C-1/C-2)', async () => {
     getSyncStateSpy.mockResolvedValue(undefined) // remoteCreated = false
     getSpy.mockResolvedValue(storedDoc(5, [cell(CELL_A, 'edited-after-lost-ack', 5)]))
