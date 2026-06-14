@@ -56,8 +56,12 @@ export async function pullServerNotebook(server: notebookApi.Notebook): Promise<
   // could pose as authoritative content.
   if (!isNotebookJSON(json)) return 'rejected'
   if (await hasUnsyncedLocalChanges(json.id)) return 'kept-local-dirty'
-  // Server wins for a clean/absent copy: an unconditional put is safe because a
-  // clean local doc is already synced (server is equal or newer under LWW).
-  await wrap(notebookStorage.put(json))
-  return 'accepted'
+  // Server wins for a clean/absent copy — but write under a compare-and-swap, not
+  // an unconditional put (CL-17): a local-first write (another tab, a slow IDB)
+  // can land between the dirty-check above and this write. `putIfNewer` re-reads
+  // and writes in one transaction, so a newer local version is never clobbered;
+  // if it lost the race we treat it as a dirty-keep, not an overwrite.
+  const current = await wrap(notebookStorage.get(json.id))
+  const result = await wrap(notebookStorage.putIfNewer(json, current?.updatedAt ?? null))
+  return result.ok ? 'accepted' : 'kept-local-dirty'
 }

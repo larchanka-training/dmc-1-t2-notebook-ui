@@ -121,6 +121,7 @@ describe('deleteNotebookAction', () => {
   const NB_ID = '55555555-5555-4555-8555-555555555555'
 
   beforeEach(() => {
+    slotMock.degradeSlotToFloor.mockClear()
     slotMock.degradeSlotToFloor.mockResolvedValue(undefined)
     vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
     vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
@@ -156,19 +157,32 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([other, listItem(NB_ID, 'Doomed')])
   })
 
-  test('vacates the slot first when deleting the active notebook', async () => {
+  test('vacates the slot AFTER a successful delete of the active notebook (CL-4)', async () => {
     activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
     notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
     const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
 
     await deleteNotebookAction(NB_ID)
 
-    // Slot degraded to the floor BEFORE the server delete, so its bindings cannot
-    // recreate the id mid-delete.
+    // Degrade happens only after the server delete commits, so a failed delete
+    // (next test) cannot leave the slot degraded with the row rolled back.
     expect(slotMock.degradeSlotToFloor).toHaveBeenCalledTimes(1)
-    const degradeOrder = slotMock.degradeSlotToFloor.mock.invocationCallOrder[0]
     const removeOrder = removeSpy.mock.invocationCallOrder[0]
-    expect(degradeOrder).toBeLessThan(removeOrder)
+    const degradeOrder = slotMock.degradeSlotToFloor.mock.invocationCallOrder[0]
+    expect(removeOrder).toBeLessThan(degradeOrder)
+  })
+
+  test('does NOT degrade the slot when deleting the active notebook fails (CL-4)', async () => {
+    activeNotebookIdAtom.set(NB_ID) // open in the slot
+    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
+
+    await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
+
+    // The server delete failed → the slot must stay intact (not degraded), and the
+    // optimistic row is rolled back.
+    expect(slotMock.degradeSlotToFloor).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Doomed')])
   })
 })
 

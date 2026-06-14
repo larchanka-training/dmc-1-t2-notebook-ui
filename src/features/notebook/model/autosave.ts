@@ -240,6 +240,13 @@ let channel: ReturnType<typeof openCrossTabChannel> | null = null
 // before a slot switch; null while autosave is not running.
 let flushPendingSave: (() => void) | null = null
 
+// The teardown handle of the live autosave instance, or null when stopped. Used
+// to make `startAutosave` teardown-first (mirroring `startRemoteSync`): a repeated
+// start (slot switch, HMR, test re-init) must stop the previous instance before
+// re-arming, otherwise the old `notebookRevisionAtom` subscription, focus/
+// visibility listeners and BroadcastChannel leak and double-write for the session.
+let activeAutosaveTeardown: (() => void) | null = null
+
 /**
  * Flush a pending debounced save and await any in-flight write. The slot
  * controller (#135) awaits this BEFORE flipping `activeNotebookIdAtom`, so the
@@ -305,6 +312,11 @@ function subscribeToFocusChecks(): () => void {
 }
 
 export function startAutosave(): () => void {
+  // Teardown-first (H-3, mirrors startRemoteSync): drop any prior instance's
+  // subscription / listeners / channel before wiring a new one, so a repeated
+  // start cannot leak a second autosave or a second cross-tab channel.
+  activeAutosaveTeardown?.()
+
   let timer: ReturnType<typeof setTimeout> | null = null
   let primed = false
 
@@ -362,12 +374,17 @@ export function startAutosave(): () => void {
   // `drainAutosave` (flush + await) so the write lands under the old id. A bare
   // teardown without a drain still cancels the timer (the unflushed edit stays in
   // the editor and re-arms on the next change), matching the pre-#135 behaviour.
-  return () => {
+  const teardown = () => {
     if (timer !== null) clearTimeout(timer)
     flushPendingSave = null
     unsubscribe()
     unsubscribeFocusChecks()
     channel?.close()
     channel = null
+    // Only clear the module pointer if this instance is still the live one — a
+    // newer start may have already replaced it (and torn this one down).
+    if (activeAutosaveTeardown === teardown) activeAutosaveTeardown = null
   }
+  activeAutosaveTeardown = teardown
+  return teardown
 }

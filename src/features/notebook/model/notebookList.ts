@@ -115,21 +115,28 @@ export const createNotebookAction = action(async (title: string) => {
  * so it is never deletable; callers gate the Delete affordance on that.
  */
 export const deleteNotebookAction = action(async (id: string): Promise<void> => {
-  // If the deleted notebook is open, vacate the slot before any storage cleanup so
-  // its still-running bindings cannot re-persist the id mid-delete.
-  if (id === activeNotebookIdAtom()) {
-    await wrap(degradeSlotToFloor())
-  }
+  const wasActive = id === activeNotebookIdAtom()
   // Optimistically remove the row; a failed DELETE rolls it back (withTransaction).
   notebookListResource.data.set((items) => items.filter((it) => it.id !== id))
+  // Server delete FIRST. If it throws (offline/500), withTransaction rolls the row
+  // back and — crucially — the slot is still intact (CL-4): we have not degraded it
+  // yet, so a failed delete of the OPEN notebook leaves the user exactly where they
+  // were, pending edits and all.
   await wrap(notebookApi.remove(id))
-  // Server delete committed — drop the local copy + its sync queue. Best-effort:
-  // a storage hiccup here must not roll the row back (the notebook IS deleted
-  // server-side), so swallow and let the next list refetch reconcile.
+  // Delete committed. Only now vacate the slot if the deleted notebook was open:
+  // `degradeSlotToFloor` drains the pending edit, stops the bindings (so autosave /
+  // remote-sync cannot recreate the id) and re-seeds the welcome floor.
+  if (wasActive) {
+    await wrap(degradeSlotToFloor())
+  }
+  // Drop the local copy + its sync queue. Best-effort: a storage hiccup here must
+  // not roll the row back (the notebook IS deleted server-side). Log the failure
+  // (CL-6) instead of swallowing it silently — an orphaned dirty sync-state left
+  // behind can later block re-opening that server id.
   try {
     await wrap(notebookStorage.delete(id))
     await wrap(notebookStorage.deleteSyncState(id))
-  } catch {
-    // Local cleanup is advisory; the authoritative delete already succeeded.
+  } catch (error) {
+    console.warn(`notebook.delete: local cleanup failed for ${id}; orphan may remain`, error)
   }
 }, 'notebook.list.delete').extend(withAsync(), withTransaction())

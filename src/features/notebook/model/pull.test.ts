@@ -32,14 +32,17 @@ function cleanSyncState(notebookId: string): NotebookSyncState {
 }
 
 let getSyncStateSpy: ReturnType<typeof vi.spyOn>
-let putSpy: ReturnType<typeof vi.spyOn>
+let putIfNewerSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   // Default slot id is the local notebook, so a SERVER_ID pull is "not the open
   // notebook" unless a test switches the slot — isolates the durable-state path.
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
   getSyncStateSpy = vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
-  putSpy = vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+  // The pull write is a compare-and-swap (CL-17): re-read updatedAt, then
+  // putIfNewer. Default: nothing stored locally, CAS succeeds.
+  vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
+  putIfNewerSpy = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
 })
 
 afterEach(() => {
@@ -51,22 +54,32 @@ describe('pullServerNotebook', () => {
   test('accepts the server version when no local copy is tracked', async () => {
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('accepted')
-    expect(putSpy).toHaveBeenCalledTimes(1)
-    expect(putSpy.mock.calls[0][0]).toMatchObject({ id: SERVER_ID, title: 'From server' })
+    expect(putIfNewerSpy).toHaveBeenCalledTimes(1)
+    expect(putIfNewerSpy.mock.calls[0][0]).toMatchObject({ id: SERVER_ID, title: 'From server' })
   })
 
   test('accepts the server version when the local copy is clean', async () => {
     getSyncStateSpy.mockResolvedValue(cleanSyncState(SERVER_ID))
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('accepted')
-    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(putIfNewerSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('does NOT clobber a newer local write that lands during the pull (CL-17 CAS)', async () => {
+    // Conflict check passes (clean sync-state), but a local-first write lands
+    // before the server write: putIfNewer's CAS rejects it. The server doc must
+    // not overwrite the newer local version.
+    getSyncStateSpy.mockResolvedValue(cleanSyncState(SERVER_ID))
+    putIfNewerSpy.mockResolvedValue({ ok: false, current: serverNotebook() })
+    const result = await pullServerNotebook(serverNotebook())
+    expect(result).toBe('kept-local-dirty')
   })
 
   test('keeps the local copy when its sync state is dirty', async () => {
     getSyncStateSpy.mockResolvedValue({ ...cleanSyncState(SERVER_ID), dirty: true })
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('kept-local-dirty')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
   })
 
   test('keeps the local copy when it has pending tombstones', async () => {
@@ -76,14 +89,14 @@ describe('pullServerNotebook', () => {
     })
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('kept-local-dirty')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
   })
 
   test('keeps the local copy on an unresolved owner conflict', async () => {
     getSyncStateSpy.mockResolvedValue({ ...cleanSyncState(SERVER_ID), ownerConflict: true })
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('kept-local-dirty')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
   })
 
   test('keeps the open notebook when the editor has unsaved in-memory changes', async () => {
@@ -102,13 +115,13 @@ describe('pullServerNotebook', () => {
 
     const result = await pullServerNotebook(serverNotebook())
     expect(result).toBe('kept-local-dirty')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
   })
 
   test('rejects a malformed server payload without writing storage (§11)', async () => {
     // A 2xx whose formatVersion is not the current one fails the boundary guard.
     const result = await pullServerNotebook(serverNotebook({ formatVersion: 99 }))
     expect(result).toBe('rejected')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(putIfNewerSpy).not.toHaveBeenCalled()
   })
 })
