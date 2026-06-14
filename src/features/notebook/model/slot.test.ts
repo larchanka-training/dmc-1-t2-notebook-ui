@@ -128,12 +128,28 @@ describe('openNotebookInSlot', () => {
     getSpy.mockResolvedValue(undefined)
     apiGetSpy.mockRejectedValue(new Error('network down'))
 
-    await openNotebookInSlot(SERVER_ID)
+    const outcome = await openNotebookInSlot(SERVER_ID)
 
-    // Slot untouched: id unchanged, bindings not switched.
+    // Slot untouched: id unchanged, bindings not switched, outcome reported (CL-5).
+    expect(outcome).toBe('unavailable')
     expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
     expect(h.startRemoteSync).not.toHaveBeenCalled()
     expect(h.drainAutosave).not.toHaveBeenCalled()
+  })
+
+  test('keeps the current slot when the server payload is rejected and re-read is empty (CL-11)', async () => {
+    // GET resolves, but pull rejects the payload (§11 boundary) and the re-read is
+    // still undefined → the second-null branch. The slot must stay put, not blank.
+    getSpy.mockResolvedValue(undefined) // absent before AND after the pull
+    apiGetSpy.mockResolvedValue(doc(SERVER_ID) as unknown as notebookApi.Notebook)
+    h.pullServerNotebook.mockResolvedValue('rejected')
+
+    const outcome = await openNotebookInSlot(SERVER_ID)
+
+    expect(outcome).toBe('unavailable')
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+    expect(h.drainAutosave).not.toHaveBeenCalled()
+    expect(h.startRemoteSync).not.toHaveBeenCalled()
   })
 
   test('is a no-op when the target is already the active notebook', async () => {
@@ -147,12 +163,13 @@ describe('openNotebookInSlot', () => {
     getSpy.mockReturnValueOnce(gate.promise as Promise<NotebookJSON | undefined>)
 
     const first = openNotebookInSlot(SERVER_ID)
-    // Second call lands while the first awaits the storage read.
-    await openNotebookInSlot('11111111-1111-4111-8111-111111111111')
+    // Second call lands while the first awaits the storage read → reported busy.
+    const secondOutcome = await openNotebookInSlot('11111111-1111-4111-8111-111111111111')
+    expect(secondOutcome).toBe('busy')
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('in progress'))
 
     gate.resolve(doc(SERVER_ID))
-    await first
+    expect(await first).toBe('opened')
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
   })
 })

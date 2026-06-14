@@ -66,9 +66,18 @@ function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
   }
 }
 
+// Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
+// is pending, but that is UX only — a second entry point (a shortcut, command
+// palette, or a direct call) could still fire overlapping creates, each minting a
+// new UUID + optimistic row + POST. The concurrency rule belongs in the model, so
+// an overlapping call is a no-op until the first settles.
+let createInFlight = false
+
 export const createNotebookAction = action(async (title: string) => {
   const trimmed = title.trim()
   if (!trimmed) return null
+  if (createInFlight) return null
+  createInFlight = true
 
   // Client-chosen UUID (FU1): the same id is both the optimistic row id AND the
   // `id` sent to POST. Server create is idempotent on the client id, so a lost
@@ -83,23 +92,29 @@ export const createNotebookAction = action(async (title: string) => {
     updatedAt: now,
     cellsCount: 0,
   }
-  notebookListResource.data.set((items) => [...items, optimistic])
-
-  const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
-  // FU2: reconcile the optimistic row with the server's authoritative values
-  // (same id) BEFORE the refetch, so the row is correct even if the refetch
-  // fails. Without this, a transient list failure after a committed POST would
-  // roll the optimistic row back under withTransaction() — a false "create
-  // failed" for a notebook that already exists on the server.
-  notebookListResource.data.set((items) => items.map((it) => (it.id === id ? toListItem(nb) : it)))
   try {
-    await wrap(notebookListResource.retry())
-  } catch {
-    // Best-effort refetch: the list invalidation is advisory. The reconciled
-    // optimistic row stands until the next successful load. The create itself
-    // succeeded, so we must not reject (that would roll the row back).
+    notebookListResource.data.set((items) => [...items, optimistic])
+
+    const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
+    // FU2: reconcile the optimistic row with the server's authoritative values
+    // (same id) BEFORE the refetch, so the row is correct even if the refetch
+    // fails. Without this, a transient list failure after a committed POST would
+    // roll the optimistic row back under withTransaction() — a false "create
+    // failed" for a notebook that already exists on the server.
+    notebookListResource.data.set((items) =>
+      items.map((it) => (it.id === id ? toListItem(nb) : it)),
+    )
+    try {
+      await wrap(notebookListResource.retry())
+    } catch {
+      // Best-effort refetch: the list invalidation is advisory. The reconciled
+      // optimistic row stands until the next successful load. The create itself
+      // succeeded, so we must not reject (that would roll the row back).
+    }
+    return nb
+  } finally {
+    createInFlight = false
   }
-  return nb
 }, 'notebook.list.create').extend(withAsync(), withTransaction())
 
 /**

@@ -44,6 +44,14 @@ const fullNotebook = (id: string, title: string): notebookApi.Notebook => ({
   cells: [],
 })
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   vi.spyOn(idLib, 'newId').mockReturnValue(CLIENT_ID)
   vi.spyOn(notebookApi, 'list').mockResolvedValue([])
@@ -114,6 +122,22 @@ describe('createNotebookAction', () => {
 
     await expect(createNotebookAction('new')).rejects.toThrow()
     expect(peek(notebookListResource.data)).toEqual([existing])
+  })
+
+  test('dedupes overlapping creates at the model level — one API call (CL-12)', async () => {
+    const created = fullNotebook(CLIENT_ID, 'new')
+    const gate = deferred<notebookApi.Notebook>()
+    const createSpy = vi.spyOn(notebookApi, 'create').mockReturnValue(gate.promise)
+
+    // Two overlapping calls (e.g. a shortcut firing while the button is mid-create):
+    // the second is a no-op until the first settles, so only ONE POST goes out.
+    const first = createNotebookAction('new')
+    const second = await createNotebookAction('new')
+    expect(second).toBeNull()
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    gate.resolve(created)
+    expect(await first).toEqual(created)
   })
 })
 

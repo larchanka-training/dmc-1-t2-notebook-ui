@@ -57,4 +57,18 @@ describe('SyncIndicator', () => {
     expect(screen.getByText(/sign in again/i)).toBeInTheDocument()
     expect(screen.queryByText(/syncing/i)).toBeNull()
   })
+
+  // AC-14 honesty constraint (CL-10): the UI must NOT promise an untrusted-device
+  // data wipe before #136. Guarded by a code comment today; this asserts it so a
+  // future edit re-adding wipe copy fails CI instead of shipping a false promise.
+  test('never renders device-wipe copy in any status (AC-14)', () => {
+    const wipeCopy = /wipe|erased|cleared from this device|deleted from this device/i
+    for (const status of ['idle', 'syncing', 'synced', 'offline', 'error', 'failed'] as const) {
+      const { container } = renderWith(status)
+      expect(container.textContent ?? '').not.toMatch(wipeCopy)
+      cleanup()
+    }
+    const { container } = renderWith('idle', true) // paused → re-login prompt
+    expect(container.textContent ?? '').not.toMatch(wipeCopy)
+  })
 })
