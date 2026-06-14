@@ -28,7 +28,7 @@ import {
   notebookListResource,
   notebookTitleAtom,
   renameTargetAtom,
-  LOCAL_NOTEBOOK_ID,
+  activeNotebookIdAtom,
   shortcutsOpenAtom,
 } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
@@ -263,11 +263,12 @@ const NotebooksGroup = reatomComponent(() => {
   // The local notebook opens at the notebook route — the same empty-path href
   // as the "Notebook" item in Workspace (BASE_URL + '').
   const notebookHref = import.meta.env.BASE_URL
-  // The currently open notebook lives in local storage (LOCAL_NOTEBOOK_ID),
-  // separate from the backend list. Surface it as a synthetic top entry with a
+  // The currently open notebook lives in the editor slot (its id is
+  // `activeNotebookIdAtom`, #135). Surface it as a synthetic top entry with a
   // live title so it shows up and stays highlighted while editing. Full
   // open/switch across the backend list is epic 04.
   const currentTitle = notebookTitleAtom()
+  const activeId = activeNotebookIdAtom()
   const [filter, setFilter] = useState('')
 
   if (!user) return null
@@ -277,8 +278,9 @@ const NotebooksGroup = reatomComponent(() => {
   })
 
   const filterText = filter.trim().toLowerCase()
-  // Never list the local notebook twice if it ever appears in the backend feed.
-  const backendItems = items.filter((nb) => nb.id !== LOCAL_NOTEBOOK_ID)
+  // Never list the open notebook twice: it is already shown as the synthetic
+  // current-row above, so drop its id from the backend feed.
+  const backendItems = items.filter((nb) => nb.id !== activeId)
   const filtered = filterText
     ? backendItems.filter((nb) => nb.title.toLowerCase().includes(filterText))
     : backendItems
@@ -323,7 +325,7 @@ const NotebooksGroup = reatomComponent(() => {
                 <NotebookRowMenu
                   onRename={wrap(() =>
                     renameTargetAtom.set({
-                      id: LOCAL_NOTEBOOK_ID,
+                      id: activeId,
                       title: currentTitle || NEW_NOTEBOOK_TITLE,
                     }),
                   )}

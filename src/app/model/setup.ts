@@ -7,9 +7,9 @@ import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
+  activeNotebookIdAtom,
   aiContextModeAtom,
   loadNotebook,
-  LOCAL_NOTEBOOK_ID,
   markBootRestored,
   startAiContextSync,
   startAutosave,
@@ -129,13 +129,14 @@ rootFrame.run(async () => {
     // Background remote sync (#134): push local changes to the backend for the
     // authorized user. Starts unconditionally — it self-guards on auth, staying
     // idle while signed out and flushing the persisted queue once a token exists.
-    startRemoteSync(LOCAL_NOTEBOOK_ID)
+    // Bound to the active slot id (#135); on boot that is the local notebook.
+    startRemoteSync(activeNotebookIdAtom())
     // Mode B (persisted AI context, Epic 07 / #116): load the saved context and
     // keep it in sync with edits/deletes. Opt-in via VITE_AI_CONTEXT_MODE; the
     // default 'at-send' mode builds context lazily at generate time and needs no
     // backend round-trip here.
     if (aiContextModeAtom() === 'persisted') {
-      startAiContextSync(LOCAL_NOTEBOOK_ID)
+      startAiContextSync(activeNotebookIdAtom())
     }
   }
 })
