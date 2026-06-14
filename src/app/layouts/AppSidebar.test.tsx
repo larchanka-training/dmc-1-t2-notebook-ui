@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { SidebarProvider } from '@/shared/ui/sidebar'
 import { setSession, clearSession } from '@/entities/session'
-import { notebookListResource, type NotebookListItem } from '@/features/notebook'
+import { notebook as notebookApi } from '@/shared/api'
+import { notebookListResource } from '@/features/notebook'
 import { AppSidebar } from './AppSidebar'
 
 // AppSidebar opens a notebook into the slot via the `openNotebookInSlot` action
@@ -25,7 +26,7 @@ const { openNotebookInSlot } = await import('@/features/notebook')
 
 const BACKEND_ID = '44444444-4444-4444-8444-444444444444'
 
-function listItem(id: string, title: string): NotebookListItem {
+function listItem(id: string, title: string): notebookApi.NotebookListItem {
   return { id, title, formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 }
 }
 
@@ -63,5 +64,42 @@ describe('AppSidebar — open-into-slot', () => {
     await user.click(screen.getByText('Backend notebook'))
 
     expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(BACKEND_ID)
+  })
+})
+
+describe('AppSidebar — create guard (FU3)', () => {
+  test('disables the "+" button while a create is in flight', async () => {
+    const user = userEvent.setup()
+    // Hang the POST so the action stays in flight; the button must disable to
+    // block a second concurrent create from a double-click.
+    let resolveCreate!: (nb: notebookApi.Notebook) => void
+    vi.spyOn(notebookApi, 'create').mockReturnValue(
+      new Promise<notebookApi.Notebook>((resolve) => {
+        resolveCreate = resolve
+      }),
+    )
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    renderSidebar()
+
+    const addButton = screen.getByRole('button', { name: /new notebook/i })
+    expect(addButton).toBeEnabled()
+
+    await user.click(addButton)
+    // While the create promise is pending, the action is not ready → disabled.
+    expect(addButton).toBeDisabled()
+
+    // Settle the create inside act so the resulting state update is flushed
+    // before the test ends (no dangling promise, no act warning).
+    await act(async () => {
+      resolveCreate({
+        id: BACKEND_ID,
+        title: 'Untitled notebook',
+        ownerId: 'owner-1',
+        formatVersion: 1,
+        createdAt: 0,
+        updatedAt: 0,
+        cells: [],
+      })
+    })
   })
 })

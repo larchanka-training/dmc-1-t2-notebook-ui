@@ -278,6 +278,10 @@ const NotebooksGroup = reatomComponent(() => {
   // open/switch across the backend list is epic 04.
   const currentTitle = notebookTitleAtom()
   const activeId = activeNotebookIdAtom()
+  // FU3: disable the "+" while a create is in flight, so a double-click cannot
+  // fire two concurrent createNotebookAction calls (each pushing an optimistic
+  // row + a list retry, which can transiently drop or mis-roll-back a row).
+  const creating = !createNotebookAction.ready()
   const [filter, setFilter] = useState('')
 
   if (!user) return null
@@ -305,6 +309,7 @@ const NotebooksGroup = reatomComponent(() => {
           className="size-6 shrink-0 text-muted-foreground hover:text-primary"
           aria-label="New notebook"
           onClick={onCreate}
+          disabled={creating}
         >
           <Plus className="size-4" />
         </Button>
