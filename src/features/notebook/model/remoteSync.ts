@@ -38,7 +38,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { isNotebookJSON, type NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
-import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
+import { activeNotebookIdAtom, cellsAtom, notebookBaseUpdatedAtAtom } from './notebook'
 import { notebookRestoredAtom } from './revision'
 import { hasLocalChangesAtom, localSaveCommittedAtom, reloadFromStorage } from './autosave'
 import { isOnlineAtom, startOnlineTracking } from './online'
@@ -200,13 +200,16 @@ async function applyServerBaseline(
     return 'rejected'
   }
   // M-1: don't adopt over a concurrent local edit — checked before any write, so
-  // neither storage nor editor is touched while the user is mid-edit.
-  if (notebookId === LOCAL_NOTEBOOK_ID && hasLocalChangesAtom()) return 'deferred'
+  // neither storage nor editor is touched while the user is mid-edit. The guard
+  // applies only when the pushed notebook is the one open in the editor slot
+  // (#135): `hasLocalChangesAtom`/`reloadFromStorage` below act on the in-memory
+  // editor, so they are meaningless for a background push of a non-active id.
+  if (notebookId === activeNotebookIdAtom() && hasLocalChangesAtom()) return 'deferred'
   // Storage CAS: refuse to clobber a version newer than the one this push was
   // based on (e.g. another tab saved during the PATCH) instead of an unconditional put.
   const result = await wrap(notebookStorage.putIfNewer(json, base))
   if (!result.ok) return 'deferred'
-  if (notebookId === LOCAL_NOTEBOOK_ID) {
+  if (notebookId === activeNotebookIdAtom()) {
     // Re-check after the write: a keystroke during the put must not be clobbered
     // by the wholesale reload (it survives in the editor; autosave reconciles).
     if (hasLocalChangesAtom()) {

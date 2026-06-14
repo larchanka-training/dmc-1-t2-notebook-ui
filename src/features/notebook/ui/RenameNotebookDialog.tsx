@@ -4,7 +4,7 @@ import { wrap } from '@reatom/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { LOCAL_NOTEBOOK_ID, setNotebookTitle } from '../model/notebook'
+import { activeNotebookIdAtom, setNotebookTitle } from '../model/notebook'
 import { renameTargetAtom } from '../model/notebookSettings'
 
 // Rename dialog driven by renameTargetAtom (new-design-v2). Works for ANY
@@ -23,10 +23,11 @@ export const RenameNotebookDialog = reatomComponent(() => {
     const next = inputRef.current?.value.trim()
     // Empty input keeps the existing title (matches the prototype's fallback).
     if (next) {
-      // Only the open local notebook has a persistence path today; renaming a
-      // backend row is presentational until the notebook-management epic adds
-      // an update endpoint.
-      if (target.id === LOCAL_NOTEBOOK_ID) setNotebookTitle(next)
+      // Only the notebook open in the editor slot has a title-persistence path
+      // today (its title lives in the in-memory store + autosave). Renaming a
+      // different backend row is presentational until the notebook-management
+      // epic adds an update endpoint, so gate on the active slot id (#135).
+      if (target.id === activeNotebookIdAtom()) setNotebookTitle(next)
     }
     renameTargetAtom.set(null)
   })
