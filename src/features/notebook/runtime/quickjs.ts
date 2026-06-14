@@ -392,12 +392,14 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * the argument handles. Promise detection and its handle-disposal contract live
  * in `isPromise`/`inspectPromise`.
  *
- * Defined non-writable / non-configurable / non-enumerable: user declarations
+ * Defined read-only / non-configurable / non-enumerable: user declarations
  * publish to the same `globalThis` (and the VM is persistent), so a plain
  * writable prop could be reassigned or deleted from a cell and silently break
- * trailing detection for the rest of the session. A value descriptor with
- * `configurable: false` is read-only in QuickJS, so `globalThis.<m> = …` is
- * ignored in sloppy mode (throws in strict); non-enumerable keeps it out of the
+ * trailing detection for the rest of the session. Read-only comes from the
+ * VALUE descriptor itself — a QuickJS value property with no get/set defaults to
+ * non-writable (so `globalThis.<m> = …` is ignored in sloppy mode, throws in
+ * strict). `configurable: false` is a SEPARATE guarantee: it blocks redefining
+ * or deleting the marker, NOT reassignment. Non-enumerable keeps it out of the
  * user's `Object.keys(globalThis)`.
  *
  * `__nbTrailing` is internal: the transform only emits it around the trailing
@@ -410,6 +412,8 @@ function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
     if (isPromise(vm, handle)) sink.trailingWasPromise = true
     return handle
   })
+  // Read-only is the QuickJS default for a value descriptor; `VmPropertyDescriptor`
+  // has no `writable` key, so it can't (and must not) be flipped writable here.
   vm.defineProp(vm.global, TRAILING_MARKER, { value: fn, configurable: false, enumerable: false })
   fn.dispose()
 }
