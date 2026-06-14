@@ -263,8 +263,11 @@ function patternToGlobalTarget(pattern: Pattern, source: string): string {
 
 function rewriteTrailingExpression(node: ExpressionStatement, source: string): string {
   // Wrap in the kernel's identity marker so a rejected trailing Promise can be
-  // told apart from an ordinary throw (see header §2).
-  return `return ${TRAILING_MARKER}(${sliceNode(source, node.expression as Expression)})`
+  // told apart from an ordinary throw (see header §2). The expression gets its
+  // OWN inner parens: a bare SequenceExpression (`a, b`) would otherwise be
+  // parsed as two call ARGUMENTS, so the marker would see only `a` and the cell
+  // would return the wrong operand (JS sequence semantics yield the last).
+  return `return ${TRAILING_MARKER}((${sliceNode(source, node.expression as Expression)}))`
 }
 
 function sliceNode(source: string, node: Node): string {

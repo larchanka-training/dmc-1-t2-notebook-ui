@@ -683,6 +683,28 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     const r = await runFresh('console.log(Promise.reject(new Promise(() => {})))')
     expect(onlyStdout(r.items)).toBe('Promise { <rejected> Error: Promise { <pending> } }')
   })
+
+  // Trailing SequenceExpression (`a, b`): JS semantics yield the LAST operand,
+  // and the hint must track that last operand. The __nbTrailing wrapper must
+  // keep the sequence as one argument (regression: it used to split on the comma).
+  test('a trailing sequence expression returns its last operand', async () => {
+    const r = await runFresh('1, 2')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
+  })
+
+  test('a rejected first operand of a sequence is discarded (value is the last)', async () => {
+    const r = await runFresh('Promise.reject(new Error("x")), 5')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 5 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
+
+  test('a sequence ending in a rejected promise surfaces the rejection with the hint', async () => {
+    const r = await runFresh('5, Promise.reject(new Error("x"))')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.hint).toBe(PROMISE_HINT)
+  })
 })
 
 describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {

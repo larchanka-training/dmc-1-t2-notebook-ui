@@ -80,7 +80,15 @@ describe('transformCellCode — no prelude / re-run safety', () => {
 describe('transformCellCode — trailing expression statement', () => {
   test('rewrites trailing ExpressionStatement into a return (wrapped in __nbTrailing)', () => {
     const out = transformCellCode('1 + 2').code
-    expect(out).toMatch(/return\s+__nbTrailing\(1 \+ 2\)/)
+    expect(out).toMatch(/return\s+__nbTrailing\(\(1 \+ 2\)\)/)
+  })
+
+  test('a trailing sequence expression stays ONE __nbTrailing argument', () => {
+    // The inner parens keep `1, 2` a single SequenceExpression argument, not two
+    // call args — otherwise the marker would see only `1` and the cell would
+    // return the wrong operand (JS sequence semantics yield the last).
+    const out = transformCellCode('1, 2').code
+    expect(out).toContain('__nbTrailing((1, 2))')
   })
 
   test('does not add return if the last statement is not an expression', () => {
@@ -156,6 +164,6 @@ describe('transformCellCode — function hoisting', () => {
 
   test('a lone string literal is still treated as the trailing result, not a directive', () => {
     const out = transformCellCode('"hello"').code
-    expect(out).toMatch(/return\s+__nbTrailing\("hello"\)/)
+    expect(out).toMatch(/return\s+__nbTrailing\(\("hello"\)\)/)
   })
 })
