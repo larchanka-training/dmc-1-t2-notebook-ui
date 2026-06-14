@@ -284,6 +284,10 @@ async function runOne(
     return { status, items }
   } finally {
     vm.runtime.removeInterruptHandler()
+    // Clear the streaming hook so it cannot fire between runs. Safe today
+    // (pushItem only runs during VM execution), but defends against a future
+    // change that schedules a microtask after the run resolves.
+    sink.emit = undefined
   }
 }
 
@@ -383,17 +387,23 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * (auto-awaits) it. The flag lets the kernel attach the "did you forget await?"
  * hint when that trailing Promise rejects, without tagging ordinary throws.
  *
- * Returning the borrowed argument handle is safe here (quickjs-emscripten copies
- * the return value before freeing arg handles — verified). Promise detection and
- * its handle-disposal contract live in `isPromise`/`inspectPromise`.
+ * Returning the borrowed argument handle is safe here — quickjs-emscripten's
+ * `newFunction` copies the callback's return value into the VM before freeing
+ * the argument handles. Promise detection and its handle-disposal contract live
+ * in `isPromise`/`inspectPromise`.
  *
  * Defined non-writable / non-configurable / non-enumerable: user declarations
  * publish to the same `globalThis` (and the VM is persistent), so a plain
  * writable prop could be reassigned or deleted from a cell and silently break
  * trailing detection for the rest of the session. A value descriptor with
- * `configurable: false` is read-only in QuickJS (verified), so `globalThis.<m>
- * = …` is ignored in sloppy mode; non-enumerable keeps it out of the user's
- * `Object.keys(globalThis)`.
+ * `configurable: false` is read-only in QuickJS, so `globalThis.<m> = …` is
+ * ignored in sloppy mode (throws in strict); non-enumerable keeps it out of the
+ * user's `Object.keys(globalThis)`.
+ *
+ * `__nbTrailing` is internal: the transform only emits it around the trailing
+ * expression. A cell that *directly* calls this hidden marker with a Promise and
+ * then throws can set a misleading hint — an accepted cosmetic edge, not part of
+ * the user API (the marker is non-enumerable and `__nb`-prefixed).
  */
 function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
   const fn = vm.newFunction(TRAILING_MARKER, (handle) => {
@@ -495,11 +505,12 @@ function safeToString(value: unknown): string {
 /**
  * Inspect a handle's Promise state and hand the result to exactly one callback,
  * owning the handle-disposal contract in ONE place so it cannot drift between
- * call sites. Contract verified empirically against quickjs-emscripten 0.32
- * (`vm.dump` of a Promise both leaks its internal state and disposes the handle,
- * so `getPromiseState` is the only safe primitive):
- *   - non-Promise → `onNotPromise()`; `getPromiseState` reports `notAPromise`
- *     and its `value` IS the borrowed input handle — NOT disposed here.
+ * call sites. Disposal follows the `JSPromiseState` contract in
+ * quickjs-emscripten's types (`getPromiseState` is used instead of `vm.dump`,
+ * which on a Promise both leaks its internal state and disposes the handle):
+ *   - non-Promise → `onNotPromise()`; the fulfilled state carries
+ *     `notAPromise: true` and its `value` IS the borrowed input handle (per the
+ *     type's own doc comment) — NOT disposed here.
  *   - pending     → `onPending()`; no disposable handles (`error` is a throwing
  *     getter, never read).
  *   - fulfilled   → `onFulfilled(value)`; `value` is a fresh dup — disposed
