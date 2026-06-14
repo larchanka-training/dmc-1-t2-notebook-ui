@@ -374,21 +374,12 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * hint when that trailing Promise rejects, without tagging ordinary throws.
  *
  * Returning the borrowed argument handle is safe here (quickjs-emscripten copies
- * the return value before freeing arg handles — verified). `getPromiseState`
- * allocates `value`/`error` handles for a real Promise that must be disposed; a
- * non-Promise reports `notAPromise` and its `value` is the same borrowed handle,
- * which must NOT be disposed.
+ * the return value before freeing arg handles — verified). Promise detection and
+ * its handle-disposal contract live in `isPromise`/`inspectPromise`.
  */
 function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
   const fn = vm.newFunction('__nbTrailing', (handle) => {
-    try {
-      const state = vm.getPromiseState(handle)
-      if (!(state.type === 'fulfilled' && state.notAPromise)) sink.trailingWasPromise = true
-      if (state.type === 'fulfilled' && !state.notAPromise) state.value.dispose()
-      else if (state.type === 'rejected') state.error.dispose()
-    } catch {
-      // Detection is best-effort; never let it break the run.
-    }
+    if (isPromise(vm, handle)) sink.trailingWasPromise = true
     return handle
   })
   vm.setProp(vm.global, '__nbTrailing', fn)
@@ -430,6 +421,15 @@ function toErrorItem(
   vm: QuickJSContext,
   errorHandle: QuickJSHandle,
 ): Extract<OutputItem, { type: 'error' }> {
+  // A rejection reason can itself be a Promise — `Promise.reject(x)` does NOT
+  // unwrap x. `vm.dump` on a Promise both LEAKS its internal state object
+  // (`{"type":"rejected",...}`) into the message AND disposes the handle, which
+  // the caller then disposes again → double-free (TARDIS-65 H-1). Render it
+  // promise-aware first; `formatPromise` never dumps or disposes `errorHandle`.
+  const asPromise = formatPromise(vm, errorHandle)
+  if (asPromise !== null) {
+    return { type: 'error', name: 'Error', message: asPromise }
+  }
   let dumped: unknown
   try {
     dumped = vm.dump(errorHandle) as unknown
@@ -471,44 +471,89 @@ function safeToString(value: unknown): string {
 }
 
 /**
- * Render a QuickJS Promise handle Node-style (`Promise { <pending> }`,
- * `Promise { 42 }`, `Promise { <rejected> TypeError: ... }`), or return null if
- * the handle is not a Promise. Uses `getPromiseState` — the precise primitive —
- * instead of `vm.dump`, which leaks QuickJS-emscripten's internal state object
- * (`{"type":"rejected",...}`) into output.
- *
- * Disposal contract (verified empirically against quickjs-emscripten 0.32):
- *   - non-Promise → `{ type:'fulfilled', notAPromise:true, value }` where
- *     `value` IS the borrowed input handle (`eq` true) — must NOT be disposed.
- *   - fulfilled Promise → `value` is a fresh dup — dispose it.
- *   - rejected Promise → `error` is a fresh dup — dispose it.
- *   - pending Promise → nothing to dispose; `error` is a throwing getter, untouched.
+ * Inspect a handle's Promise state and hand the result to exactly one callback,
+ * owning the handle-disposal contract in ONE place so it cannot drift between
+ * call sites. Contract verified empirically against quickjs-emscripten 0.32
+ * (`vm.dump` of a Promise both leaks its internal state and disposes the handle,
+ * so `getPromiseState` is the only safe primitive):
+ *   - non-Promise → `onNotPromise()`; `getPromiseState` reports `notAPromise`
+ *     and its `value` IS the borrowed input handle — NOT disposed here.
+ *   - pending     → `onPending()`; no disposable handles (`error` is a throwing
+ *     getter, never read).
+ *   - fulfilled   → `onFulfilled(value)`; `value` is a fresh dup — disposed
+ *     after the callback returns.
+ *   - rejected    → `onRejected(error)`; `error` is a fresh dup — disposed after
+ *     the callback returns.
+ * Callbacks must read the handle synchronously and not retain it.
  */
-function formatPromise(vm: QuickJSContext, handle: QuickJSHandle): string | null {
+function inspectPromise<T>(
+  vm: QuickJSContext,
+  handle: QuickJSHandle,
+  handlers: {
+    onNotPromise: () => T
+    onPending: () => T
+    onFulfilled: (value: QuickJSHandle) => T
+    onRejected: (error: QuickJSHandle) => T
+  },
+): T {
   let state: ReturnType<QuickJSContext['getPromiseState']>
   try {
     state = vm.getPromiseState(handle)
   } catch {
-    return null
+    return handlers.onNotPromise()
   }
-  if (state.type === 'fulfilled' && state.notAPromise) return null
+  if (state.type === 'fulfilled' && state.notAPromise) return handlers.onNotPromise()
   switch (state.type) {
     case 'pending':
-      return 'Promise { <pending> }'
+      return handlers.onPending()
     case 'fulfilled':
       try {
-        return `Promise { ${stringifyArg(vm, state.value)} }`
+        return handlers.onFulfilled(state.value)
       } finally {
         state.value.dispose()
       }
     case 'rejected':
       try {
-        const err = toErrorItem(vm, state.error)
-        return `Promise { <rejected> ${err.name}: ${err.message} }`
+        return handlers.onRejected(state.error)
       } finally {
         state.error.dispose()
       }
   }
+}
+
+/** True if the handle is a Promise (any state), with correct disposal. */
+function isPromise(vm: QuickJSContext, handle: QuickJSHandle): boolean {
+  return inspectPromise(vm, handle, {
+    onNotPromise: () => false,
+    onPending: () => true,
+    onFulfilled: () => true,
+    onRejected: () => true,
+  })
+}
+
+/**
+ * Render a QuickJS Promise handle Node-style (`Promise { <pending> }`,
+ * `Promise { 42 }`, `Promise { <rejected> TypeError: ... }`), or return null if
+ * the handle is not a Promise. Goes through `inspectPromise` (`getPromiseState`),
+ * never `vm.dump`, which leaks the engine's internal state object and disposes
+ * the handle.
+ */
+function formatPromise(vm: QuickJSContext, handle: QuickJSHandle): string | null {
+  // Cheap gate: only objects can be Promises. Skips the `getPromiseState`
+  // round-trip (a WASM call + allocation) for primitives on the hot console path.
+  if (vm.typeof(handle) !== 'object') return null
+  return inspectPromise<string | null>(vm, handle, {
+    onNotPromise: () => null,
+    onPending: () => 'Promise { <pending> }',
+    onFulfilled: (value) => `Promise { ${stringifyArg(vm, value)} }`,
+    onRejected: (error) => {
+      // The reason is usually an Error, but `Promise.reject(x)` does not unwrap
+      // x — it can be a Promise (rendered promise-aware by toErrorItem, which
+      // never dumps/disposes a Promise reason) or any other value.
+      const err = toErrorItem(vm, error)
+      return `Promise { <rejected> ${err.name}: ${err.message} }`
+    },
+  })
 }
 
 /**

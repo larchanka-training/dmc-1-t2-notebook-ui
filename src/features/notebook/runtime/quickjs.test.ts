@@ -590,4 +590,37 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
     expect(r.items.some((it) => it.type === 'error')).toBe(false)
   })
+
+  // H-1 (cross-review): Promise.reject(x) does NOT unwrap x, so the reason can
+  // be a native Promise. vm.dump disposes a Promise handle and leaks its state,
+  // so the old code double-freed (QuickJSUseAfterFree) and re-leaked raw JSON.
+  function assertNoLeakNoCrash(items: OutputItem[]) {
+    const blob = JSON.stringify(items)
+    expect(blob).not.toContain('QuickJSUseAfterFree')
+    expect(blob).not.toContain('"type":"fulfilled"')
+    expect(blob).not.toContain('"type":"rejected"')
+    expect(blob).not.toContain('"type":"pending"')
+  }
+
+  test('console.log(Promise.reject(<fulfilled promise>)) does not crash or leak', async () => {
+    const r = await runFresh('console.log(Promise.reject(Promise.resolve(1)))')
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyStdout(r.items)).toContain('Promise {')
+  })
+
+  test('console.log(Promise.reject(<rejected promise>)) does not crash or leak', async () => {
+    const r = await runFresh('console.log(Promise.reject(Promise.reject(2)))')
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+  })
+
+  test('trailing Promise.reject(<native promise>) → error + hint, no crash or leak', async () => {
+    const r = await runFresh('Promise.reject(Promise.resolve(1))')
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    const err = onlyError(r.items)
+    expect(err.name).not.toBe('QuickJSUseAfterFree')
+    expect(err.hint).toBe('Promise rejected; did you forget await?')
+  })
 })
