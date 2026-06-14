@@ -28,6 +28,7 @@ import {
   notebookListResource,
   notebookTitleAtom,
   openNotebookInSlot,
+  slotOpenErrorAtom,
   renameTargetAtom,
   deleteTargetAtom,
   activeNotebookIdAtom,
@@ -269,6 +270,7 @@ const NotebooksGroup = reatomComponent(() => {
   const { pathname } = urlAtom()
   const items = notebookListResource.data()
   const createError = createNotebookAction.error()?.message
+  const openError = slotOpenErrorAtom()
   // The local notebook opens at the notebook route — the same empty-path href
   // as the "Notebook" item in Workspace (BASE_URL + '').
   const notebookHref = import.meta.env.BASE_URL
@@ -367,9 +369,15 @@ const NotebooksGroup = reatomComponent(() => {
                     above (filtered out of this list), so no URL state per id. */}
                 <SidebarMenuButton
                   className="pr-8"
-                  onClick={wrap(() => {
-                    void openNotebookInSlot(nb.id)
-                    urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+                  onClick={wrap(async () => {
+                    // Gate navigation on a successful open (CL-5): a failed/dropped
+                    // open keeps the previous slot, so moving the URL would leave the
+                    // editor showing a different notebook than the route implies. The
+                    // controller surfaces the failure via `slotOpenErrorAtom`.
+                    const outcome = await openNotebookInSlot(nb.id)
+                    if (outcome === 'opened' || outcome === 'already') {
+                      urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+                    }
                   })}
                 >
                   <span className="truncate">{nb.title}</span>
@@ -389,6 +397,11 @@ const NotebooksGroup = reatomComponent(() => {
         {createError ? (
           <p role="alert" className="px-2 text-xs text-destructive">
             {createError}
+          </p>
+        ) : null}
+        {openError ? (
+          <p role="alert" className="px-2 text-xs text-destructive">
+            {openError}
           </p>
         ) : null}
       </SidebarGroupContent>

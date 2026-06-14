@@ -41,7 +41,10 @@ function renderSidebar() {
 }
 
 beforeEach(() => {
-  vi.mocked(openNotebookInSlot).mockClear()
+  vi.mocked(openNotebookInSlot).mockReset()
+  // Default: a successful open so the click navigates (CL-5 gates navigation on
+  // the outcome). Failure cases override the resolved value per test.
+  vi.mocked(openNotebookInSlot).mockResolvedValue('opened')
   setSession({
     accessToken: 'tok',
     refreshToken: 'ref',
@@ -63,6 +66,20 @@ describe('AppSidebar — open-into-slot', () => {
 
     await user.click(screen.getByText('Backend notebook'))
 
+    expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(BACKEND_ID)
+  })
+
+  test('a failed open still lets the user retry (no stuck slot) (CL-5)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(openNotebookInSlot).mockResolvedValue('unavailable')
+    renderSidebar()
+
+    // Two clicks on a failing open both reach the controller — the sidebar does
+    // not wedge after the first failure (navigation is simply gated off).
+    await user.click(screen.getByText('Backend notebook'))
+    await user.click(screen.getByText('Backend notebook'))
+
+    expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledTimes(2)
     expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(BACKEND_ID)
   })
 })

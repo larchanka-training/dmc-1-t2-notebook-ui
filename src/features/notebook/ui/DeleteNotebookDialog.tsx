@@ -15,24 +15,40 @@ import { deleteNotebookAction } from '../model/notebookList'
 // Confirm-before-delete dialog driven by `deleteTargetAtom` (#135). Reuses the
 // existing `dialog.tsx` primitive (no new alert-dialog dependency — §11). Mounted
 // once globally alongside RenameNotebookDialog so it is reachable from the sidebar
-// row menu. Confirming runs `deleteNotebookAction` (optimistic row removal +
-// server DELETE + local cleanup); the row rolls back on failure inside the action.
+// row menu.
+//
+// Async ownership (CL-18): confirm AWAITS `deleteNotebookAction`, keeps a pending
+// state (destructive button disabled, dialog non-dismissable), closes ONLY on
+// success, and renders a concise error on failure instead of dropping a rejected
+// destructive action on the floor. This is exactly the surface a failed
+// active-delete (CL-4) needs to report on.
 export const DeleteNotebookDialog = reatomComponent(() => {
   const target = deleteTargetAtom()
+  const pending = !deleteNotebookAction.ready()
+  const error = deleteNotebookAction.error()?.message
 
-  const close = wrap(() => deleteTargetAtom.set(null))
-
-  const confirm = wrap(() => {
-    if (!target) return
-    void deleteNotebookAction(target.id)
+  const close = wrap(() => {
+    if (pending) return // don't dismiss while the destructive action is in flight
     deleteTargetAtom.set(null)
+  })
+
+  const confirm = wrap(async () => {
+    if (!target) return
+    try {
+      await deleteNotebookAction(target.id)
+      // Close only after the delete actually committed (server + cleanup).
+      deleteTargetAtom.set(null)
+    } catch {
+      // Keep the dialog open; `deleteNotebookAction.error()` renders below. The
+      // optimistic row was already rolled back inside the action (withTransaction).
+    }
   })
 
   return (
     <Dialog
       open={target !== null}
       onOpenChange={wrap((open: boolean) => {
-        if (!open) deleteTargetAtom.set(null)
+        if (!open && !pending) deleteTargetAtom.set(null)
       })}
     >
       <DialogContent className="sm:max-w-md">
@@ -44,12 +60,17 @@ export const DeleteNotebookDialog = reatomComponent(() => {
               : ''}
           </DialogDescription>
         </DialogHeader>
+        {error ? (
+          <p role="alert" className="px-1 text-xs text-destructive">
+            Delete failed. Check your connection and try again.
+          </p>
+        ) : null}
         <DialogFooter>
-          <Button variant="outline" onClick={close}>
+          <Button variant="outline" onClick={close} disabled={pending}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={confirm}>
-            Delete
+          <Button variant="destructive" onClick={confirm} disabled={pending}>
+            {pending ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogFooter>
       </DialogContent>

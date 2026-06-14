@@ -82,7 +82,8 @@ export {
   deleteNotebookAction,
   startNotebookListSync,
 } from './model/notebookList'
-export { openNotebookInSlot, startSlot, stopSlot } from './model/slot'
+export { openNotebookInSlot, startSlot, stopSlot, slotOpenErrorAtom } from './model/slot'
+export type { OpenOutcome } from './model/slot'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'
 export {
   searchOpenAtom,
