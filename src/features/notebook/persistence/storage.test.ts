@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { FORMAT_VERSION, type NotebookJSON } from './schema'
-import { clear, get, list, put, putIfNewer, remove } from './storage'
+import { MAX_DELETED_CELLS, type NotebookSyncState } from './storageAdapter'
+import { clear, get, getSyncState, list, put, putIfNewer, putSyncState, remove } from './storage'
 
 // Cell id must be a UUID (schema validates `format: uuid`); notebooks here are
 // keyed/asserted by their own id, so a single fixed cell UUID is enough.
@@ -59,7 +60,7 @@ describe('notebook IndexedDB storage', () => {
   test('putIfNewer rethrows newer-format storage instead of downgrading it', async () => {
     const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', {
       ...notebook(id, FORMAT_VERSION + 1, 'future'),
       formatVersion: FORMAT_VERSION + 1,
@@ -97,7 +98,7 @@ describe('notebook IndexedDB storage', () => {
   test('get rejects a structurally invalid stored record', async () => {
     // Write a broken record straight to IDB, bypassing put()'s typing.
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', { id: 'broken', title: 42 })
     db.close()
     await expect(get('broken')).rejects.toThrow(/Invalid notebook JSON/)
@@ -106,11 +107,30 @@ describe('notebook IndexedDB storage', () => {
   test('list skips a corrupt record but returns the valid ones', async () => {
     await put(notebook('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 1))
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    const db = await openDB('js-notebook')
     await db.put('notebooks', { id: 'broken', updatedAt: 5 })
     db.close()
     const all = await list()
     expect(all).toHaveLength(1)
     expect(all[0].id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  })
+
+  test('sync state round-trips a bounded tombstone queue with an overflow marker', async () => {
+    const state: NotebookSyncState = {
+      notebookId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      remoteCreated: true,
+      dirty: true,
+      ownerId: '33333333-3333-4333-8333-333333333333',
+      deletedCells: Array.from({ length: MAX_DELETED_CELLS }, (_, i) => ({
+        id: `00000000-0000-4000-8000-${i.toString().padStart(12, '0')}`,
+        deletedAt: i + 1,
+      })),
+      tombstonesOverflow: true,
+      lastSyncedUpdatedAt: 10,
+    }
+
+    await putSyncState(state)
+
+    expect(await getSyncState(state.notebookId)).toEqual(state)
   })
 })

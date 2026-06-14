@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { isStaleWrite } from './storageAdapter'
+import { isNotebookSyncState, isStaleWrite, MAX_DELETED_CELLS } from './storageAdapter'
 
 // The conflict rule is shared by both backends' putIfNewer (disk + memory), so
 // it is pinned here once — divergence here would diverge their conflict
@@ -34,5 +34,23 @@ describe('isStaleWrite', () => {
 
   test('treats Infinity as newer than any finite baseline', () => {
     expect(isStaleWrite(Infinity, 10)).toBe(true)
+  })
+})
+
+describe('isNotebookSyncState', () => {
+  test('rejects an oversized tombstone buffer at the storage boundary', () => {
+    const deletedCells = Array.from({ length: MAX_DELETED_CELLS + 1 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${i.toString().padStart(12, '0')}`,
+      deletedAt: i + 1,
+    }))
+
+    expect(
+      isNotebookSyncState({
+        notebookId: 'notebook-1',
+        remoteCreated: true,
+        dirty: true,
+        deletedCells,
+      }),
+    ).toBe(false)
   })
 })

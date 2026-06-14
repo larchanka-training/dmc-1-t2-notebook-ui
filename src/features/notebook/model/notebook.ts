@@ -5,7 +5,7 @@ import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
-import { bumpNotebookRevision } from './revision'
+import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
@@ -76,6 +76,9 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
   cellsAtom.set(fromJSON(stored))
   // One bump for the whole restore (cells + title + metadata replaced at once).
   bumpNotebookRevision()
+  // Signal a wholesale content replacement so remote-sync re-seeds its
+  // delete-detection baseline (the cell set just changed without a user edit).
+  bumpNotebookRestored()
   clearHistory()
 }, 'notebook.restore')
 

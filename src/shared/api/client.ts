@@ -86,6 +86,10 @@ async function doRefresh(): Promise<void> {
     throw new Error('malformed_refresh_response')
   }
   const data = raw as { accessToken: string; refreshToken: string }
+  // A sign-out / session-expiry cleanup can clear or rotate the refresh token
+  // while this request is in flight. A stale response must not repopulate a
+  // session the app has already torn down.
+  if (getRefreshToken() !== token) throw new Error('stale_refresh_response')
   onTokensRefreshed(data.accessToken, data.refreshToken)
 }
 
@@ -120,12 +124,23 @@ const refreshMiddleware: Middleware = {
   async onResponse({ request, response }) {
     if (response.status !== 401) return response
 
+    // Cancellation must survive the refresh hop. The caller (e.g. remoteSync's
+    // per-push AbortController) threads `signal` through the facade onto this
+    // Request; a sign-out / teardown / session-expiry pause aborts it. Without
+    // this guard the refresh-and-retry below would issue a fresh POST/PATCH after
+    // the caller gave up — landing a mutation under a torn-down session (gpt-v-7
+    // B-1). Check both before and after the refresh await (the abort can land
+    // mid-refresh), and thread the signal into the retry so it stays cancellable.
+    if (request.signal?.aborted) return response
+
     try {
       await refreshOnce()
     } catch {
       // Refresh failed; onSessionExpired() was already called.
       return response
     }
+
+    if (request.signal?.aborted) return response
 
     const newToken = getAuthToken()
     if (!newToken) return response
@@ -146,6 +161,7 @@ const refreshMiddleware: Middleware = {
       headers: retryHeaders,
       body: buffered ? await buffered.text() : null,
       credentials: request.credentials,
+      signal: request.signal,
     })
   },
 }

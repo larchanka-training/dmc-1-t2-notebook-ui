@@ -15,7 +15,9 @@ describe('indexedDbAdapter (disk-specific)', () => {
 
   test('putIfNewer rethrows newer-format storage instead of downgrading it', async () => {
     const { openDB } = await import('idb')
-    const db = await openDB('js-notebook', 1)
+    // Open at the DB's current version (v2 since #134) — `beforeEach` already
+    // created it, so pinning version 1 here would throw a VersionError.
+    const db = await openDB('js-notebook')
     await db.put('notebooks', {
       ...makeNotebook(ID, FORMAT_VERSION + 1, 'future'),
       formatVersion: FORMAT_VERSION + 1,

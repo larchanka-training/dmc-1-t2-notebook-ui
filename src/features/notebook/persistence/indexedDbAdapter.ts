@@ -7,7 +7,17 @@
 // is a reserved word for a bare function export).
 
 import type { NotebookStorageAdapter } from './storageAdapter'
-import { clear, get, list, put, putIfNewer, remove } from './storage'
+import {
+  clear,
+  deleteSyncState,
+  get,
+  getSyncState,
+  list,
+  put,
+  putIfNewer,
+  putSyncState,
+  remove,
+} from './storage'
 
 export const indexedDbAdapter: NotebookStorageAdapter = {
   get,
@@ -16,4 +26,7 @@ export const indexedDbAdapter: NotebookStorageAdapter = {
   delete: remove,
   list,
   clearAll: clear,
+  getSyncState,
+  putSyncState,
+  deleteSyncState,
 }

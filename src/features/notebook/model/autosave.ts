@@ -37,6 +37,21 @@ export const saveStatusAtom = atom<SaveStatus>('idle', 'notebook.autosave.status
 /** Unix ms of the last successful save, or null if nothing has been saved yet. */
 export const lastSavedAtAtom = atom<number | null>(null, 'notebook.autosave.lastSavedAt')
 
+/**
+ * Monotonic counter bumped after every user-driven local save commits (the
+ * debounced autosave or "Save mine"). The remote autosync layer (#134)
+ * subscribes to this as its push trigger: a server push happens only AFTER the
+ * edit is persisted locally ("local first"), and NOT on boot / reload / cross-tab
+ * pull — those restore content from elsewhere rather than originate a local edit,
+ * so re-pushing them would be wasteful (and risks bouncing a just-pulled version
+ * back to the server).
+ */
+export const localSaveCommittedAtom = atom(0, 'notebook.autosave.localSaveCommitted')
+
+function markLocalSaveCommitted(): void {
+  localSaveCommittedAtom.set((seq) => seq + 1)
+}
+
 // The local revision number that corresponds to the last persisted/accepted
 // baseline. If the current revision differs, this tab has unsaved local changes.
 const savedRevisionAtom = atom<number>(0, 'notebook.autosave.savedRevision')
@@ -81,6 +96,7 @@ async function runConditionalSave(): Promise<void> {
   lastSavedAtAtom.set(Date.now())
   saveStatusAtom.set('saved')
   channel?.postSaved(snapshot.id, snapshot.updatedAt)
+  markLocalSaveCommitted()
 }
 
 /**
@@ -119,15 +135,21 @@ export async function saveNow(): Promise<void> {
   }
 }
 
-/** Reload the latest stored notebook, discarding this tab's local version. */
-export async function reloadFromStorage(): Promise<void> {
+/**
+ * Reload the latest stored notebook, discarding this tab's local version. Returns
+ * `true` only when the editor was actually restored, so a caller (remote-sync
+ * baseline adoption) can avoid reporting `synced` when the in-memory restore failed
+ * (review veai A-2).
+ */
+export async function reloadFromStorage(): Promise<boolean> {
   try {
     const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
-    if (!stored) return
+    if (!stored) return false
     restoreNotebook(stored)
     acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
+    return true
   } catch (error) {
     // `get()` runs `applyMigrations`, so a notebook saved by a newer build
     // surfaces here too (this is reachable from the "Reload" button and from a
@@ -139,6 +161,7 @@ export async function reloadFromStorage(): Promise<void> {
     } else {
       saveStatusAtom.set('error')
     }
+    return false
   }
 }
 
@@ -160,6 +183,7 @@ export async function saveMine(): Promise<void> {
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')
     channel?.postSaved(snapshot.id, snapshot.updatedAt)
+    markLocalSaveCommitted()
   } catch (error) {
     if (error instanceof NewerFormatError) {
       storageCompatibilityAtom.set('newer-format')
@@ -288,8 +312,10 @@ export function startAutosave(): () => void {
 
   // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
   // but does NOT cancel a save already in flight — that storage write runs to
-  // completion by design. In-flight cancellation (AbortController) arrives with
-  // #134's network-sync layer, where the window actually matters.
+  // completion by design (a sub-ms IndexedDB op). In-flight cancellation lives in
+  // #134's remoteSync layer instead (a `generation` guard that discards a stale
+  // push's result; the notebook facade takes no AbortSignal yet), where the
+  // network push has a window long enough to matter.
   return () => {
     if (timer !== null) clearTimeout(timer)
     unsubscribe()

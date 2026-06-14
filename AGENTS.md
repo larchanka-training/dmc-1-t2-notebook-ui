@@ -25,6 +25,7 @@ Folder layout, routing, and path aliases are documented in `docs/architecture/`.
 - [docs/architecture/path-aliases.md](./docs/architecture/path-aliases.md)
 - [docs/architecture/reatom.md](./docs/architecture/reatom.md)
 - [docs/architecture/api-layer.md](./docs/architecture/api-layer.md)
+- [docs/architecture/remote-sync.md](./docs/architecture/remote-sync.md)
 
 The fractal frontend skill (`.claude/skills/fractal-frontend/`) governs layer placement and cross-feature boundaries — load it when deciding where new code should live.
 

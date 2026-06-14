@@ -129,7 +129,7 @@ export async function get(id: string): Promise<Notebook> {
   return normalizeNotebook(data)
 }
 
-export async function create(input: CreateNotebookInput): Promise<Notebook> {
+export async function create(input: CreateNotebookInput, signal?: AbortSignal): Promise<Notebook> {
   const body: Schemas['NotebookCreate'] = {
     title: input.title,
     formatVersion: input.formatVersion,
@@ -137,12 +137,16 @@ export async function create(input: CreateNotebookInput): Promise<Notebook> {
     ...(input.cells !== undefined ? { cells: input.cells } : {}),
   }
   const data = await request<Schemas['NotebookResponse']>(
-    notebookClient.POST('/notebooks', { body }),
+    notebookClient.POST('/notebooks', { body, signal }),
   )
   return normalizeNotebook(data)
 }
 
-export async function patch(id: string, input: UpdateNotebookInput): Promise<Notebook> {
+export async function patch(
+  id: string,
+  input: UpdateNotebookInput,
+  signal?: AbortSignal,
+): Promise<Notebook> {
   const body: Schemas['NotebookPatch'] = {
     title: input.title,
     formatVersion: input.formatVersion,
@@ -153,6 +157,7 @@ export async function patch(id: string, input: UpdateNotebookInput): Promise<Not
     notebookClient.PATCH('/notebooks/{notebook_id}', {
       params: { path: { notebook_id: id } },
       body,
+      signal,
     }),
   )
   return normalizeNotebook(data)

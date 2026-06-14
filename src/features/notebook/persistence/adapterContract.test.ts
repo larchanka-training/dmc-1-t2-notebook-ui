@@ -1,13 +1,27 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { indexedDbAdapter } from './indexedDbAdapter'
 import { createMemoryAdapter } from './memoryAdapter'
-import type { NotebookStorageAdapter } from './storageAdapter'
+import type { NotebookStorageAdapter, NotebookSyncState } from './storageAdapter'
 import {
+  CELL_ID,
   makeNotebook,
   NOTEBOOK_ID as ID,
   NOTEBOOK_ID_B as ID_B,
   NOTEBOOK_ID_C as ID_C,
 } from './__fixtures__/notebook'
+
+function makeSyncState(
+  notebookId: string,
+  overrides: Partial<NotebookSyncState> = {},
+): NotebookSyncState {
+  return {
+    notebookId,
+    remoteCreated: false,
+    dirty: true,
+    deletedCells: [{ id: CELL_ID, deletedAt: 1_700_000_000_000 }],
+    ...overrides,
+  }
+}
 
 // One contract, two backends. Every shared behaviour is asserted against both
 // `indexedDbAdapter` (disk) and `createMemoryAdapter()` (memory), so the two can
@@ -85,6 +99,58 @@ describe.each(backends)('NotebookStorageAdapter contract: $name', ({ create }) =
     await store.put(makeNotebook(ID, 1))
     await store.clearAll()
     expect(await store.list()).toEqual([])
+  })
+
+  // --- Sync-metadata partition (#134) -------------------------------------
+
+  test('putSyncState then getSyncState round-trips', async () => {
+    const state = makeSyncState(ID)
+    await store.putSyncState(state)
+    expect(await store.getSyncState(ID)).toEqual(state)
+  })
+
+  test('getSyncState returns undefined for an unknown id', async () => {
+    expect(await store.getSyncState('missing')).toBeUndefined()
+  })
+
+  test('putSyncState replaces an existing record with the same id', async () => {
+    await store.putSyncState(makeSyncState(ID, { dirty: true }))
+    await store.putSyncState(makeSyncState(ID, { dirty: false, remoteCreated: true }))
+    const stored = await store.getSyncState(ID)
+    expect(stored).toMatchObject({ dirty: false, remoteCreated: true })
+  })
+
+  test('deleteSyncState removes the record', async () => {
+    await store.putSyncState(makeSyncState(ID))
+    await store.deleteSyncState(ID)
+    expect(await store.getSyncState(ID)).toBeUndefined()
+  })
+
+  test('sync state lives in a partition separate from notebook content', async () => {
+    await store.put(makeNotebook(ID, 1))
+    await store.putSyncState(makeSyncState(ID))
+    // Deleting the notebook must not drop its sync state, and vice versa.
+    await store.delete(ID)
+    expect(await store.getSyncState(ID)).toBeDefined()
+    expect(await store.get(ID)).toBeUndefined()
+  })
+
+  test('clearAll wipes notebooks AND sync state in one call', async () => {
+    await store.put(makeNotebook(ID, 1))
+    await store.putSyncState(makeSyncState(ID))
+    await store.clearAll()
+    expect(await store.list()).toEqual([])
+    expect(await store.getSyncState(ID)).toBeUndefined()
+  })
+
+  test('mutating the object passed to putSyncState does not change the store', async () => {
+    const source = makeSyncState(ID)
+    await store.putSyncState(source)
+    source.dirty = false
+    source.deletedCells[0].deletedAt = 0
+    const stored = await store.getSyncState(ID)
+    expect(stored?.dirty).toBe(true)
+    expect(stored?.deletedCells[0].deletedAt).toBe(1_700_000_000_000)
   })
 
   test('list returns notebooks most recently edited first', async () => {

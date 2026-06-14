@@ -1,9 +1,11 @@
 import { KeyRound, Play, Save, Sparkles, Type } from 'lucide-react'
 
-// Real, shipped features only. AI generation is intentionally NOT here — it is
-// surfaced separately as "In progress" (epic 07). Autosave is local-only
-// (IndexedDB); cross-session sync (epic 04/05) does not exist yet, so it is not
-// claimed here.
+// Real, shipped features only. AI generation is surfaced separately as
+// "In progress" (epic 07). Autosave persists locally to IndexedDB; for a
+// signed-in user it also pushes to the server in the background (#134). Full
+// cross-device sync (server bootstrap + status UI, #135) is not live yet, so the
+// cards below stay conservative and do not promise "see your notebooks on another
+// device".
 const FEATURES = [
   {
     icon: Play,

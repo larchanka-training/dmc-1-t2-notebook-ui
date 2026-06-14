@@ -19,3 +19,16 @@ export const notebookRevisionAtom = atom(0, 'notebook.revision')
 export const bumpNotebookRevision = action(() => {
   notebookRevisionAtom.set((revision) => revision + 1)
 }, 'notebook.revision.bump')
+
+// Bumped when the in-memory notebook is REPLACED wholesale from storage (boot
+// load, cross-tab pull / Reload, or remote-sync baseline adoption) — i.e. the cell
+// set changed without a user edit. The remote-sync layer re-seeds its
+// delete-detection baseline (`previousCellIds`) on this so a cell that arrived via
+// a reload still produces a tombstone when later deleted. Distinct from
+// `notebookRevisionAtom` (which also bumps on edits, and so cannot be used).
+export const notebookRestoredAtom = atom(0, 'notebook.restored')
+
+/** Mark a wholesale content replacement from storage (not a user edit). */
+export const bumpNotebookRestored = action(() => {
+  notebookRestoredAtom.set((seq) => seq + 1)
+}, 'notebook.restored.bump')

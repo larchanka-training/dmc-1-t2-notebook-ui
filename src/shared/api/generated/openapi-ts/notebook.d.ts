@@ -22,6 +22,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notebooks/features-demo/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore feature-demo notebook */
+        post: operations["restore_features_demo_api_v1_notebooks_features_demo_restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notebooks/{notebook_id}": {
         parameters: {
             query?: never;
@@ -361,6 +378,44 @@ export interface operations {
             };
         };
     };
+    restore_features_demo_api_v1_notebooks_features_demo_restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description No feature-demo notebook to restore */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     get_notebook_api_v1_notebooks__notebook_id__get: {
         parameters: {
             query?: never;
@@ -592,7 +647,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
-            /** @description Stored context exceeds the item/byte limits */
+            /** @description Body too large or stored context exceeds the byte limit */
             422: {
                 headers: {
                     [name: string]: unknown;
