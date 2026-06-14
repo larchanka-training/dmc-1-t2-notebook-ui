@@ -1,9 +1,10 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import * as idLib from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
-import { createNotebookAction, notebookListResource } from './notebookList'
+import { createNotebookAction, notebookListResource, startNotebookListSync } from './notebookList'
 
 // A fixed client UUID so the create payload (FU1) is deterministic to assert.
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
@@ -99,5 +100,82 @@ describe('createNotebookAction', () => {
 
     await expect(createNotebookAction('new')).rejects.toThrow()
     expect(peek(notebookListResource.data)).toEqual([existing])
+  })
+})
+
+const ALICE = { id: '11111111-1111-4111-8111-111111111111', roles: [] }
+const BOB = { id: '22222222-2222-4222-8222-222222222222', roles: [] }
+
+// Assert the contract of startNotebookListSync (reset + conditional retry on an
+// account change) via spies on the resource, not the resource's reactive `data`:
+// the computed only pushes a fetched result while it has a live subscriber, which
+// a unit test doesn't set up. Whether the rows actually re-render is the
+// resource's own concern, covered by the createNotebookAction tests above.
+describe('startNotebookListSync (refresh on account change)', () => {
+  let stop: (() => void) | undefined
+  let resetSpy: ReturnType<typeof vi.spyOn>
+  let retrySpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    resetSpy = vi.spyOn(notebookListResource, 'reset').mockImplementation(() => undefined as never)
+    retrySpy = vi
+      .spyOn(notebookListResource, 'retry')
+      .mockImplementation(() => Promise.resolve() as never)
+  })
+
+  afterEach(() => {
+    stop?.()
+    stop = undefined
+    userAtom.set(null)
+  })
+
+  test('resets and refetches the list when the account changes within a session', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(BOB) // switch account
+    await Promise.resolve()
+
+    // Alice's cached rows are dropped, then Bob's list is fetched.
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('resets but does not refetch on sign-out', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(null) // sign out
+    await Promise.resolve()
+
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('does not reset or refetch on the initial subscribe (boot loads lazily)', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    await Promise.resolve()
+
+    // The first synchronous emit is skipped — starting the sync touches nothing.
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('ignores a redundant emit when the same account stays signed in', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set({ ...ALICE }) // same id, new object reference
+    await Promise.resolve()
+
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(retrySpy).not.toHaveBeenCalled()
   })
 })

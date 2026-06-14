@@ -8,6 +8,7 @@ import {
   wrap,
 } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 
@@ -17,6 +18,38 @@ export const notebookListResource = computed(
 ).extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
 
 notebookListResource.data.extend(withRollback())
+
+/**
+ * Keep the sidebar list in step with the signed-in account (#135). The resource
+ * is a `computed` over `notebookApi.list()` that does NOT read `userAtom`, so it
+ * never re-runs on its own when the account changes within one session (sign-out
+ * → sign-in, or account B after account A on a shared device). Without this, the
+ * cached rows of the previous account would linger — both a staleness bug and a
+ * cross-account leak (§11).
+ *
+ * On every owner change: reset the cached rows (so a foreign list cannot flash),
+ * then, when signed in, refetch for the new account. The initial synchronous emit
+ * is skipped — boot loads the list lazily through the sidebar's own subscription,
+ * so there is no redundant fetch on startup. Returns an unsubscribe handle.
+ */
+export function startNotebookListSync(): () => void {
+  let primed = false
+  let lastOwnerId: string | null = null
+  return userAtom.subscribe((user) => {
+    const ownerId = user?.id ?? null
+    if (!primed) {
+      primed = true
+      lastOwnerId = ownerId
+      return
+    }
+    if (ownerId === lastOwnerId) return
+    lastOwnerId = ownerId
+    // Drop the previous account's rows before anything can render them.
+    notebookListResource.reset()
+    // Signed in → load the new account's list; signed out → leave it empty.
+    if (ownerId !== null) void notebookListResource.retry()
+  })
+}
 
 /** Project a full notebook onto the lightweight list row (same id; FU2 reconcile). */
 function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
