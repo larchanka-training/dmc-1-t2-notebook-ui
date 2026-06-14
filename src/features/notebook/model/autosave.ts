@@ -18,7 +18,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { openCrossTabChannel } from '../persistence/crosstab'
 import {
-  LOCAL_NOTEBOOK_ID,
+  activeNotebookIdAtom,
   notebookBaseUpdatedAtAtom,
   notebookSnapshot,
   restoreNotebook,
@@ -143,7 +143,7 @@ export async function saveNow(): Promise<void> {
  */
 export async function reloadFromStorage(): Promise<boolean> {
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (!stored) return false
     restoreNotebook(stored)
     acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
@@ -173,7 +173,7 @@ export async function saveMine(): Promise<void> {
   }
   saveStatusAtom.set('saving')
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     const snapshotRevision = notebookRevisionAtom()
     const snapshot = snapshotAfter(
       Math.max(notebookBaseUpdatedAtAtom() ?? 0, stored?.updatedAt ?? 0),
@@ -237,7 +237,7 @@ async function handleExternalSave(updatedAt: number): Promise<void> {
 
 async function checkStoredVersion(): Promise<void> {
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (!stored) return
     await handleExternalSave(stored.updatedAt)
   } catch (error) {
@@ -304,7 +304,7 @@ export function startAutosave(): () => void {
   // isolated, so #136 must gate this channel by device mode before enabling it.
   channel = openCrossTabChannel(
     wrap((message) => {
-      if (message.id !== LOCAL_NOTEBOOK_ID) return
+      if (message.id !== activeNotebookIdAtom()) return
       void handleExternalSave(message.updatedAt)
     }),
   )
