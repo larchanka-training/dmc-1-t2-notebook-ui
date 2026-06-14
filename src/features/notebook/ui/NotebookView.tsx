@@ -284,34 +284,51 @@ export const NotebookView = reatomComponent(() => {
           {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
               drag on Esc out of the box (pointer + keyboard sensors). */}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={onDragEnd}
-            autoScroll={{ threshold: { x: 0, y: 0.15 } }}
-          >
-            <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-3">
-                {cells.map((cell, idx) => (
-                  <div key={cell.id} className="flex flex-col gap-3">
-                    <SortableCell id={cell.id}>
-                      <NotebookRow
-                        cell={cell}
-                        isFirst={idx === 0}
-                        isLast={idx === cells.length - 1}
-                      />
-                    </SortableCell>
-                    {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
-                  </div>
-                ))}
-
-                <CellInserter
-                  afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
-                  variant="end"
-                />
+          {cells.length === 0 ? (
+            // Minimal functional empty-state (#135): open-into-slot can now load a
+            // 0-cell notebook (created via the sidebar "+"), and `deleteCell`
+            // guards the last cell, so an empty notebook must offer a way out. The
+            // end-inserter's Code/Text buttons already call addCell('code'|'markdown'),
+            // so wrapping them with a caption is the whole feature — no new logic.
+            // Final visual design (illustration, copy, layout) is #67 §6.
+            <div className="flex flex-col items-center gap-4 py-16 text-center">
+              <p className="text-sm text-muted-foreground">
+                This notebook is empty. Add your first cell to get started.
+              </p>
+              <div className="w-full max-w-sm">
+                <CellInserter variant="end" />
               </div>
-            </SortableContext>
-          </DndContext>
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onDragEnd}
+              autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+            >
+              <SortableContext
+                items={cells.map((c) => c.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="flex flex-col gap-3">
+                  {cells.map((cell, idx) => (
+                    <div key={cell.id} className="flex flex-col gap-3">
+                      <SortableCell id={cell.id}>
+                        <NotebookRow
+                          cell={cell}
+                          isFirst={idx === 0}
+                          isLast={idx === cells.length - 1}
+                        />
+                      </SortableCell>
+                      {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+                    </div>
+                  ))}
+
+                  <CellInserter afterId={cells[cells.length - 1].id} variant="end" />
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
         </div>
       </main>
 
