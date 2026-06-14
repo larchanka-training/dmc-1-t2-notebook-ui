@@ -12,6 +12,7 @@ import {
   updateCellCode,
 } from './notebook'
 import {
+  drainAutosave,
   hasLocalChangesAtom,
   lastSavedAtAtom,
   localSaveCommittedAtom,
@@ -386,5 +387,73 @@ describe('notebook autosave', () => {
       markBootRestored()
       expect(localSaveCommittedAtom()).toBe(before)
     })
+  })
+})
+
+// CL-7: the slot switch's data-loss seam (INV-A) is `drainAutosave` — flush the
+// pending debounce + await any in-flight write BEFORE the id flip. Exercised here
+// against the REAL autosave module (no slot.ts mock), which `slot.test.ts` cannot
+// because it stubs `./autosave` wholesale.
+describe('drainAutosave (slot-switch flush seam)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    saveStatusAtom.set('idle')
+    lastSavedAtAtom.set(null)
+    localSaveCommittedAtom.set(0)
+    storageCompatibilityAtom.set('ok')
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  test('flushes an armed debounce synchronously (pending edit persists before the flip)', async () => {
+    const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+    const stop = startAutosave()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'pending-edit')
+    // Within the debounce window: the timer is armed but the write has NOT fired.
+    await vi.advanceTimersByTimeAsync(100)
+    expect(putIfNewer).not.toHaveBeenCalled()
+
+    // Drain promotes the pending save now, without waiting out the 500ms debounce.
+    await drainAutosave()
+    expect(putIfNewer).toHaveBeenCalledTimes(1)
+    expect(saveStatusAtom()).toBe('saved')
+    stop()
+  })
+
+  test('does not resolve until an in-flight write settles', async () => {
+    let release!: () => void
+    const gate = new Promise<{ ok: true }>((resolve) => {
+      release = () => resolve({ ok: true })
+    })
+    vi.spyOn(notebookStorage, 'putIfNewer').mockReturnValue(gate)
+    const stop = startAutosave()
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'in-flight')
+    // Let the debounce fire so a write is genuinely in flight (blocked on `gate`).
+    await vi.advanceTimersByTimeAsync(500)
+    expect(saveStatusAtom()).toBe('saving')
+
+    let drained = false
+    const drain = drainAutosave().then(() => {
+      drained = true
+    })
+    // While the write is blocked, the drain must NOT have resolved yet.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(drained).toBe(false)
+
+    release()
+    await drain
+    expect(drained).toBe(true)
+    expect(saveStatusAtom()).toBe('saved')
+    stop()
+  })
+
+  test('resolves immediately when autosave is stopped (no pending, no in-flight)', async () => {
+    // No active autosave instance — drain is a no-op that resolves right away.
+    await expect(drainAutosave()).resolves.toBeUndefined()
   })
 })

@@ -6,6 +6,7 @@ import type { NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
 import { reatomCell } from '../domain/cell'
 import {
+  activeNotebookIdAtom,
   cellsAtom,
   LOCAL_NOTEBOOK_ID,
   notebookBaseUpdatedAtAtom,
@@ -1247,5 +1248,51 @@ describe('remote sync engine', () => {
     expect(pausedAtom()).toBe(true)
     expect(remoteSyncStatusAtom()).toBe('paused')
     expect(clearAllSpy).not.toHaveBeenCalled()
+  })
+
+  // CL-8: the adopt-baseline guards were migrated from `=== LOCAL_NOTEBOOK_ID` to
+  // `=== activeNotebookIdAtom()` (the literal point of #135). These exercise them
+  // with the slot switched to a BACKEND id, which the old constant-based guard
+  // could never have matched — so they distinguish the new behaviour from the old.
+  const BACKEND_ID = '44444444-4444-4444-8444-444444444444'
+  const backendState: NotebookSyncState = {
+    notebookId: BACKEND_ID,
+    remoteCreated: true,
+    dirty: false,
+    ownerId: OWNER,
+    deletedCells: [],
+    lastSyncedUpdatedAt: 5,
+  }
+  function backendDoc(updatedAt: number, cells: NotebookJSON['cells']): NotebookJSON {
+    return { formatVersion: 1, id: BACKEND_ID, title: 'NB', createdAt: 1, updatedAt, cells }
+  }
+
+  test('dirty-guard defers adoption for the switched-in backend id, not just LOCAL (CL-8)', async () => {
+    // Slot switched to a backend notebook; the editor is dirty for THAT id.
+    activeNotebookIdAtom.set(BACKEND_ID)
+    getSpy.mockResolvedValue(backendDoc(5, [cell(CELL_A, 'local', 5)]))
+    getSyncStateSpy.mockResolvedValue({ ...backendState })
+    patchSpy.mockResolvedValue({
+      ...serverResponse([cell(CELL_A, 'server', 10)]),
+      id: BACKEND_ID,
+    })
+    // CAS write succeeds, but a keystroke keeps the editor dirty during adoption.
+    putIfNewerSpy.mockImplementation(async () => {
+      bumpNotebookRevision()
+      return { ok: true }
+    })
+    cellsAtom.set([reatomCell('local', 'code', CELL_A, 5)])
+
+    teardown = startRemoteSync(BACKEND_ID)
+    await vi.advanceTimersByTimeAsync(0)
+    await commitAndFlush()
+
+    // The open editor (backend id) is NOT clobbered by the server doc — proving the
+    // guard keyed on the active id, which equals BACKEND_ID here. The status is
+    // not a false 'synced'.
+    expect(cellsAtom()[0].code()).toBe('local')
+    expect(remoteSyncStatusAtom()).not.toBe('synced')
+
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
   })
 })
