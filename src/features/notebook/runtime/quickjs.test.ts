@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
-import { createKernel, type Kernel } from './quickjs'
+import { createKernel, PROMISE_HINT, type Kernel } from './quickjs'
 import type { OutputItem } from './types'
 
 // These tests pin the public contract of the persistent kernel. Worker
@@ -506,4 +506,267 @@ describe('kernel.run — incremental output streaming (onItem)', () => {
       kernel.dispose()
     }
   }, 10_000)
+})
+
+describe('kernel.run — promise output (TARDIS-65)', () => {
+  // Regression: a Promise passed to console.log must NOT leak QuickJS's
+  // internal promise-state object (`{"type":"rejected",...}`) into stdout.
+  // It renders Node-style: `Promise { ... }`. This is the `stdout` leak path.
+  function onlyStdout(items: OutputItem[]): string {
+    const out = items.filter((it) => it.type === 'stdout')
+    expect(out).toHaveLength(1)
+    return (out[0] as Extract<OutputItem, { type: 'stdout' }>).text
+  }
+
+  test('console.log(rejected) renders Promise { <rejected> … }, not raw JSON', async () => {
+    const r = await runFresh('console.log(Promise.reject(new TypeError("not a function")))')
+    expect(r.status).toBe('done')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { <rejected> TypeError: not a function }')
+    expect(text).not.toContain('"type":"rejected"')
+  })
+
+  test('console.log(fulfilled) renders Promise { value }, not raw JSON', async () => {
+    const r = await runFresh('console.log(Promise.resolve(42))')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { 42 }')
+    expect(text).not.toContain('"type":"fulfilled"')
+  })
+
+  test('console.log(pending) renders Promise { <pending> }, not raw JSON', async () => {
+    const r = await runFresh('console.log(new Promise(() => {}))')
+    const text = onlyStdout(r.items)
+    expect(text).toBe('Promise { <pending> }')
+    expect(text).not.toContain('"type":"pending"')
+  })
+
+  test('a non-Promise object is unaffected by promise-aware stringify', async () => {
+    const r = await runFresh('console.log({ a: 1 })')
+    expect(onlyStdout(r.items)).toBe('{"a":1}')
+  })
+
+  // Documented limitation: formatPromise only catches a TOP-LEVEL promise. A
+  // nested one falls through to vm.dump, which special-cases promise-state only
+  // for top-level handles — so it prints as an opaque `{}`, NOT the raw
+  // `{"type":…}` state object. Pin that so the limitation can't silently worsen.
+  test('a Promise nested in a logged container prints as {} (no raw state leak)', async () => {
+    const text = onlyStdout(
+      (await runFresh('console.log([Promise.reject(new TypeError("x"))])')).items,
+    )
+    expect(text).toBe('[{}]')
+    expect(text).not.toContain('"type":"rejected"')
+  })
+
+  // The `result` leak path: a trailing rejected Promise must surface as a
+  // structured error (never raw JSON) and carry the "forgot await?" hint.
+  function onlyError(items: OutputItem[]): Extract<OutputItem, { type: 'error' }> {
+    const err = items.find((it) => it.type === 'error')
+    expect(err).toBeDefined()
+    return err as Extract<OutputItem, { type: 'error' }>
+  }
+
+  test('trailing rejected Promise → structured error with hint, not raw JSON', async () => {
+    const r = await runFresh('Promise.reject(new TypeError("not a function"))')
+    expect(r.status).toBe('error')
+    const err = onlyError(r.items)
+    expect(err.name).toBe('TypeError')
+    expect(err.message).toBe('not a function')
+    expect(err.hint).toBe(PROMISE_HINT)
+    expect(r.items.some((it) => it.type === 'result')).toBe(false)
+    expect(JSON.stringify(r.items)).not.toContain('"type":"rejected"')
+  })
+
+  test('trailing rejected Promise from an async function carries the hint', async () => {
+    const r = await runFresh('async function f(n){ return n.nope() }\nf(5)')
+    expect(r.status).toBe('error')
+    expect(onlyError(r.items).hint).toBe(PROMISE_HINT)
+  })
+
+  test('an ordinary thrown error gets NO promise hint (unchanged)', async () => {
+    const r = await runFresh('throw new TypeError("not a function")')
+    expect(r.status).toBe('error')
+    const err = onlyError(r.items)
+    expect(err.message).toBe('not a function')
+    expect(err.hint).toBeUndefined()
+  })
+
+  test('a trailing fulfilled Promise still resolves to its value (unchanged)', async () => {
+    const r = await runFresh('Promise.resolve(42)')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 42 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
+
+  test('a trailing non-Promise value is a plain result, no hint', async () => {
+    const r = await runFresh('1 + 1')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
+
+  // H-1 (cross-review): Promise.reject(x) does NOT unwrap x, so the reason can
+  // be a native Promise. vm.dump disposes a Promise handle and leaks its state,
+  // so the old code double-freed (QuickJSUseAfterFree) and re-leaked raw JSON.
+  function assertNoLeakNoCrash(items: OutputItem[]) {
+    const blob = JSON.stringify(items)
+    expect(blob).not.toContain('QuickJSUseAfterFree')
+    expect(blob).not.toContain('"type":"fulfilled"')
+    expect(blob).not.toContain('"type":"rejected"')
+    expect(blob).not.toContain('"type":"pending"')
+  }
+
+  test('console.log(Promise.reject(<fulfilled promise>)) does not crash or leak', async () => {
+    const r = await runFresh('console.log(Promise.reject(Promise.resolve(1)))')
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyStdout(r.items)).toContain('Promise {')
+  })
+
+  test('console.log(Promise.reject(<rejected promise>)) does not crash or leak', async () => {
+    const r = await runFresh('console.log(Promise.reject(Promise.reject(2)))')
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+  })
+
+  test('trailing Promise.reject(<native promise>) → error + hint, no crash or leak', async () => {
+    const r = await runFresh('Promise.reject(Promise.resolve(1))')
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    const err = onlyError(r.items)
+    expect(err.name).not.toBe('QuickJSUseAfterFree')
+    expect(err.hint).toBe(PROMISE_HINT)
+  })
+
+  // A self-rejected / cyclic promise must stay bounded: the formatPromise ↔
+  // toErrorItem recursion is depth-capped, so there is no host stack overflow,
+  // no RangeError rejecting the run, and no VM teardown abort. `run` never throws.
+  const SELF_REJECTED = 'let rej; const p = new Promise((_, r) => { rej = r }); rej(p)'
+
+  test('a self-rejected trailing promise renders bounded, not a stack overflow', async () => {
+    const r = await runFresh(`${SELF_REJECTED}; p`)
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    const err = onlyError(r.items)
+    expect(err.message).toContain('[nested promise]')
+    expect(err.message).not.toContain('Maximum call stack')
+  })
+
+  test('console.log of a self-rejected promise renders bounded, no crash', async () => {
+    const r = await runFresh(`${SELF_REJECTED}; console.log(p)`)
+    expect(r.status).toBe('done')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyStdout(r.items)).toContain('[nested promise]')
+  })
+
+  test('a deep Promise.reject chain stays bounded', async () => {
+    const r = await runFresh(
+      'let p = Promise.reject(0); for (let i = 0; i < 4000; i++) { p = Promise.reject(p) } p',
+    )
+    expect(r.status).toBe('error')
+    assertNoLeakNoCrash(r.items)
+    expect(onlyError(r.items).message).toContain('[nested promise]')
+  })
+
+  test('console.warn / console.error render promises with the stderr prefix, no raw JSON', async () => {
+    const warn = await runFresh('console.warn(Promise.reject(new TypeError("x")))')
+    expect(warn.items).toContainEqual({
+      type: 'stderr',
+      text: '[warn] Promise { <rejected> TypeError: x }',
+    })
+    const error = await runFresh('console.error(Promise.reject(new TypeError("x")))')
+    expect(error.items).toContainEqual({
+      type: 'stderr',
+      text: '[error] Promise { <rejected> TypeError: x }',
+    })
+    expect(JSON.stringify([warn.items, error.items])).not.toContain('"type":"rejected"')
+  })
+
+  test('a primitive rejection reason renders as `Error: <value>` (pinned contract)', async () => {
+    // Promise.reject(x) accepts any value as the reason; a non-Error reason is
+    // surfaced through the generic `Error:` prefix (deliberate — not Node-exact).
+    expect(onlyStdout((await runFresh('console.log(Promise.reject(2))')).items)).toBe(
+      'Promise { <rejected> Error: 2 }',
+    )
+    expect(onlyStdout((await runFresh('console.log(Promise.reject("oops"))')).items)).toBe(
+      'Promise { <rejected> Error: oops }',
+    )
+  })
+
+  test('a pending rejection reason renders Promise { <pending> }', async () => {
+    const r = await runFresh('console.log(Promise.reject(new Promise(() => {})))')
+    expect(onlyStdout(r.items)).toBe('Promise { <rejected> Error: Promise { <pending> } }')
+  })
+
+  // Trailing SequenceExpression (`a, b`): JS semantics yield the LAST operand,
+  // and the hint must track that last operand. The __nbTrailing wrapper must
+  // keep the sequence as one argument (regression: it used to split on the comma).
+  test('a trailing sequence expression returns its last operand', async () => {
+    const r = await runFresh('1, 2')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 2 } })
+  })
+
+  test('a rejected first operand of a sequence is discarded (value is the last)', async () => {
+    const r = await runFresh('Promise.reject(new Error("x")), 5')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'result', value: { kind: 'primitive', value: 5 } })
+    expect(r.items.some((it) => it.type === 'error')).toBe(false)
+  })
+
+  test('a sequence ending in a rejected promise surfaces the rejection with the hint', async () => {
+    const r = await runFresh('5, Promise.reject(new Error("x"))')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.hint).toBe(PROMISE_HINT)
+  })
+})
+
+describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
+  test('user code cannot reassign the marker away (hint survives the session)', async () => {
+    const kernel = await createKernel()
+    try {
+      // Reassigning the internal marker is silently ignored (non-writable, sloppy
+      // mode). The persistent VM must keep detecting trailing promises afterward.
+      const clobber = await kernel.run('globalThis.__nbTrailing = 123')
+      expect(clobber.status).toBe('done')
+      const r = await kernel.run('Promise.reject(new TypeError("x"))')
+      expect(r.status).toBe('error')
+      const err = r.items.find((it) => it.type === 'error')
+      expect(err?.type === 'error' && err.hint).toBe(PROMISE_HINT)
+    } finally {
+      kernel.dispose()
+    }
+  })
+
+  test('the marker is not enumerable on globalThis', async () => {
+    const r = await runFresh('console.log(Object.keys(globalThis).includes("__nbTrailing"))')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'false' })
+  })
+
+  test('in strict mode, reassigning the marker throws a contained TypeError', async () => {
+    // The sloppy-mode case silently ignores the write; a strict-mode cell (the
+    // directive is preserved by the transform) throws read-only, surfaced as an
+    // ordinary error item — the marker still survives for later runs.
+    const r = await runFresh('"use strict"; globalThis.__nbTrailing = 1')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('TypeError')
+    expect(err?.type === 'error' && err.message).toContain('read-only')
+  })
+
+  test('a stale hint does not leak to a later plain throw on the same kernel', async () => {
+    // trailingWasPromise is a per-run flag reset at the top of runOne. On the
+    // persistent VM (one kernel per worker) a hint from a trailing rejected
+    // promise must not survive into the next run's ordinary throw.
+    const kernel = await createKernel()
+    try {
+      const first = await kernel.run('Promise.reject(new TypeError("x"))')
+      const firstErr = first.items.find((it) => it.type === 'error')
+      expect(firstErr?.type === 'error' && firstErr.hint).toBe(PROMISE_HINT)
+
+      const second = await kernel.run('throw new Error("plain")')
+      const secondErr = second.items.find((it) => it.type === 'error')
+      expect(secondErr?.type === 'error' && secondErr.hint).toBeUndefined()
+    } finally {
+      kernel.dispose()
+    }
+  })
 })

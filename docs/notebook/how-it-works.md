@@ -2,8 +2,10 @@
 
 ## Overview
 
-Each code cell runs in an **isolated QuickJS VM** that lives inside a
-dedicated **Web Worker**. Two layers of isolation, one path of data:
+A notebook's code cells run inside a **persistent QuickJS VM** that lives in a
+dedicated **Web Worker** — one VM per worker, shared across all of that
+notebook's cells (Jupyter-style; see [Shared scope](#shared-scope-jupyter-style)).
+Two layers of isolation **from the page**, one path of data:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -68,7 +70,9 @@ runtime/worker.ts: self.onmessage
     │
     ▼
 runtime/transform.ts: publish top-level declarations to globalThis;
-                       trailing ExpressionStatement becomes `return <expr>`
+                       trailing ExpressionStatement becomes
+                       `return __nbTrailing(<expr>)` — an identity marker that
+                       records whether the value was a Promise before adoption
     │
     ▼
 runtime/quickjs.ts: kernel.run(transformedCode, { timeoutMs })
@@ -103,13 +107,32 @@ type OutputItem =
   | { type: 'stdout'; text: string }
   | { type: 'stderr'; text: string } // also: console.warn → '[warn] …'
   | { type: 'result'; value: SerializedValue }
-  | { type: 'error'; name: string; message: string; stack?: string }
+  | { type: 'error'; name: string; message: string; stack?: string; hint?: string }
   | { type: 'html'; html: string } // → sandboxed iframe
   | { type: 'image'; mime: string; data: string } // base64 → <img>
 ```
 
 `SerializedValue` is recursion-safe up to depth 5; anything deeper, or a
 cyclic reference, becomes `{ kind: 'truncated', placeholder: '[Object]' }`.
+
+`error.hint` is an optional human-readable diagnostic for a specific class of
+mistake, rendered as a muted line near the error rather than folded into
+`message`. Today it carries `"Promise rejected; did you forget await?"` when a
+cell's trailing expression evaluates to a rejected Promise.
+
+A Promise passed **directly** to output — `console.log(somePromise)` or a
+trailing/`console.log` rejection reason — renders Node-style:
+`Promise { <pending> }`, `Promise { 42 }`, `Promise { <rejected> TypeError: … }`,
+instead of the engine's internal `{"type":"rejected",…}` state object. Detection
+uses QuickJS's `getPromiseState`, not the lossy `vm.dump`.
+
+Known limitation: a Promise **nested inside** a logged container
+(`console.log([Promise.reject(1)])`) or returned as the cell result goes through
+`vm.dump`, which special-cases promise-state only for a top-level handle. A
+nested Promise therefore renders as an opaque `{}` (e.g. `[{}]`) — the raw
+`{"type":…}` state object does **not** leak there; it is just printed without the
+`Promise { … }` form. Recursive promise-aware rendering of nested values is
+deferred.
 
 ### Rich output: `display()`
 

@@ -115,6 +115,21 @@ describe('outputsDigest', () => {
     expect(digest).toContain('[error] TypeError: boom')
     expect(digest).toContain('[result] array[0]')
   })
+
+  test('omits error.hint from the digest (UI-only, deliberate)', () => {
+    // The "did you forget await?" hint is a UI affordance; the LLM digest
+    // carries only name + message. Pinned so a future change is a conscious one.
+    const digest = outputsDigest([
+      {
+        type: 'error',
+        name: 'TypeError',
+        message: 'boom',
+        hint: 'Promise rejected; did you forget await?',
+      },
+    ])
+    expect(digest).toBe('[error] TypeError: boom')
+    expect(digest).not.toContain('did you forget await')
+  })
 })
 
 describe('truncateUtf8', () => {
