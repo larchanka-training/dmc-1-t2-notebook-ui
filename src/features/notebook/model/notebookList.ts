@@ -11,6 +11,9 @@ import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
 import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
+import { notebookStorage } from '../persistence/activeStorage'
+import { activeNotebookIdAtom } from './notebook'
+import { degradeSlotToFloor } from './slot'
 
 export const notebookListResource = computed(
   async () => await wrap(notebookApi.list()),
@@ -98,3 +101,35 @@ export const createNotebookAction = action(async (title: string) => {
   }
   return nb
 }, 'notebook.list.create').extend(withAsync(), withTransaction())
+
+/**
+ * Delete a notebook from the sidebar (#135). Optimistically drops the row (rolled
+ * back by `withRollback`/`withTransaction` if the server `DELETE` fails, like
+ * create), soft-deletes it server-side, then removes its local copy AND sync-state
+ * (per-notebook cleanup — NOT a device-mode wipe, that is #136).
+ *
+ * If the deleted notebook is the one open in the slot, its bindings are stopped
+ * and the slot degrades to the welcome-seed floor FIRST — otherwise autosave /
+ * remote-sync would immediately recreate the id we just deleted. The local-only
+ * floor (`LOCAL_NOTEBOOK_ID`) has no backend identity and is regenerated on boot,
+ * so it is never deletable; callers gate the Delete affordance on that.
+ */
+export const deleteNotebookAction = action(async (id: string): Promise<void> => {
+  // If the deleted notebook is open, vacate the slot before any storage cleanup so
+  // its still-running bindings cannot re-persist the id mid-delete.
+  if (id === activeNotebookIdAtom()) {
+    await wrap(degradeSlotToFloor())
+  }
+  // Optimistically remove the row; a failed DELETE rolls it back (withTransaction).
+  notebookListResource.data.set((items) => items.filter((it) => it.id !== id))
+  await wrap(notebookApi.remove(id))
+  // Server delete committed — drop the local copy + its sync queue. Best-effort:
+  // a storage hiccup here must not roll the row back (the notebook IS deleted
+  // server-side), so swallow and let the next list refetch reconcile.
+  try {
+    await wrap(notebookStorage.delete(id))
+    await wrap(notebookStorage.deleteSyncState(id))
+  } catch {
+    // Local cleanup is advisory; the authoritative delete already succeeded.
+  }
+}, 'notebook.list.delete').extend(withAsync(), withTransaction())

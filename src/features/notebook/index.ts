@@ -4,6 +4,7 @@ export { NotebookToolbar } from './ui/NotebookToolbar'
 export { SaveIndicator } from './ui/SaveIndicator'
 export { ShortcutsHelp, shortcutsOpenAtom } from './ui/ShortcutsHelp'
 export { RenameNotebookDialog } from './ui/RenameNotebookDialog'
+export { DeleteNotebookDialog } from './ui/DeleteNotebookDialog'
 export {
   cellsAtom,
   addCell,
@@ -66,11 +67,13 @@ export {
   outlineVisibleAtom,
   outlineDrawerOpenAtom,
   renameTargetAtom,
+  deleteTargetAtom,
 } from './model/notebookSettings'
-export type { RenameTarget } from './model/notebookSettings'
+export type { RenameTarget, DeleteTarget } from './model/notebookSettings'
 export {
   notebookListResource,
   createNotebookAction,
+  deleteNotebookAction,
   startNotebookListSync,
 } from './model/notebookList'
 export { openNotebookInSlot, startSlot, stopSlot } from './model/slot'

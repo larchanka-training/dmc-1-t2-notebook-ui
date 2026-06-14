@@ -29,7 +29,9 @@ import {
   notebookTitleAtom,
   openNotebookInSlot,
   renameTargetAtom,
+  deleteTargetAtom,
   activeNotebookIdAtom,
+  LOCAL_NOTEBOOK_ID,
   shortcutsOpenAtom,
 } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
@@ -217,7 +219,9 @@ const InfoGroup = reatomComponent(() => {
 // wired, and only for the current notebook (focuses the editor's title field);
 // Duplicate/Delete and any action on backend rows are presentational until the
 // notebook-management epic (04). Revealed on row hover / when the menu is open.
-function NotebookRowMenu({ onRename }: { onRename?: () => void }) {
+// `onDelete` is omitted for the local-only welcome-seed floor (no backend
+// identity, regenerated on boot) — that row shows no Delete item (#135).
+function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDelete?: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -241,11 +245,15 @@ function NotebookRowMenu({ onRename }: { onRename?: () => void }) {
           <Copy className="size-4" />
           Duplicate
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive">
-          <Trash2 className="size-4" />
-          Delete
-        </DropdownMenuItem>
+        {onDelete ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 className="size-4" />
+              Delete
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -330,6 +338,18 @@ const NotebooksGroup = reatomComponent(() => {
                       title: currentTitle || NEW_NOTEBOOK_TITLE,
                     }),
                   )}
+                  // The local-only welcome-seed floor cannot be deleted; only an
+                  // open backend notebook gets a Delete item (#135).
+                  onDelete={
+                    activeId === LOCAL_NOTEBOOK_ID
+                      ? undefined
+                      : wrap(() =>
+                          deleteTargetAtom.set({
+                            id: activeId,
+                            title: currentTitle || NEW_NOTEBOOK_TITLE,
+                          }),
+                        )
+                  }
                 />
               </SidebarMenuItem>
             ) : null}
@@ -351,6 +371,7 @@ const NotebooksGroup = reatomComponent(() => {
                 </SidebarMenuButton>
                 <NotebookRowMenu
                   onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title: nb.title }))}
+                  onDelete={wrap(() => deleteTargetAtom.set({ id: nb.id, title: nb.title }))}
                 />
               </SidebarMenuItem>
             ))}

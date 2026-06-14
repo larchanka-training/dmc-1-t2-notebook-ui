@@ -14,7 +14,7 @@
 import { action, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
-import { activeNotebookIdAtom, restoreNotebook } from './notebook'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
 import { drainAutosave, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
@@ -65,6 +65,25 @@ export function startSlot(): void {
 export function stopSlot(): void {
   stopBindings()
 }
+
+/**
+ * Degrade the slot back to the local welcome-seed floor (#135). Called when the
+ * notebook currently open in the slot is deleted: leaving the slot on the deleted
+ * id would let autosave/remote-sync recreate it. Points the slot at
+ * `LOCAL_NOTEBOOK_ID` and reloads it from storage (re-seeding the welcome notebook
+ * if absent), re-arming the bindings on that floor id.
+ *
+ * The caller (delete action) MUST stop the deleted notebook's bindings before its
+ * own per-notebook storage cleanup; this re-arms fresh bindings for the floor.
+ */
+export const degradeSlotToFloor = action(async (): Promise<void> => {
+  stopBindings()
+  // Point the slot at the floor id BEFORE loading, since `loadNotebook` reads the
+  // active id. `loadNotebook` restores the stored welcome notebook or re-seeds one.
+  activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  await wrap(loadNotebook())
+  startBindings()
+}, 'notebook.degradeSlotToFloor')
 
 /**
  * Open a notebook from the sidebar list into the single editor slot. Loads the
