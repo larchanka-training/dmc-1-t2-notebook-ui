@@ -86,6 +86,51 @@ describe('OutputFrame — sandbox hardening', () => {
   })
 })
 
+describe('OutputFrame — resize sizing', () => {
+  test('measures the #output-root wrapper, not the document element', () => {
+    const { container } = render(<OutputFrame html="<b>hi</b>" />)
+    const srcDoc = container.querySelector('iframe')!.getAttribute('srcdoc') ?? ''
+    // The shell must measure an intrinsic content wrapper, not the iframe
+    // viewport (document.documentElement). Measuring documentElement makes the
+    // reported height track the iframe's own height and re-opens the feedback
+    // loop this ticket fixes.
+    expect(srcDoc).toContain('id="output-root"')
+    expect(srcDoc).toContain("getElementById('output-root')")
+    expect(srcDoc).not.toContain('document.documentElement.scrollHeight')
+  })
+
+  describe('parent height application', () => {
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    test('does not grow when the shell keeps reporting the applied height', () => {
+      // Reproduces the TARDIS-66 loop: the shell reports the iframe's own
+      // height back on every heartbeat. The old parent added +4 each time, so
+      // an idle frame crept up to MAX_HEIGHT. The fix applies the reported
+      // value verbatim and ignores no-op updates, so the height must stay put.
+      const { container } = render(<OutputFrame html="<b>x</b>" />)
+      const iframe = container.querySelector('iframe')!
+
+      // Seed a content height above MIN_HEIGHT so any growth would be visible.
+      act(() => {
+        pingFrom(iframe, 200)
+        vi.advanceTimersByTime(20)
+      })
+      const settled = iframe.style.height
+      expect(settled).toBe('200px')
+
+      // Feed the applied height back repeatedly — the feedback loop itself.
+      for (let i = 0; i < 5; i++) {
+        act(() => {
+          pingFrom(iframe, Number.parseInt(iframe.style.height, 10))
+          vi.advanceTimersByTime(20)
+        })
+      }
+      expect(iframe.style.height).toBe(settled)
+    })
+  })
+})
+
 /**
  * Dispatch a `iframe-resize` message that looks like it came from the given
  * iframe's content window (the component checks `event.source`). jsdom doesn't
