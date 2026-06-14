@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
-import { createKernel, type Kernel } from './quickjs'
+import { createKernel, PROMISE_HINT, type Kernel } from './quickjs'
 import type { OutputItem } from './types'
 
 // These tests pin the public contract of the persistent kernel. Worker
@@ -559,7 +559,7 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     const err = onlyError(r.items)
     expect(err.name).toBe('TypeError')
     expect(err.message).toBe('not a function')
-    expect(err.hint).toBe('Promise rejected; did you forget await?')
+    expect(err.hint).toBe(PROMISE_HINT)
     expect(r.items.some((it) => it.type === 'result')).toBe(false)
     expect(JSON.stringify(r.items)).not.toContain('"type":"rejected"')
   })
@@ -567,7 +567,7 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
   test('trailing rejected Promise from an async function carries the hint', async () => {
     const r = await runFresh('async function f(n){ return n.nope() }\nf(5)')
     expect(r.status).toBe('error')
-    expect(onlyError(r.items).hint).toBe('Promise rejected; did you forget await?')
+    expect(onlyError(r.items).hint).toBe(PROMISE_HINT)
   })
 
   test('an ordinary thrown error gets NO promise hint (unchanged)', async () => {
@@ -621,6 +621,6 @@ describe('kernel.run — promise output (TARDIS-65)', () => {
     assertNoLeakNoCrash(r.items)
     const err = onlyError(r.items)
     expect(err.name).not.toBe('QuickJSUseAfterFree')
-    expect(err.hint).toBe('Promise rejected; did you forget await?')
+    expect(err.hint).toBe(PROMISE_HINT)
   })
 })

@@ -35,7 +35,7 @@ import RELEASE_SYNC from '@jitl/quickjs-wasmfile-release-sync'
 import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, OUTPUT_ITEM_LIMIT, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
-import { transformCellCode } from './transform'
+import { TRAILING_MARKER, transformCellCode } from './transform'
 import type { OutputItem, RuntimeResult, RuntimeStatus, SerializedValue } from './types'
 
 /**
@@ -56,7 +56,7 @@ const VM_MAX_STACK_BYTES = 1024 * 1024
  * Diagnostic attached to the `error` item when a cell's trailing expression
  * evaluated to a rejected Promise (the most common "forgot to await" mistake).
  */
-const PROMISE_HINT = 'Promise rejected; did you forget await?'
+export const PROMISE_HINT = 'Promise rejected; did you forget await?'
 
 /**
  * Output accumulator shared by console / display capture and the result
@@ -378,11 +378,11 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * its handle-disposal contract live in `isPromise`/`inspectPromise`.
  */
 function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
-  const fn = vm.newFunction('__nbTrailing', (handle) => {
+  const fn = vm.newFunction(TRAILING_MARKER, (handle) => {
     if (isPromise(vm, handle)) sink.trailingWasPromise = true
     return handle
   })
-  vm.setProp(vm.global, '__nbTrailing', fn)
+  vm.setProp(vm.global, TRAILING_MARKER, fn)
   fn.dispose()
 }
 

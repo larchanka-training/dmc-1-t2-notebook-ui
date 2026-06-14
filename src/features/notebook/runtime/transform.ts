@@ -63,6 +63,14 @@ export interface TransformResult {
   code: string
 }
 
+/**
+ * Name of the identity marker the trailing expression is wrapped in. Shared
+ * contract: `transform` emits a call to it, the kernel (`quickjs.ts`) injects a
+ * function of this exact name. Keep both sides on this constant — a literal on
+ * one side and a rename on the other would only fail at runtime.
+ */
+export const TRAILING_MARKER = '__nbTrailing'
+
 class UnsupportedSyntaxError extends Error {
   constructor(message: string) {
     super(message)
@@ -254,9 +262,9 @@ function patternToGlobalTarget(pattern: Pattern, source: string): string {
 }
 
 function rewriteTrailingExpression(node: ExpressionStatement, source: string): string {
-  // Wrap in the kernel's `__nbTrailing` identity marker so a rejected trailing
-  // Promise can be told apart from an ordinary throw (see header §2).
-  return `return __nbTrailing(${sliceNode(source, node.expression as Expression)})`
+  // Wrap in the kernel's identity marker so a rejected trailing Promise can be
+  // told apart from an ordinary throw (see header §2).
+  return `return ${TRAILING_MARKER}(${sliceNode(source, node.expression as Expression)})`
 }
 
 function sliceNode(source: string, node: Node): string {

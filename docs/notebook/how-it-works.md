@@ -68,7 +68,9 @@ runtime/worker.ts: self.onmessage
     │
     ▼
 runtime/transform.ts: publish top-level declarations to globalThis;
-                       trailing ExpressionStatement becomes `return <expr>`
+                       trailing ExpressionStatement becomes
+                       `return __nbTrailing(<expr>)` — an identity marker that
+                       records whether the value was a Promise before adoption
     │
     ▼
 runtime/quickjs.ts: kernel.run(transformedCode, { timeoutMs })
