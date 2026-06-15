@@ -216,12 +216,12 @@ const InfoGroup = reatomComponent(() => {
   )
 }, 'InfoGroup')
 
-// Per-row "…" menu (new-design-v2): Rename / Duplicate / Delete. Only Rename is
-// wired, and only for the current notebook (focuses the editor's title field);
-// Duplicate/Delete and any action on backend rows are presentational until the
-// notebook-management epic (04). Revealed on row hover / when the menu is open.
-// `onDelete` is omitted for the local-only welcome-seed floor (no backend
-// identity, regenerated on boot) — that row shows no Delete item (#135).
+// Per-row "…" menu (new-design-v2): Rename / Duplicate / Delete (#135). Rename
+// (title edit) and Delete (confirm modal → server DELETE) are wired; `onDelete` is
+// omitted for the local-only welcome-seed floor (no backend identity, regenerated
+// on boot), so that row shows no Delete item. Duplicate is not implemented yet —
+// it is rendered disabled with explicit coming-soon semantics rather than as a
+// dead clickable item (review L7). Revealed on row hover / when the menu is open.
 function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDelete?: () => void }) {
   return (
     <DropdownMenu>
@@ -242,7 +242,7 @@ function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDele
           <Pencil className="size-4" />
           Rename
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem disabled aria-disabled="true" title="Duplicate — coming soon">
           <Copy className="size-4" />
           Duplicate
         </DropdownMenuItem>
@@ -260,9 +260,9 @@ function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDele
   )
 }
 
-// Default title for the quick "+" create (new-design-v2 uses "Untitled
-// notebook"). Opening/renaming/switching notebooks is epic 04 — out of scope
-// here; the list stays presentational.
+// Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
+// Open-into-slot, rename and delete are wired here (#135); multi-notebook routing
+// / duplicate stay in epic 04.
 const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
 
 const NotebooksGroup = reatomComponent(() => {
@@ -274,10 +274,11 @@ const NotebooksGroup = reatomComponent(() => {
   // The local notebook opens at the notebook route — the same empty-path href
   // as the "Notebook" item in Workspace (BASE_URL + '').
   const notebookHref = import.meta.env.BASE_URL
-  // The currently open notebook lives in the editor slot (its id is
-  // `activeNotebookIdAtom`, #135). Surface it as a synthetic top entry with a
-  // live title so it shows up and stays highlighted while editing. Full
-  // open/switch across the backend list is epic 04.
+  // The notebook open in the editor slot is identified by `activeNotebookIdAtom`
+  // (#135). Its row stays in place in the backend list and is highlighted; only
+  // when the active id is NOT in the list (the local welcome floor) is a single
+  // synthetic row surfaced for it (see `showFloorRow`). `currentTitle` is the live
+  // editor title, shown on the active row so it reflects in-progress edits.
   const currentTitle = notebookTitleAtom()
   const activeId = activeNotebookIdAtom()
   // FU3: disable the "+" while a create is in flight, so a double-click cannot

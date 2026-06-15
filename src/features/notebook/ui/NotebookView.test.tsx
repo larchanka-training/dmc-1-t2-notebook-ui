@@ -40,9 +40,11 @@ describe('NotebookView (RTL integration)', () => {
   test('adding a cell renders one more editor', async () => {
     const user = userEvent.setup()
     renderView()
-    expect(getCodeEditors()).toHaveLength(1)
+    // CodeMirror editors mount asynchronously; wait for the seed editor instead of
+    // a synchronous assert (which flaked under a busy parallel pool).
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
-    expect(getCodeEditors()).toHaveLength(2)
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(2))
   })
 
   test('running a cell populates its output area', async () => {
@@ -63,6 +65,7 @@ describe('NotebookView (RTL integration)', () => {
   test('editing one cell leaves other cells untouched (atomization)', async () => {
     const user = userEvent.setup()
     renderView()
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
     const [first, second] = cellsAtom()
     expect(first.code()).toBe(SEED_CODE)
