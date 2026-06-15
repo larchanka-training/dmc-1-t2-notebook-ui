@@ -46,7 +46,11 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
-import { cloudGenerateAndInsertCodeAction } from '../model/cloudCodeGenerator'
+import {
+  cloudGenerateAndInsertCodeAction,
+  cloudGeneratingCellIdAtom,
+  cloudGenerateErrorsAtom,
+} from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
 import { AgentChatDialog } from './AgentChatDialog'
 import { RateLimitedError } from '@/shared/api/errors'
@@ -104,8 +108,8 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const hasGenerator = !!codeGeneratorAtom()
   const isGenerating = !generateAndInsertCodeAction.ready()
   const generateError = generateAndInsertCodeAction.error()
-  const isCloudGenerating = !cloudGenerateAndInsertCodeAction.ready()
-  const cloudGenerateError = cloudGenerateAndInsertCodeAction.error()
+  const isCloudGenerating = cloudGeneratingCellIdAtom() === cell.id
+  const cloudGenerateError = cloudGenerateErrorsAtom().get(cell.id) ?? null
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
   // re-render the entire cell (card + toolbar + output) on every search
