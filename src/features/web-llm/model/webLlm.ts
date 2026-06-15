@@ -6,18 +6,22 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export type LoadProgress = { progress: number; text: string }
 
-export const AVAILABLE_MODELS = [
-  'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC', // ~1 GB  — fast, code-focused
-  'Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC', // ~2 GB  — best code/size tradeoff
-  'Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC', // ~4.5 GB — best code quality
-  'Llama-3.2-1B-Instruct-q4f32_1-MLC', // ~0.8 GB — tiny, general
-  'Llama-3.2-3B-Instruct-q4f32_1-MLC', // ~2 GB  — general reasoning
-  'Llama-3.1-8B-Instruct-q4f32_1-MLC', // ~5 GB  — strong reasoning + code
-  'Phi-3.5-mini-instruct-q4f16_1-MLC', // ~2.2 GB — Microsoft, compact
-  'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', // ~4.5 GB — solid all-rounder
-  'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', // ~4.5 GB — reasoning model
-  'SmolLM2-1.7B-Instruct-q4f16_1-MLC', // ~1 GB  — ultra-light fallback
+export type ModelEntry = { id: string; size: string }
+
+export const MODEL_CATALOG: ModelEntry[] = [
+  { id: 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC', size: '~1 GB' },
+  { id: 'Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC', size: '~2 GB' },
+  { id: 'Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC', size: '~0.8 GB' },
+  { id: 'Llama-3.2-3B-Instruct-q4f32_1-MLC', size: '~2 GB' },
+  { id: 'Llama-3.1-8B-Instruct-q4f32_1-MLC', size: '~5 GB' },
+  { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC', size: '~2.2 GB' },
+  { id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', size: '~1 GB' },
 ]
+
+export const AVAILABLE_MODELS = MODEL_CATALOG.map((m) => m.id)
 
 export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId')
 

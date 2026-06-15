@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import {
   AVAILABLE_MODELS,
+  MODEL_CATALOG,
   engineAtom,
   loadModelAction,
   loadProgressAtom,
@@ -28,7 +29,7 @@ export const NotebookLlmBar = reatomComponent(() => {
   })
   // autoLoad is intentionally from the first render only — it captures the
   // Reatom context at mount time and must not re-run on subsequent renders.
-   
+
   useEffect(() => {
     autoLoad()
   }, [])
@@ -46,9 +47,12 @@ export const NotebookLlmBar = reatomComponent(() => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {AVAILABLE_MODELS.map((m) => (
-              <SelectItem key={m} value={m} className="text-xs">
-                {m}
+            {MODEL_CATALOG.map((m) => (
+              <SelectItem key={m.id} value={m.id} className="text-xs">
+                <span className="flex w-full items-center justify-between gap-4">
+                  <span>{m.id}</span>
+                  <span className="text-muted-foreground">{m.size}</span>
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
