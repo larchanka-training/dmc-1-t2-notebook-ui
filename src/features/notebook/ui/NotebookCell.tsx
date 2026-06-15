@@ -78,6 +78,8 @@ export interface NotebookCellProps {
   onInBrowserGenerate?: () => void
   isGenerating?: boolean
   generatorLoaded?: boolean
+  onCloudGenerate?: () => void
+  isCloudGenerating?: boolean
 }
 
 export function NotebookCell({
@@ -110,6 +112,8 @@ export function NotebookCell({
   onInBrowserGenerate,
   isGenerating,
   generatorLoaded,
+  onCloudGenerate,
+  isCloudGenerating,
 }: NotebookCellProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -288,16 +292,28 @@ export function NotebookCell({
               </Tooltip>
             )}
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button type="button" aria-label={agentCloudLabel} className={AGENT_BTN}>
-                    <Cloud className="size-[15px]" />
-                  </button>
-                }
-              />
-              <TooltipContent>{agentCloudLabel}</TooltipContent>
-            </Tooltip>
+            {isMarkdown && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={agentCloudLabel}
+                      className={AGENT_BTN}
+                      disabled={isCloudGenerating}
+                      onClick={onCloudGenerate}
+                    >
+                      {isCloudGenerating ? (
+                        <Loader2 className="size-[15px] animate-spin" />
+                      ) : (
+                        <Cloud className="size-[15px]" />
+                      )}
+                    </button>
+                  }
+                />
+                <TooltipContent>{agentCloudLabel}</TooltipContent>
+              </Tooltip>
+            )}
 
             {isMarkdown && onViewModeChange ? (
               <Tooltip>

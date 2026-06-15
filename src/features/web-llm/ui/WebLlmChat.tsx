@@ -7,7 +7,7 @@ import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import {
-  AVAILABLE_MODELS,
+  MODEL_CATALOG,
   engineAtom,
   loadModelAction,
   loadProgressAtom,
@@ -65,9 +65,12 @@ export const WebLlmChat = reatomComponent(() => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {AVAILABLE_MODELS.map((m) => (
-              <SelectItem key={m} value={m}>
-                {m}
+            {MODEL_CATALOG.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                <span className="flex w-full items-center justify-between gap-4">
+                  <span>{m.id}</span>
+                  <span className="text-xs text-muted-foreground">{m.size}</span>
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

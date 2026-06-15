@@ -46,6 +46,10 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import { cloudGenerateAndInsertCodeAction } from '../model/cloudCodeGenerator'
+import { openAgentChatAction } from '../model/agentChat'
+import { AgentChatDialog } from './AgentChatDialog'
+import { RateLimitedError } from '@/shared/api/errors'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -70,6 +74,24 @@ function runAndInsertBelow(cellId: string) {
   enterEdit(inserted.id)
 }
 
+function formatCloudGenerateError(err: Error): string {
+  if (err instanceof RateLimitedError) {
+    const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
+    return `Rate limit reached.${wait}`
+  }
+  const msg = err.message.toLowerCase()
+  if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
+    return 'Prompt was flagged by the safety filter.'
+  }
+  if (msg.includes('llm_timeout') || msg.includes('timeout')) {
+    return 'Cloud generation timed out. Try the local model instead.'
+  }
+  if (msg.includes('503') || msg.includes('502') || msg.includes('unavailable')) {
+    return 'Cloud AI is temporarily unavailable. Try the local model instead.'
+  }
+  return `Cloud generation failed: ${err.message}`
+}
+
 interface NotebookRowProps {
   cell: Cell
   isFirst: boolean
@@ -82,6 +104,8 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const hasGenerator = !!codeGeneratorAtom()
   const isGenerating = !generateAndInsertCodeAction.ready()
   const generateError = generateAndInsertCodeAction.error()
+  const isCloudGenerating = !cloudGenerateAndInsertCodeAction.ready()
+  const cloudGenerateError = cloudGenerateAndInsertCodeAction.error()
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
   // re-render the entire cell (card + toolbar + output) on every search
@@ -133,10 +157,21 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         }
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
+        onCloudGenerate={
+          cell.kind === 'markdown'
+            ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
+            : undefined
+        }
+        isCloudGenerating={isCloudGenerating}
       />
       {generateError && (
         <p className="px-3 py-1 text-xs text-destructive">
           Generate failed: {generateError.message}
+        </p>
+      )}
+      {cloudGenerateError && (
+        <p className="px-3 py-1 text-xs text-destructive">
+          {formatCloudGenerateError(cloudGenerateError)}
         </p>
       )}
     </div>
@@ -199,11 +234,9 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
         <button type="button" onClick={onAddText} className={pill}>
           <Type className="size-[13px]" /> Text
         </button>
-        {/* Ask agent (new-design-v2): drafts a cell from a prompt. Presentational
-            slot for the LLM epic (07) — clicks but does nothing yet (no `ai`
-            cell kind, no handler). Primary-tinted to read as an AI action. */}
         <button
           type="button"
+          onClick={wrap(() => openAgentChatAction(afterId))}
           className={cn(pill, 'text-primary hover:border-primary hover:text-primary')}
         >
           <Sparkles className="size-[13px]" /> Ask agent
@@ -258,64 +291,70 @@ export const NotebookView = reatomComponent(() => {
   }, [])
 
   return (
-    // No own scroll port here: the shell's content area (AppLayout) scrolls, so
-    // <main> and the sticky outline share one scroll context. The row must size
-    // to its content height (NOT flex-1, which would cap it at one viewport and
-    // make the sticky outline detach halfway down) so the outline stays pinned
-    // for the whole scroll. min-h-full keeps a short notebook filling the area.
-    <div className="flex min-h-full">
-      <main className="flex-1">
-        <div
-          className="mx-auto w-full px-6 py-8"
-          style={{
-            // editor-width when the outline is visible; reclaim its width + gap
-            // when it is hidden, so cells grow to fill the freed space.
-            maxWidth: outlineTakesSpace
-              ? 'var(--editor-width)'
-              : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
-          }}
-        >
-          {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
+    <>
+      {/* No own scroll port here: the shell's content area (AppLayout) scrolls, so
+        <main> and the sticky outline share one scroll context. The row must size
+        to its content height (NOT flex-1, which would cap it at one viewport and
+        make the sticky outline detach halfway down) so the outline stays pinned
+        for the whole scroll. min-h-full keeps a short notebook filling the area. */}
+      <div className="flex min-h-full">
+        <main className="flex-1">
+          <div
+            className="mx-auto w-full px-6 py-8"
+            style={{
+              // editor-width when the outline is visible; reclaim its width + gap
+              // when it is hidden, so cells grow to fill the freed space.
+              maxWidth: outlineTakesSpace
+                ? 'var(--editor-width)'
+                : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
+            }}
+          >
+            {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
               live in the global AppTopbar. SearchBar stays mounted here
               (toggled by the topbar button / ⌘F). */}
-          <NotebookHeader />
-          <SearchBar />
+            <NotebookHeader />
+            <SearchBar />
 
-          {/* autoScroll keeps the page scrolling when a drag nears the
+            {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
               drag on Esc out of the box (pointer + keyboard sensors). */}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={onDragEnd}
-            autoScroll={{ threshold: { x: 0, y: 0.15 } }}
-          >
-            <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-3">
-                {cells.map((cell, idx) => (
-                  <div key={cell.id} className="flex flex-col gap-3">
-                    <SortableCell id={cell.id}>
-                      <NotebookRow
-                        cell={cell}
-                        isFirst={idx === 0}
-                        isLast={idx === cells.length - 1}
-                      />
-                    </SortableCell>
-                    {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
-                  </div>
-                ))}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onDragEnd}
+              autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+            >
+              <SortableContext
+                items={cells.map((c) => c.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="flex flex-col gap-3">
+                  {cells.map((cell, idx) => (
+                    <div key={cell.id} className="flex flex-col gap-3">
+                      <SortableCell id={cell.id}>
+                        <NotebookRow
+                          cell={cell}
+                          isFirst={idx === 0}
+                          isLast={idx === cells.length - 1}
+                        />
+                      </SortableCell>
+                      {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+                    </div>
+                  ))}
 
-                <CellInserter
-                  afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
-                  variant="end"
-                />
-              </div>
-            </SortableContext>
-          </DndContext>
-        </div>
-      </main>
+                  <CellInserter
+                    afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
+                    variant="end"
+                  />
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
+        </main>
 
-      <NotebookOutline />
-    </div>
+        <NotebookOutline />
+      </div>
+      <AgentChatDialog />
+    </>
   )
 }, 'NotebookView')
