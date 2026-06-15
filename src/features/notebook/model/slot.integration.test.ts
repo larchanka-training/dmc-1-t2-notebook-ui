@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
@@ -36,6 +37,13 @@ beforeEach(async () => {
   userAtom.set(null)
   isOnlineAtom.set(true)
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  // open-into-slot always fetches the server version first; mock it to the same
+  // backend doc so the integration exercises the real pull → storage → re-arm
+  // path deterministically instead of hitting the network (401).
+  vi.spyOn(notebookApi, 'get').mockImplementation(
+    async (id: string) =>
+      ({ ...doc(id, 'Backend'), ownerId: 'o' }) as Awaited<ReturnType<typeof notebookApi.get>>,
+  )
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 

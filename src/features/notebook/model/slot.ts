@@ -232,30 +232,30 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
 
   let outcome: OpenOutcome = 'error'
   const ran = await runExclusive('open', async () => {
-    // 1. Resolve the document first. Prefer a local copy (no network); only fetch
-    //    when absent. A locally-dirty copy is intentionally preferred here too —
-    //    the conflict rule keeps it until the next push reconciles with the server.
-    let target = await wrap(notebookStorage.get(id))
-    if (!target) {
-      let server: notebookApi.Notebook
-      try {
-        server = await wrap(raceWithTimeout(wrap(notebookApi.get(id)), 'notebook fetch'))
-      } catch (error) {
-        console.warn('slot: failed to fetch notebook; keeping the current slot', error)
-        slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
-        outcome = 'unavailable'
-        return
-      }
-      // Accept the server version into storage under the conflict rule, then read
-      // it back. (`kept-local-dirty` cannot happen here — no local copy existed.)
-      await wrap(pullServerNotebook(server))
-      target = await wrap(notebookStorage.get(id))
+    // 1. ALWAYS fetch the server version first so a click picks up edits made on
+    //    another device (the user's #1 concern: a stale local copy must not win).
+    //    `pullServerNotebook` reconciles it under the conflict rule — it accepts
+    //    the server doc only when the local copy is clean/absent and KEEPS a
+    //    locally-dirty copy (its unsynced edits push first). If the fetch fails
+    //    (offline / 5xx) we fall back to whatever is in local storage, so an
+    //    already-downloaded notebook still opens offline.
+    let server: notebookApi.Notebook | undefined
+    try {
+      server = await wrap(raceWithTimeout(wrap(notebookApi.get(id)), 'notebook fetch'))
+    } catch (error) {
+      console.warn('slot: failed to fetch notebook; falling back to a local copy', error)
     }
+    if (server) {
+      // accept-server-if-clean (keeps a dirty local copy); ignores the outcome —
+      // we read the reconciled document back from storage next either way.
+      await wrap(pullServerNotebook(server))
+    }
+    const target = await wrap(notebookStorage.get(id))
     if (!target) {
-      // Server payload was rejected by the boundary guard, or storage failed.
+      // No server doc (offline / rejected payload) AND no local copy → cannot open.
       // Leave the working slot untouched rather than blank the editor.
       console.warn('slot: could not load the notebook; keeping the current slot')
-      slotOpenErrorAtom.set('Could not open the notebook.')
+      slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
       outcome = 'unavailable'
       return
     }

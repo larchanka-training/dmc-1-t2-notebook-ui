@@ -49,6 +49,13 @@ beforeEach(async () => {
     isOnlineAtom.set(true)
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
   })
+  // open-into-slot always fetches the server version first; mock it so the repro
+  // doesn't hit the real network (401) — we only care about the async-stack frame
+  // surviving the await chain, not the fetch outcome.
+  vi.spyOn(notebookApi, 'get').mockResolvedValue({
+    ...doc(SERVER_ID, 'Backend'),
+    ownerId: 'o',
+  } as Awaited<ReturnType<typeof notebookApi.get>>)
 })
 
 afterEach(() => {

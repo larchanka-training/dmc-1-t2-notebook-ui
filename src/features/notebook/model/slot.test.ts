@@ -62,7 +62,13 @@ beforeEach(() => {
   h.drainAutosave.mockResolvedValue(undefined)
   h.pullServerNotebook.mockResolvedValue('accepted')
   getSpy = vi.spyOn(notebookStorage, 'get')
-  apiGetSpy = vi.spyOn(notebookApi, 'get')
+  // open-into-slot now ALWAYS fetches the server version first (picks up edits
+  // from another device); default the fetch to a benign server doc so tests that
+  // don't care about the network don't hang on an unmocked GET.
+  apiGetSpy = vi.spyOn(notebookApi, 'get').mockResolvedValue({
+    ...doc(SERVER_ID),
+    ownerId: 'o',
+  } as unknown as notebookApi.Notebook)
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
@@ -73,27 +79,31 @@ afterEach(() => {
 })
 
 describe('openNotebookInSlot', () => {
-  test('opens a notebook already in local storage without a network fetch', async () => {
+  test('always fetches the server version first, then reconciles via pull', async () => {
+    // Even with a local copy present, the open path fetches the server doc so a
+    // newer remote version is picked up; `pullServerNotebook` reconciles it.
+    const server = { ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook
+    apiGetSpy.mockResolvedValue(server)
     getSpy.mockResolvedValue(doc(SERVER_ID))
 
     await openNotebookInSlot(SERVER_ID)
 
-    expect(apiGetSpy).not.toHaveBeenCalled()
+    expect(apiGetSpy).toHaveBeenCalledWith(SERVER_ID)
+    expect(h.pullServerNotebook).toHaveBeenCalledWith(server)
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
     expect(h.startRemoteSync).toHaveBeenCalledWith(SERVER_ID)
   })
 
-  test('lazily fetches one GET /notebooks/{id} when the notebook is absent locally', async () => {
-    // Absent on first read, then present after the pull writes it.
-    getSpy.mockResolvedValueOnce(undefined).mockResolvedValueOnce(doc(SERVER_ID))
-    const server = { ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook
-    apiGetSpy.mockResolvedValue(server)
+  test('falls back to the local copy when the server fetch fails (offline)', async () => {
+    // Fetch rejects (offline), but a previously-downloaded copy is in storage —
+    // the notebook still opens from local storage.
+    apiGetSpy.mockRejectedValue(new Error('network down'))
+    getSpy.mockResolvedValue(doc(SERVER_ID))
 
-    await openNotebookInSlot(SERVER_ID)
+    const outcome = await openNotebookInSlot(SERVER_ID)
 
-    expect(apiGetSpy).toHaveBeenCalledTimes(1)
-    expect(apiGetSpy).toHaveBeenCalledWith(SERVER_ID)
-    expect(h.pullServerNotebook).toHaveBeenCalledWith(server)
+    expect(outcome).toBe('opened')
+    expect(h.pullServerNotebook).not.toHaveBeenCalled() // no server doc to reconcile
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
   })
 
@@ -124,9 +134,10 @@ describe('openNotebookInSlot', () => {
     expect(h.drainAutosave.mock.invocationCallOrder[0]).toBeLessThan(teardownOrder)
   })
 
-  test('keeps the current slot when the lazy fetch fails', async () => {
-    getSpy.mockResolvedValue(undefined)
+  test('keeps the current slot when fetch fails AND no local copy exists', async () => {
+    // Offline with nothing downloaded yet: neither server nor local has the doc.
     apiGetSpy.mockRejectedValue(new Error('network down'))
+    getSpy.mockResolvedValue(undefined)
 
     const outcome = await openNotebookInSlot(SERVER_ID)
 
@@ -140,8 +151,8 @@ describe('openNotebookInSlot', () => {
   test('keeps the current slot when the server payload is rejected and re-read is empty (CL-11)', async () => {
     // GET resolves, but pull rejects the payload (§11 boundary) and the re-read is
     // still undefined → the second-null branch. The slot must stay put, not blank.
-    getSpy.mockResolvedValue(undefined) // absent before AND after the pull
     apiGetSpy.mockResolvedValue(doc(SERVER_ID) as unknown as notebookApi.Notebook)
+    getSpy.mockResolvedValue(undefined) // absent before AND after the pull
     h.pullServerNotebook.mockResolvedValue('rejected')
 
     const outcome = await openNotebookInSlot(SERVER_ID)
@@ -159,16 +170,18 @@ describe('openNotebookInSlot', () => {
   })
 
   test('ignores a concurrent switch while one is in flight', async () => {
-    const gate = deferred<NotebookJSON | undefined>()
-    getSpy.mockReturnValueOnce(gate.promise as Promise<NotebookJSON | undefined>)
+    // Hang the first op on its server fetch (the first await now), so the second
+    // call lands while the lock is held.
+    const gate = deferred<notebookApi.Notebook>()
+    apiGetSpy.mockReturnValueOnce(gate.promise)
+    getSpy.mockResolvedValue(doc(SERVER_ID))
 
     const first = openNotebookInSlot(SERVER_ID)
-    // Second call lands while the first awaits the storage read → reported busy.
     const secondOutcome = await openNotebookInSlot('11111111-1111-4111-8111-111111111111')
     expect(secondOutcome).toBe('busy')
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('in progress'))
 
-    gate.resolve(doc(SERVER_ID))
+    gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
     expect(await first).toBe('opened')
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
   })

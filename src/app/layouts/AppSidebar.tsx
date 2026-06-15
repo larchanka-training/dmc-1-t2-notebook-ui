@@ -374,7 +374,10 @@ const NotebooksGroup = reatomComponent(() => {
                     // open keeps the previous slot, so moving the URL would leave the
                     // editor showing a different notebook than the route implies. The
                     // controller surfaces the failure via `slotOpenErrorAtom`.
-                    const outcome = await openNotebookInSlot(nb.id)
+                    // `await wrap(...)` re-binds the Reatom frame so the `urlAtom.set`
+                    // continuation runs in-frame under production clearStack()
+                    // (otherwise it throws `missing async stack`).
+                    const outcome = await wrap(openNotebookInSlot(nb.id))
                     if (outcome === 'opened' || outcome === 'already') {
                       urlAtom.set((url) => new URL(notebookHref, url.origin), true)
                     }
