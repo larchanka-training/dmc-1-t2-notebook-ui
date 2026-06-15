@@ -5,7 +5,7 @@ import { TooltipProvider } from '@/shared/ui/tooltip'
 import { SidebarProvider } from '@/shared/ui/sidebar'
 import { setSession, clearSession } from '@/entities/session'
 import { notebook as notebookApi } from '@/shared/api'
-import { notebookListResource } from '@/features/notebook'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, notebookListResource } from '@/features/notebook'
 import { AppSidebar } from './AppSidebar'
 
 // AppSidebar opens a notebook into the slot via the `openNotebookInSlot` action
@@ -57,6 +57,7 @@ afterEach(() => {
   cleanup()
   clearSession()
   notebookListResource.data.set([])
+  act(() => activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID))
 })
 
 describe('AppSidebar — open-into-slot', () => {

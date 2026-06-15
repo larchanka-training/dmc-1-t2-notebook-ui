@@ -293,13 +293,17 @@ const NotebooksGroup = reatomComponent(() => {
   })
 
   const filterText = filter.trim().toLowerCase()
-  // Never list the open notebook twice: it is already shown as the synthetic
-  // current-row above, so drop its id from the backend feed.
-  const backendItems = items.filter((nb) => nb.id !== activeId)
   const filtered = filterText
-    ? backendItems.filter((nb) => nb.title.toLowerCase().includes(filterText))
-    : backendItems
-  const currentMatchesFilter = !filterText || currentTitle.toLowerCase().includes(filterText)
+    ? items.filter((nb) => nb.title.toLowerCase().includes(filterText))
+    : items
+  // The active notebook keeps its place in the list and is just highlighted (no
+  // "jump to top"). Only when it is NOT in the backend list (the local welcome
+  // floor before its first sync, or a not-yet-loaded list) do we surface a single
+  // synthetic row for it so the open notebook is always visible.
+  const activeInList = items.some((nb) => nb.id === activeId)
+  const showFloorRow =
+    !activeInList &&
+    (!filterText || (currentTitle || NEW_NOTEBOOK_TITLE).toLowerCase().includes(filterText))
 
   return (
     <SidebarGroup className="min-h-0 flex-1">
@@ -329,7 +333,10 @@ const NotebooksGroup = reatomComponent(() => {
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <SidebarMenu>
-            {currentMatchesFilter ? (
+            {/* The local welcome floor (or a not-yet-listed active notebook) shown
+                as a single synthetic row, ONLY when it isn't in the backend list.
+                A listed active notebook stays in place below and is highlighted. */}
+            {showFloorRow ? (
               <SidebarMenuItem className="group/nb">
                 <SidebarMenuButton
                   isActive={pathname === notebookHref}
@@ -360,38 +367,44 @@ const NotebooksGroup = reatomComponent(() => {
                 />
               </SidebarMenuItem>
             ) : null}
-            {filtered.map((nb) => (
-              <SidebarMenuItem key={nb.id} className="group/nb">
-                {/* Open-into-slot (#135): clicking a backend row loads it into the
-                    single editor slot (lazy GET /notebooks/{id}) and navigates to
-                    the notebook route so the editor is on screen. Once open it
-                    becomes the active id and is shown as the synthetic current-row
-                    above (filtered out of this list), so no URL state per id. */}
-                <SidebarMenuButton
-                  className="pr-8"
-                  onClick={wrap(async () => {
-                    // Gate navigation on a successful open (CL-5): a failed/dropped
-                    // open keeps the previous slot, so moving the URL would leave the
-                    // editor showing a different notebook than the route implies. The
-                    // controller surfaces the failure via `slotOpenErrorAtom`.
-                    // `await wrap(...)` re-binds the Reatom frame so the `urlAtom.set`
-                    // continuation runs in-frame under production clearStack()
-                    // (otherwise it throws `missing async stack`).
-                    const outcome = await wrap(openNotebookInSlot(nb.id))
-                    if (outcome === 'opened' || outcome === 'already') {
-                      urlAtom.set((url) => new URL(notebookHref, url.origin), true)
-                    }
-                  })}
-                >
-                  <span className="truncate">{nb.title}</span>
-                </SidebarMenuButton>
-                <NotebookRowMenu
-                  onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title: nb.title }))}
-                  onDelete={wrap(() => deleteTargetAtom.set({ id: nb.id, title: nb.title }))}
-                />
-              </SidebarMenuItem>
-            ))}
-            {filterText && !currentMatchesFilter && filtered.length === 0 ? (
+            {filtered.map((nb) => {
+              const isActive = nb.id === activeId
+              // For the active row show the live editor title (it may differ from
+              // the last-loaded list row while the user types before a list refetch).
+              const title = isActive ? currentTitle || nb.title : nb.title
+              return (
+                <SidebarMenuItem key={nb.id} className="group/nb">
+                  {/* Open-into-slot (#135): clicking a row loads it into the single
+                      editor slot (GET /notebooks/{id}) and navigates to the notebook
+                      route. The active row stays in place and is highlighted — no
+                      reordering. */}
+                  <SidebarMenuButton
+                    isActive={isActive && pathname === notebookHref}
+                    className={cn(isActive && NAV_ACTIVE, 'pr-8')}
+                    onClick={wrap(async () => {
+                      // Gate navigation on a successful open (CL-5): a failed/dropped
+                      // open keeps the previous slot, so moving the URL would leave the
+                      // editor showing a different notebook than the route implies. The
+                      // controller surfaces the failure via `slotOpenErrorAtom`.
+                      // `await wrap(...)` re-binds the Reatom frame so the `urlAtom.set`
+                      // continuation runs in-frame under production clearStack()
+                      // (otherwise it throws `missing async stack`).
+                      const outcome = await wrap(openNotebookInSlot(nb.id))
+                      if (outcome === 'opened' || outcome === 'already') {
+                        urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+                      }
+                    })}
+                  >
+                    <span className="truncate">{title}</span>
+                  </SidebarMenuButton>
+                  <NotebookRowMenu
+                    onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title }))}
+                    onDelete={wrap(() => deleteTargetAtom.set({ id: nb.id, title }))}
+                  />
+                </SidebarMenuItem>
+              )
+            })}
+            {filterText && !showFloorRow && filtered.length === 0 ? (
               <li className="px-2 text-xs text-muted-foreground">No matches.</li>
             ) : null}
           </SidebarMenu>
