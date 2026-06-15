@@ -1,5 +1,6 @@
 import { reatomComponent } from '@reatom/react'
 import { Check, CircleAlert, CloudOff, Loader2, LogIn } from 'lucide-react'
+import { slotOpeningPhaseAtom } from '../model/slot'
 import { pausedAtom, remoteSyncStatusAtom } from '../model/remoteSync'
 
 // Header remote-sync status (#135), shown next to the local SaveIndicator. Pure
@@ -12,7 +13,19 @@ import { pausedAtom, remoteSyncStatusAtom } from '../model/remoteSync'
 // on this device", this owns "synced to the server".
 export const SyncIndicator = reatomComponent(() => {
   const paused = pausedAtom()
+  const openingPhase = slotOpeningPhaseAtom()
   const status = remoteSyncStatusAtom()
+
+  if (openingPhase !== 'idle') {
+    return (
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        <span>
+          Synchronization<span className="animate-pulse">...</span>
+        </span>
+      </span>
+    )
+  }
 
   if (paused) {
     return (

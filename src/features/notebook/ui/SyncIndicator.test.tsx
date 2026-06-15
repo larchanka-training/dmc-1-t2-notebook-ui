@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { SyncIndicator } from './SyncIndicator'
+import { slotOpeningPhaseAtom } from '../model/slot'
 import { pausedAtom, remoteSyncStatusAtom, type RemoteSyncStatus } from '../model/remoteSync'
 
 function renderWith(status: RemoteSyncStatus, paused = false) {
   act(() => {
     remoteSyncStatusAtom.set(status)
     pausedAtom.set(paused)
+    slotOpeningPhaseAtom.set('idle')
   })
   return render(<SyncIndicator />)
 }
@@ -19,6 +21,7 @@ beforeEach(() => {
   act(() => {
     remoteSyncStatusAtom.set('idle')
     pausedAtom.set(false)
+    slotOpeningPhaseAtom.set('idle')
   })
 })
 
@@ -26,6 +29,16 @@ describe('SyncIndicator', () => {
   test('shows nothing when idle', () => {
     const { container } = renderWith('idle')
     expect(container).toBeEmptyDOMElement()
+  })
+
+  test('shows Synchronization while opening a notebook from the server', () => {
+    act(() => {
+      slotOpeningPhaseAtom.set('remote-only')
+      remoteSyncStatusAtom.set('synced')
+    })
+    render(<SyncIndicator />)
+    expect(screen.getByText(/synchronization/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^synced$/i)).toBeNull()
   })
 
   test('shows "Syncing…" while syncing', () => {

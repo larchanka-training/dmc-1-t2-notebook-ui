@@ -88,8 +88,9 @@ export {
   startSlot,
   stopSlot,
   slotOpenErrorAtom,
+  slotOpeningPhaseAtom,
 } from './model/slot'
-export type { OpenOutcome } from './model/slot'
+export type { OpenOutcome, SlotOpeningPhase } from './model/slot'
 export { undo, redo, clearHistory, canUndoAtom, canRedoAtom } from './model/history'
 export {
   searchOpenAtom,

@@ -3,7 +3,13 @@ import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
-import { openNotebookInSlot, slotOpenErrorAtom, startSlot, stopSlot } from './slot'
+import {
+  openNotebookInSlot,
+  slotOpenErrorAtom,
+  slotOpeningPhaseAtom,
+  startSlot,
+  stopSlot,
+} from './slot'
 
 // The slot controller drives the id-dependent bindings (autosave / remote-sync /
 // AI context) and the pull helper. Mock those collaborators so this suite asserts
@@ -56,15 +62,16 @@ let apiGetSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.clearAllMocks()
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  slotOpeningPhaseAtom.set('idle')
   h.startAutosave.mockReturnValue(h.autosaveTeardown)
   h.startRemoteSync.mockReturnValue(h.remoteTeardown)
   h.startAiContextSync.mockReturnValue(vi.fn())
   h.drainAutosave.mockResolvedValue(undefined)
   h.pullServerNotebook.mockResolvedValue('accepted')
   getSpy = vi.spyOn(notebookStorage, 'get')
-  // open-into-slot now ALWAYS fetches the server version first (picks up edits
-  // from another device); default the fetch to a benign server doc so tests that
-  // don't care about the network don't hang on an unmocked GET.
+  // open-into-slot always checks the server version in the background; default
+  // the fetch to a benign server doc so tests that don't care about the network
+  // don't hang on an unmocked GET.
   apiGetSpy = vi.spyOn(notebookApi, 'get').mockResolvedValue({
     ...doc(SERVER_ID),
     ownerId: 'o',
@@ -76,23 +83,27 @@ afterEach(() => {
   stopSlot()
   vi.restoreAllMocks()
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  slotOpeningPhaseAtom.set('idle')
 })
 
 describe('openNotebookInSlot', () => {
-  test('always fetches the server version first, then reconciles via pull', async () => {
-    // Even with a local copy present, the open path fetches the server doc so a
-    // newer remote version is picked up; `pullServerNotebook` reconciles it.
+  test('opens a local copy immediately while the server fetch is still pending', async () => {
     const server = { ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook
-    apiGetSpy.mockResolvedValue(server)
+    const gate = deferred<notebookApi.Notebook>()
+    apiGetSpy.mockReturnValue(gate.promise)
     getSpy.mockResolvedValue(doc(SERVER_ID))
 
-    await openNotebookInSlot(SERVER_ID)
+    const pending = openNotebookInSlot(SERVER_ID)
 
-    // The GET is passed the id plus an AbortSignal (M3: abortable on timeout).
+    await vi.waitFor(() => expect(activeNotebookIdAtom()).toBe(SERVER_ID))
+    expect(slotOpeningPhaseAtom()).toBe('local-first')
+    expect(h.startRemoteSync).toHaveBeenCalledWith(SERVER_ID)
+
+    gate.resolve(server)
+    await expect(pending).resolves.toBe('opened')
     expect(apiGetSpy).toHaveBeenCalledWith(SERVER_ID, expect.any(AbortSignal))
     expect(h.pullServerNotebook).toHaveBeenCalledWith(server)
-    expect(activeNotebookIdAtom()).toBe(SERVER_ID)
-    expect(h.startRemoteSync).toHaveBeenCalledWith(SERVER_ID)
+    expect(slotOpeningPhaseAtom()).toBe('idle')
   })
 
   test('falls back to the local copy when the server fetch fails (offline)', async () => {
@@ -135,6 +146,22 @@ describe('openNotebookInSlot', () => {
     expect(h.drainAutosave.mock.invocationCallOrder[0]).toBeLessThan(teardownOrder)
   })
 
+  test('shows remote-only opening phase until a non-local notebook is fetched', async () => {
+    const gate = deferred<notebookApi.Notebook>()
+    apiGetSpy.mockReturnValue(gate.promise)
+    getSpy.mockResolvedValueOnce(undefined).mockResolvedValueOnce(doc(SERVER_ID))
+
+    const pending = openNotebookInSlot(SERVER_ID)
+
+    await vi.waitFor(() => expect(slotOpeningPhaseAtom()).toBe('remote-only'))
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+
+    gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
+    await expect(pending).resolves.toBe('opened')
+    expect(activeNotebookIdAtom()).toBe(SERVER_ID)
+    expect(slotOpeningPhaseAtom()).toBe('idle')
+  })
+
   test('keeps the current slot when fetch fails AND no local copy exists', async () => {
     // Offline with nothing downloaded yet: neither server nor local has the doc.
     apiGetSpy.mockRejectedValue(new Error('network down'))
@@ -147,6 +174,7 @@ describe('openNotebookInSlot', () => {
     expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
     expect(h.startRemoteSync).not.toHaveBeenCalled()
     expect(h.drainAutosave).not.toHaveBeenCalled()
+    expect(slotOpeningPhaseAtom()).toBe('idle')
   })
 
   test('keeps the current slot when the server payload is rejected and re-read is empty (CL-11)', async () => {
@@ -171,8 +199,8 @@ describe('openNotebookInSlot', () => {
   })
 
   test('ignores a concurrent switch while one is in flight', async () => {
-    // Hang the first op on its server fetch (the first await now), so the second
-    // call lands while the lock is held.
+    // Hang the first op on its background server fetch, so the second call lands
+    // while the lock is held.
     const gate = deferred<notebookApi.Notebook>()
     apiGetSpy.mockReturnValueOnce(gate.promise)
     getSpy.mockResolvedValue(doc(SERVER_ID))

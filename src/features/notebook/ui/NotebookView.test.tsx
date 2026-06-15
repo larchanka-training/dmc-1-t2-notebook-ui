@@ -4,6 +4,7 @@ import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
 import { cellsAtom, SEED_CODE, updateCellCode } from '../model/notebook'
+import { slotOpeningPhaseAtom } from '../model/slot'
 
 function renderView() {
   return render(
@@ -30,6 +31,19 @@ async function addCodeCell(user: UserEvent) {
 }
 
 describe('NotebookView (RTL integration)', () => {
+  test('shows notebook loader while opening a server-only notebook', () => {
+    act(() => {
+      slotOpeningPhaseAtom.set('remote-only')
+    })
+    const { unmount } = renderView()
+    expect(screen.getByRole('status', { name: /loading notebook/i })).toBeInTheDocument()
+    expect(screen.getByText(/synchronization/i)).toBeInTheDocument()
+    unmount()
+    act(() => {
+      slotOpeningPhaseAtom.set('idle')
+    })
+  })
+
   test('renders a single seed cell on mount', async () => {
     renderView()
     const editors = getCodeEditors()

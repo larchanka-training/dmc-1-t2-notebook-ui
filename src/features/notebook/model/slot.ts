@@ -14,6 +14,7 @@
 import { action, atom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
+import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
 import { drainAutosave, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
@@ -289,6 +290,35 @@ export type OpenOutcome = 'opened' | 'already' | 'busy' | 'unavailable' | 'error
 /** Last open-into-slot failure, for the UI to surface; cleared on a successful open. */
 export const slotOpenErrorAtom = atom<string | null>(null, 'notebook.slotOpenError')
 
+export type SlotOpeningPhase = 'idle' | 'local-first' | 'remote-only'
+
+/**
+ * UI-visible GET/pull state for open-into-slot. Remote-sync owns push status;
+ * this atom covers the stale-while-revalidate fetch that happens when the user
+ * clicks a notebook in the sidebar.
+ */
+export const slotOpeningPhaseAtom = atom<SlotOpeningPhase>('idle', 'notebook.slotOpeningPhase')
+
+async function fetchServerNotebook(id: string): Promise<notebookApi.Notebook | undefined> {
+  const fetchAbort = new AbortController()
+  try {
+    return await wrap(
+      raceWithTimeout(wrap(notebookApi.get(id, fetchAbort.signal)), 'notebook fetch', () =>
+        fetchAbort.abort(),
+      ),
+    )
+  } catch (error) {
+    console.warn('slot: failed to fetch notebook; falling back to a local copy', error)
+    return undefined
+  }
+}
+
+async function openResolvedNotebook(stored: NotebookJSON): Promise<void> {
+  await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
+  stopBindings()
+  await wrap(rearmOrDegrade(() => restoreNotebook(stored)))
+}
+
 /**
  * Open a notebook from the sidebar list into the single editor slot. Loads the
  * full document — from local storage if present, otherwise via ONE lazy
@@ -314,53 +344,33 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
   let outcome: OpenOutcome = 'error'
   const ran = await runExclusive('open', async () => {
     try {
-      // 1. ALWAYS fetch the server version first so a click picks up edits made on
-      //    another device (the user's #1 concern: a stale local copy must not win).
-      //    `pullServerNotebook` reconciles it under the conflict rule — it accepts
-      //    the server doc only when the local copy is clean/absent and KEEPS a
-      //    locally-dirty copy (its unsynced edits push first). If the fetch fails
-      //    (offline / 5xx) we fall back to whatever is in local storage, so an
-      //    already-downloaded notebook still opens offline.
-      //    M3: the GET takes an AbortSignal aborted on the deadline, so a hung
-      //    fetch is cancelled (not left detached) when the lock is released.
-      let server: notebookApi.Notebook | undefined
-      const fetchAbort = new AbortController()
-      try {
-        server = await wrap(
-          raceWithTimeout(wrap(notebookApi.get(id, fetchAbort.signal)), 'notebook fetch', () =>
-            fetchAbort.abort(),
-          ),
-        )
-      } catch (error) {
-        console.warn('slot: failed to fetch notebook; falling back to a local copy', error)
+      const local = await wrap(notebookStorage.get(id))
+      slotOpeningPhaseAtom.set(local ? 'local-first' : 'remote-only')
+
+      if (local) {
+        await wrap(openResolvedNotebook(local))
+        outcome = 'opened'
+        slotOpenErrorAtom.set(null)
       }
-      if (server) {
-        // accept-server-if-clean (keeps a dirty local copy); ignores the outcome —
-        // we read the reconciled document back from storage next either way.
-        await wrap(pullServerNotebook(server))
-      }
+
+      // Stale-while-revalidate: a local copy opens immediately; the GET continues
+      // under the same slot op and status UI. If the server version is accepted and
+      // changes the stored document, reload the slot from storage. Dirty local docs
+      // are preserved by `pullServerNotebook` and therefore re-read unchanged.
+      const server = await wrap(fetchServerNotebook(id))
+      if (server) await wrap(pullServerNotebook(server))
+
       const target = await wrap(notebookStorage.get(id))
       if (!target) {
-        // No server doc (offline / rejected payload) AND no local copy → cannot open.
-        // Leave the working slot untouched rather than blank the editor.
         console.warn('slot: could not load the notebook; keeping the current slot')
         slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
-        outcome = 'unavailable'
+        outcome = local ? 'opened' : 'unavailable'
         return
       }
-      const loaded = target
 
-      // 2. Persist the outgoing notebook's pending edits under its own (still-active)
-      //    id, and wait for any in-flight write to land. Bounded (CL-3).
-      await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
-      // 3. Drop the outgoing bindings; remote-sync teardown aborts an in-flight push.
-      stopBindings()
-      // 4+5. Flip to the target and re-arm; a mid-switch throw degrades to the floor
-      //      rather than leaving the slot unbound (CL-2).
-      // `wrap` re-binds the frame so `slotOpenErrorAtom.set(null)` below runs
-      // IN-FRAME. A bare `await rearmOrDegrade(...)` drops the async stack and makes
-      // the next atom write throw `missing async stack` under production clearStack().
-      await wrap(rearmOrDegrade(() => restoreNotebook(loaded)))
+      if (!local || target.updatedAt !== local.updatedAt) {
+        await wrap(openResolvedNotebook(target))
+      }
       slotOpenErrorAtom.set(null)
       outcome = 'opened'
     } catch (error) {
@@ -371,6 +381,8 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
       console.warn('slot: open failed', error)
       slotOpenErrorAtom.set('Could not open the notebook. Please try again.')
       outcome = 'error'
+    } finally {
+      slotOpeningPhaseAtom.set('idle')
     }
   })
   if (!ran) return 'busy'

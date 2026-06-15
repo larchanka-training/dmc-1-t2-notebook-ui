@@ -21,6 +21,7 @@ import { cn } from '@/shared/lib/cn'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
 import { NotebookHeader } from './NotebookHeader'
+import { NotebookLoadingOverlay } from './NotebookLoadingOverlay'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
@@ -46,6 +47,7 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -215,6 +217,7 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
+  const showNotebookLoader = slotOpeningPhaseAtom() === 'remote-only'
 
   // Whether the outline pane actually occupies space right now: only on wide
   // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
@@ -263,7 +266,8 @@ export const NotebookView = reatomComponent(() => {
     // to its content height (NOT flex-1, which would cap it at one viewport and
     // make the sticky outline detach halfway down) so the outline stays pinned
     // for the whole scroll. min-h-full keeps a short notebook filling the area.
-    <div className="flex min-h-full">
+    <div className="relative flex min-h-full">
+      {showNotebookLoader ? <NotebookLoadingOverlay /> : null}
       <main className="flex-1">
         <div
           className="mx-auto w-full px-6 py-8"
