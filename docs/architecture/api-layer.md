@@ -12,22 +12,23 @@ src/shared/api/
 │   └── openapi-ts/
 │       ├── auth.d.ts          # types-only, regenerated from openapi/auth.openapi.yaml
 │       ├── llm.d.ts           # types-only, regenerated from openapi/llm.openapi.yaml
-│       └── notebook.d.ts      # types-only, regenerated from openapi/notebook.openapi.yaml
+│       └── notebook.d.ts      # types-only, regenerated from openapi/backend/openapi.json (sliced)
 ├── client.ts                  # openapi-fetch clients + auth-token middleware
-├── errors.ts                  # ApiError + 400/401/404/429/5xx subclasses, status→error mapper
+├── errors.ts                  # ApiError + 400/401/404/409/429/5xx + NetworkError, status→error mapper
 ├── auth.ts                    # login / logout / getMe
 ├── llm.ts                     # generateCode (Cloud LLM agent)
-├── notebook.ts                # list / create / runCell
+├── notebook.ts                # list / get / create / patch / remove (typed sync facade)
 └── index.ts                   # public re-export (namespace style)
 ```
 
-OpenAPI source-of-truth specs live at the repo root in `openapi/<domain>.openapi.yaml`.
+Source-of-truth specs live in `openapi/`. `auth.openapi.yaml` and `llm.openapi.yaml` are hand-maintained. **notebook** types instead come from the backend contract: a vendored machine copy at `openapi/backend/openapi.json` (refreshed by `pnpm api:vendor`), from which `api-gen.mjs` slices the `/notebooks` paths. This keeps `ui` self-contained — generation never reads `../api`. See [`openapi/backend/README.md`](../../openapi/backend/README.md).
 
 ---
 
 ## Generator: `openapi-typescript` + `openapi-fetch`
 
-- **`openapi-typescript`** (dev) reads each `openapi/*.openapi.yaml` and emits a single `.d.ts` per spec. **Types only — no runtime.**
+- **`openapi-typescript`** (dev) emits a single `.d.ts` per domain. **Types only — no runtime.** auth/llm read their `openapi/*.openapi.yaml`; notebook is assembled on the fly from `openapi/backend/openapi.json` — paths under `/api/v1/notebooks` with the `/api/v1` prefix stripped (the client already targets that base) and the reachable schemas inlined.
+  - The `/api/v1` version prefix is encoded in `scripts/notebook-slice.mjs` (`NOTEBOOK_PREFIX` / `STRIP_PREFIX`) and the client base URL (`client.ts`). An `/api/v2` bump touches both.
 - **`openapi-fetch`** (prod) is a tiny typed fetch wrapper that takes the generated `paths` interface as a generic.
 
 See `openapi.md` at the repo root for the PoC that compared this stack against `@hey-api/openapi-ts` and the rationale for choosing it.
@@ -41,25 +42,45 @@ Consumers import the namespaces:
 ```ts
 import { auth, llm, notebook } from '@/shared/api'
 
-await auth.login({ email, password })
-const notebooks = await notebook.list()
-const result = await notebook.runCell(notebookId, cellId)
+await auth.requestOtp(email) // emails a one-time code (passwordless, no password)
+const session = await auth.verifyOtp({ email, otp }) // verify the code → tokens + user
+const notebooks = await notebook.list() // NotebookListItem[] (no cells)
+const one = await notebook.get(id) // full Notebook with cells
+// formatVersion is owned by the domain model (features/notebook/persistence),
+// not the transport layer, so the caller passes it in. `id` is optional and
+// client-chosen for offline-first idempotency.
+const created = await notebook.create({ title: 'Untitled', formatVersion: 1 })
+// PATCH sends the whole notebook (server does the LWW merge); deletedCells
+// carries tombstones so cell removals propagate. It is request-only.
+const merged = await notebook.patch(id, { title, formatVersion: 1, cells, deletedCells })
+await notebook.remove(id) // soft-delete (204); named `remove`, not `delete`
 const generated = await llm.generateCode({ prompt: 'sum two numbers' })
 ```
+
+`get`, `create`, and `patch` return a `Notebook` whose `cells` is always an array: the field is optional on the wire (`NotebookResponse` does not require it), so the facade normalizes a missing `cells` to `[]` at the boundary. Consumers can rely on `nb.cells` being present.
 
 Error classes (rethrown by every facade call when the HTTP status is non-2xx):
 
 ```ts
-import { ApiError, UnauthorizedError, NotFoundError, BadRequestError } from '@/shared/api'
+import {
+  ApiError,
+  UnauthorizedError,
+  NotFoundError,
+  ConflictError,
+  NetworkError,
+} from '@/shared/api'
 
 try {
-  await notebook.runCell(nbId, cellId)
+  await notebook.list()
 } catch (e) {
   if (e instanceof NotFoundError) {
     /* ... */
   }
   if (e instanceof UnauthorizedError) {
-    /* ... */
+    /* token expired — stop syncing until re-login */
+  }
+  if (e instanceof NetworkError) {
+    /* request never reached the server (status 0) — safe to retry later */
   }
 }
 ```
@@ -68,10 +89,10 @@ Token injection:
 
 ```ts
 import { setAuthTokenGetter } from '@/shared/api'
-import { tokenAtom } from '@/entities/session'
+import { accessTokenAtom } from '@/entities/session'
 
 // Once at app boot (currently wired in src/app/model/setup.ts):
-setAuthTokenGetter(() => tokenAtom())
+setAuthTokenGetter(() => accessTokenAtom())
 ```
 
 The token itself lives in `@/entities/session` — the API facade only knows how to read it via the getter, so `shared/api` stays free of business state.
@@ -80,7 +101,7 @@ The token itself lives in `@/entities/session` — the API facade only knows how
 
 ## Rules
 
-1. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, or `app/`. Enforced by ESLint (`no-restricted-imports`).
+1. **Never import from `@/shared/api/generated/**`** in `features/`, `pages/`, `app/`, or `entities/`. Enforced by ESLint (`no-restricted-imports`).
 2. **`shared/api` is framework-agnostic** — no Reatom, no React. Functions return `Promise<T>` and throw `ApiError`. Reatom wrappers live in `features/<name>/model/`.
 3. **The generated folder is committed** but is treated like a build artifact: never edit by hand, regenerate via `pnpm api:generate`. `api:check` in pre-push fails on drift.
 4. **Calls from Reatom actions must use `wrap`** because the project enables `clearStack()`. See [reatom.md](./reatom.md):
@@ -113,8 +134,9 @@ The public API at `@/shared/api` stays unchanged via `index.ts` re-exports, so `
 
 ## Scripts
 
-- `pnpm api:generate` — regenerate all `*.d.ts` from `openapi/*.openapi.yaml`.
-- `pnpm api:check` — generate into a temp dir and diff against the committed code. Fails if anything drifted. Runs in pre-push.
+- `pnpm api:generate` — regenerate all `*.d.ts` (auth/llm from their YAML; notebook from the vendored `openapi/backend/openapi.json` slice).
+- `pnpm api:check` — generate into a temp dir and diff (EOL-insensitively) against the committed code. Fails if anything drifted. Runs in pre-push.
+- `pnpm api:vendor` — refresh `openapi/backend/openapi.json` from `../api/docs/openapi.json`. Run deliberately when the backend contract changes; needs `../api`, and is **not** run by CI, `api:generate`, or `api:check`.
 
 ---
 

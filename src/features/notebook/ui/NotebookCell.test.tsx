@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { TooltipProvider } from '@/shared/ui/tooltip'
+import type { OutputItem } from '../runtime/types'
 import { NotebookCell } from './NotebookCell'
 
 function renderCell(props: Partial<React.ComponentProps<typeof NotebookCell>> = {}) {
@@ -115,5 +116,40 @@ describe('NotebookCell — markdown modal editing', () => {
     pressEnter(textarea, {})
     expect(onViewModeChange).not.toHaveBeenCalled()
     expect(onRunAndAdvance).not.toHaveBeenCalled()
+  })
+})
+
+describe('NotebookCell — Output footer header', () => {
+  test('shows the "Output [N]" header even when an output item is an error', () => {
+    // Regression: output is an array, so logs/results can sit alongside an
+    // error. Hiding the header on error misread the run as "error, no output".
+    const output: OutputItem[] = [
+      { type: 'stdout', text: 'before the error' },
+      { type: 'error', name: 'ReferenceError', message: 'x is not defined' },
+    ]
+    const { container } = renderCell({
+      kind: 'code',
+      code: 'x',
+      output,
+      status: 'error',
+      executionCount: 3,
+    })
+    const text = container.textContent ?? ''
+    // The point is the header renders on error; the bracket count is the
+    // footer's own concern, so don't couple to its exact value.
+    expect(text).toMatch(/Output \[\d+\]/)
+    expect(text).toContain('before the error')
+    expect(text).toContain('x is not defined')
+  })
+
+  test('still shows the "Output [N]" header for a clean run', () => {
+    const { container } = renderCell({
+      kind: 'code',
+      code: 'console.log("hello")',
+      output: [{ type: 'stdout', text: 'hello' }],
+      status: 'done',
+      executionCount: 1,
+    })
+    expect(container.textContent).toMatch(/Output \[\d+\]/)
   })
 })

@@ -23,6 +23,11 @@ describe('measureItemBytes', () => {
     expect(measureItemBytes({ type: 'error', name: 'E', message: 'msg' })).toBe(1 + 3)
   })
 
+  test('error includes the diagnostic hint in its byte count', () => {
+    const item: OutputItem = { type: 'error', name: 'E', message: 'msg', stack: 'st', hint: 'hint' }
+    expect(measureItemBytes(item)).toBe(1 + 3 + 2 + 4)
+  })
+
   test('result measures the JSON size of the serialized value', () => {
     const item: OutputItem = { type: 'result', value: { kind: 'primitive', value: 42 } }
     expect(measureItemBytes(item)).toBe(JSON.stringify(item.value).length)

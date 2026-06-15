@@ -12,16 +12,31 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { applyMigrations, NewerFormatError } from './migrations'
 import type { NotebookJSON } from './schema'
+import {
+  isNotebookSyncState,
+  isStaleWrite,
+  type NotebookSyncState,
+  type PutResult,
+} from './storageAdapter'
 
 const DB_NAME = 'js-notebook'
-const DB_VERSION = 1
+// v2 (#134) adds the `sync` store for the autosync metadata partition. The
+// migration is additive and version-guarded (see `upgrade` below): the existing
+// `notebooks` store and its records are never re-created or cleared, so a user's
+// local-only notebook survives the bump untouched.
+const DB_VERSION = 2
 const STORE = 'notebooks'
+const SYNC_STORE = 'sync'
 
 interface NotebookDB extends DBSchema {
   [STORE]: {
     key: string
     value: NotebookJSON
     indexes: { updatedAt: number }
+  }
+  [SYNC_STORE]: {
+    key: string
+    value: NotebookSyncState
   }
 }
 
@@ -30,9 +45,17 @@ let dbPromise: Promise<IDBPDatabase<NotebookDB>> | undefined
 function getDB(): Promise<IDBPDatabase<NotebookDB>> {
   if (!dbPromise) {
     dbPromise = openDB<NotebookDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const store = db.createObjectStore(STORE, { keyPath: 'id' })
-        store.createIndex('updatedAt', 'updatedAt')
+      // `oldVersion` guards make every step run once and only for DBs below it,
+      // so upgrading an existing v1 DB adds the `sync` store WITHOUT touching the
+      // `notebooks` store (INV-1: never lose the existing local-only notebook).
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const store = db.createObjectStore(STORE, { keyPath: 'id' })
+          store.createIndex('updatedAt', 'updatedAt')
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore(SYNC_STORE, { keyPath: 'notebookId' })
+        }
       },
     }).catch((err) => {
       // Don't cache a rejected open (blocked DB, private mode): otherwise every
@@ -72,12 +95,6 @@ export async function put(notebook: NotebookJSON): Promise<void> {
   await (await getDB()).put(STORE, notebook)
 }
 
-/** Outcome of a conditional write. */
-export type PutResult =
-  | { ok: true }
-  /** Another writer got there first; `current` is the newer stored version. */
-  | { ok: false; current: NotebookJSON }
-
 /**
  * Compare-and-swap write: persist `notebook` only if no other tab has written
  * a newer version since this tab's `base` timestamp. Read and write happen in
@@ -109,7 +126,7 @@ export async function putIfNewer(notebook: NotebookJSON, base: number | null): P
       existing = undefined // corrupt slot — overwrite it
     }
   }
-  if (existing && (base === null || existing.updatedAt > base)) {
+  if (existing && isStaleWrite(existing.updatedAt, base)) {
     await tx.done
     return { ok: false, current: existing }
   }
@@ -123,7 +140,32 @@ export async function remove(id: string): Promise<void> {
   await (await getDB()).delete(STORE, id)
 }
 
-/** Remove all notebooks. Primarily for tests and "reset local data". */
+/**
+ * Remove all notebooks AND all sync-state records, in one transaction. Backs
+ * `clearLocalNotebookData()`: an untrusted-device wipe must leave nothing behind,
+ * neither notebook content nor the unsynced-change queue / tombstones (#134).
+ */
 export async function clear(): Promise<void> {
-  await (await getDB()).clear(STORE)
+  const db = await getDB()
+  const tx = db.transaction([STORE, SYNC_STORE], 'readwrite')
+  await Promise.all([tx.objectStore(STORE).clear(), tx.objectStore(SYNC_STORE).clear(), tx.done])
+}
+
+/** Read one notebook's sync state, validated. `undefined` if absent or corrupt. */
+export async function getSyncState(notebookId: string): Promise<NotebookSyncState | undefined> {
+  const raw = await (await getDB()).get(SYNC_STORE, notebookId)
+  if (raw === undefined) return undefined
+  // A corrupt bookkeeping record is treated as absent (the engine re-initialises
+  // it), never thrown — sync metadata must not crash boot/autosave.
+  return isNotebookSyncState(raw) ? raw : undefined
+}
+
+/** Insert or replace one notebook's sync state (keyed by `notebookId`). */
+export async function putSyncState(state: NotebookSyncState): Promise<void> {
+  await (await getDB()).put(SYNC_STORE, state)
+}
+
+/** Delete one notebook's sync state. No-op if it does not exist. */
+export async function deleteSyncState(notebookId: string): Promise<void> {
+  await (await getDB()).delete(SYNC_STORE, notebookId)
 }

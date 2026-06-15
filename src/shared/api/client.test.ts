@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { readPersistRecord } from '@/shared/lib/persist'
-import { authClient, setAuthTokenGetter, setRefreshHandlers } from './client'
+import { authClient, notebookClient, setAuthTokenGetter, setRefreshHandlers } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -60,6 +60,48 @@ describe('refresh middleware', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  // OOP-1 guard: the request body is buffered (pre-cloned) before the first
+  // fetch consumes the one-shot stream, so a POST retried after refresh must
+  // re-send the SAME body — not an empty one.
+  test('on 401: retries a POST with the same body after refresh', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh call
+      .mockResolvedValueOnce(jsonResponse(200, { otp: '123456', expiresAt: 0 })) // retry
+
+    await authClient.POST('/auth/otp/request', { body: { email: 'user@example.com' } })
+
+    expect(onTokensRefreshed).toHaveBeenCalledWith(stubTokens.accessToken, stubTokens.refreshToken)
+    // The retry is the only call that targets the endpoint via a plain URL string
+    // (the original is sent as a Request object; the refresh targets /auth/refresh).
+    const retryCall = fetchMock.mock.calls.find(
+      (args) => typeof args[0] === 'string' && args[0].includes('/auth/otp/request'),
+    )
+    expect(retryCall).toBeDefined()
+    expect(retryCall![1]?.body).toBe(JSON.stringify({ email: 'user@example.com' }))
+  })
+
+  // Regression: the retry must carry exactly the fresh token. The original
+  // request already has a lowercase `authorization` (set by authMiddleware), so
+  // a header overwrite that is not case-insensitive would leave both the stale
+  // and the fresh value and fetch would join them as "Bearer old, Bearer new".
+  test('on 401: retry sends exactly the fresh bearer token, not the stale one', async () => {
+    setAuthTokenGetter(() => 'initial-access')
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh call
+      .mockResolvedValueOnce(jsonResponse(200, stubUser)) // retry
+
+    await authClient.GET('/auth/me')
+
+    const retryInit = fetchMock.mock.calls[2]![1]!
+    const retryHeaders = new Headers(retryInit.headers as HeadersInit)
+    expect(retryHeaders.get('Authorization')).toBe(`Bearer ${stubTokens.accessToken}`)
+    // No comma-joined stale+fresh value, and no leftover initial token.
+    expect(retryHeaders.get('Authorization')).not.toContain('initial-access')
+    expect(retryHeaders.get('Authorization')).not.toContain(',')
+  })
+
   test('on 401 + refresh failure (non-200): calls onSessionExpired', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
@@ -115,6 +157,33 @@ describe('refresh middleware', () => {
     expect(refreshCallCount).toBe(1)
   })
 
+  test('does not apply stale refresh tokens after the refresh token was cleared', async () => {
+    let refreshToken: string | null = 'current-refresh'
+    setRefreshHandlers({
+      getRefreshToken: () => refreshToken,
+      onTokensRefreshed: onTokensRefreshed as (a: string, r: string) => void,
+      onSessionExpired: onSessionExpired as () => void,
+    })
+    let resolveRefresh!: (r: Response) => void
+    const refreshHeld = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve
+    })
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' }))
+      .mockReturnValueOnce(refreshHeld)
+
+    const promise = authClient.GET('/auth/me')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    refreshToken = null
+    resolveRefresh(jsonResponse(200, stubTokens))
+
+    const { response } = await promise
+    expect(response.status).toBe(401)
+    expect(onTokensRefreshed).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   test('on 401 + malformed refresh response: calls onSessionExpired', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, {}))
@@ -134,6 +203,63 @@ describe('refresh middleware', () => {
     expect(data).toEqual(stubUser)
     expect(onSessionExpired).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Regression (gpt-v-7 B-1): the refresh-and-retry must honour the caller's
+// AbortSignal. remoteSync threads a per-push AbortController through the facade so
+// a sign-out / teardown / session-expiry pause can cancel an in-flight upload;
+// without forwarding the signal, the 401-refresh retry would issue a fresh
+// POST/PATCH after the caller gave up, landing a mutation under a dead session.
+describe('refresh middleware preserves request cancellation', () => {
+  const drainMacrotask = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  test('on 401: aborting during refresh skips the retry', async () => {
+    const controller = new AbortController()
+    let resolveRefresh!: (r: Response) => void
+    const refreshHeld = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve
+    })
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { code: 'unauthorized', message: 'expired' })) // original
+      .mockReturnValueOnce(refreshHeld) // refresh (held until we abort)
+    // No retry mock on purpose: a retry would be the bug (and throw "no more mocks").
+
+    const promise = notebookClient.GET('/notebooks/{notebook_id}', {
+      params: { path: { notebook_id: 'n1' } },
+      signal: controller.signal,
+    })
+    await drainMacrotask() // let the original 401 land and enter refreshOnce
+    controller.abort() // sign-out / teardown aborts the in-flight push
+    resolveRefresh(jsonResponse(200, stubTokens))
+
+    const { response } = await promise
+    expect(response.status).toBe(401) // original 401 surfaced — no retry was issued
+    const retried = fetchMock.mock.calls.some(
+      (args) => typeof args[0] === 'string' && args[0].includes('/notebooks/'),
+    )
+    expect(retried).toBe(false)
+  })
+
+  test('on 401: the refresh retry carries an AbortSignal so it stays cancellable', async () => {
+    const controller = new AbortController()
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, {})) // original → 401
+      .mockResolvedValueOnce(jsonResponse(200, stubTokens)) // refresh
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'n1' })) // retry
+
+    await notebookClient.GET('/notebooks/{notebook_id}', {
+      params: { path: { notebook_id: 'n1' } },
+      signal: controller.signal,
+    })
+
+    const retryCall = fetchMock.mock.calls.find(
+      (args) => typeof args[0] === 'string' && args[0].includes('/notebooks/'),
+    )
+    expect(retryCall).toBeDefined()
+    // The old code passed no signal (undefined); the fix threads request.signal.
+    expect(retryCall![1]?.signal).toBeInstanceOf(AbortSignal)
   })
 })
 

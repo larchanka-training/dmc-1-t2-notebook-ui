@@ -47,7 +47,12 @@ export function measureItemBytes(item: OutputItem): number {
     case 'stderr':
       return byteLength(item.text)
     case 'error':
-      return byteLength(item.name) + byteLength(item.message) + byteLength(item.stack ?? '')
+      return (
+        byteLength(item.name) +
+        byteLength(item.message) +
+        byteLength(item.stack ?? '') +
+        byteLength(item.hint ?? '')
+      )
     case 'result':
       try {
         return byteLength(JSON.stringify(item.value))

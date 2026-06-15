@@ -1,5 +1,24 @@
 # Epic 05 — Sync UX (revision-based, на моках)
 
+> **Статус (#130/#134).** Реальный контракт синхронизации — **серверный LWW
+> merge** через `POST`/`PATCH /api/v1/notebooks` (без отдельного `/sync`, без
+> `If-Match`/`PUT`/409-диалога). Фоновый движок отправки описан в
+> [`../architecture/remote-sync.md`](../architecture/remote-sync.md) и реализован
+> в #134. Дизайн ниже (revision + `If-Match` + 409 `ConflictResolutionDialog`)
+> — **исходный план на моках**, он устарел: конфликты решает сервер, фронт
+> принимает слитый ответ как новую отправную точку. Sync-статусы в UI и
+> первичная загрузка — за #135; этот документ будет переписан там.
+
+---
+
+# ⚠️ Obsolete (mock-era plan) — superseded by #130/#134
+
+Всё, что ниже, — **исходный mock-план** (revision / `If-Match` / `PUT` /
+409-диалог). Он НЕ реализован и НЕ является текущим контрактом. Действующий
+контракт — серверный LWW через `POST`/`PATCH` (см.
+[`../architecture/remote-sync.md`](../architecture/remote-sync.md)). Не копировать
+эти assumptions в #135 — раздел сохранён только как исторический контекст.
+
 ## Why
 
 Дока обещает облачную синхронизацию, но:
@@ -91,6 +110,8 @@ src/shared/api/notebook.ts          ← +sync(id, body, ifMatch): {status: 200|4
 openapi/notebook.openapi.yaml       ← + If-Match header, 409 response
 src/app/mocks/handlers.ts           ← PUT с поддержкой If-Match
 ```
+
+> **notebook теперь vendored (TARDIS-131):** правки контракта (If-Match/409 выше) идут в backend → `pnpm api:vendor` → `pnpm api:generate`, а не в удалённый `openapi/notebook.openapi.yaml`. См. `docs/architecture/api-layer.md`.
 
 ### Reatom
 

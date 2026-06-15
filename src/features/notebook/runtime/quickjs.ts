@@ -35,7 +35,7 @@ import RELEASE_SYNC from '@jitl/quickjs-wasmfile-release-sync'
 import { DEFAULT_TIMEOUT_MS } from './limits'
 import { OUTPUT_BUDGET_BYTES, OUTPUT_ITEM_LIMIT, measureItemBytes } from './outputBudget'
 import { serialize } from './serialize'
-import { transformCellCode } from './transform'
+import { TRAILING_MARKER, transformCellCode } from './transform'
 import type { OutputItem, RuntimeResult, RuntimeStatus, SerializedValue } from './types'
 
 /**
@@ -53,6 +53,22 @@ const VM_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 const VM_MAX_STACK_BYTES = 1024 * 1024
 
 /**
+ * Diagnostic attached to the `error` item when a cell's trailing expression
+ * evaluated to a rejected Promise (the most common "forgot to await" mistake).
+ */
+export const PROMISE_HINT = 'Promise rejected; did you forget await?'
+
+/**
+ * Depth cap for the recursive promise-rejection-reason formatter
+ * (`formatPromise` → `toErrorItem` → `formatPromise`). `Promise.reject(x)` does
+ * not unwrap `x`, so a self-rejected or cyclic promise would otherwise recurse
+ * until the host worker stack overflows — which both breaks the "run never
+ * throws" invariant and can abort the VM on teardown. Past this many nested
+ * rejected promises the reason renders as a bounded `[nested promise]` marker.
+ */
+const MAX_PROMISE_DEPTH = 8
+
+/**
  * Output accumulator shared by console / display capture and the result
  * push. Tracks the cumulative byte size so the kernel can abort a run that
  * blows past the output budget *while it is still producing output* — the
@@ -64,6 +80,13 @@ interface Sink {
   /** Number of items accepted so far this run (capped by OUTPUT_ITEM_LIMIT). */
   count: number
   budgetHit: boolean
+  /**
+   * Set by the injected `__nbTrailing` marker when this run's trailing
+   * expression evaluated to a Promise. Read on the rejection branch to attach
+   * the "did you forget await?" hint, distinguishing a rejected trailing
+   * Promise from an ordinary throw (both reach `awaited.error`). Reset per run.
+   */
+  trailingWasPromise: boolean
   /**
    * Optional per-run streaming hook. Invoked synchronously the moment an item
    * is accepted into `items`, so the worker can post it to the host BEFORE the
@@ -154,9 +177,10 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   vm.runtime.setMaxStackSize(VM_MAX_STACK_BYTES)
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
-  const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false }
+  const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false, trailingWasPromise: false }
   installConsole(vm, sink)
   installDisplay(vm, sink)
+  installTrailingMarker(vm, sink)
 
   return {
     async run(code, runOptions = {}): Promise<RuntimeResult> {
@@ -188,6 +212,7 @@ async function runOne(
   sink.bytes = 0
   sink.count = 0
   sink.budgetHit = false
+  sink.trailingWasPromise = false
   // Bind the streaming hook for this run so every pushItem also forwards the
   // item to the host immediately. Rebound on each run (undefined clears it),
   // and pushItem only fires while VM code executes — between runs nothing
@@ -239,7 +264,14 @@ async function runOne(
       vm.runtime.executePendingJobs().dispose()
       const awaited = await resolved
       if (awaited.error) {
-        pushAbortAware(sink, abort.cause, () => toErrorItem(vm, awaited.error))
+        // A rejected trailing Promise and an ordinary throw both land here; the
+        // `__nbTrailing` marker tells them apart so the hint targets only the
+        // former. `pushAbortAware` runs makeItem only when cause === 'none'.
+        pushAbortAware(sink, abort.cause, () => {
+          const item = toErrorItem(vm, awaited.error)
+          if (sink.trailingWasPromise) item.hint = PROMISE_HINT
+          return item
+        })
         awaited.error.dispose()
         status = classifyAbort(abort.cause)
       } else {
@@ -252,6 +284,10 @@ async function runOne(
     return { status, items }
   } finally {
     vm.runtime.removeInterruptHandler()
+    // Clear the streaming hook so it cannot fire between runs. Safe today
+    // (pushItem only runs during VM execution), but defends against a future
+    // change that schedules a microtask after the run resolves.
+    sink.emit = undefined
   }
 }
 
@@ -344,6 +380,44 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
   return null
 }
 
+/**
+ * Inject `__nbTrailing(v)` — an identity function the transform wraps around a
+ * cell's trailing expression. It records (in `sink.trailingWasPromise`) whether
+ * `v` is a Promise, then returns `v` unchanged so the async IIFE still adopts
+ * (auto-awaits) it. The flag lets the kernel attach the "did you forget await?"
+ * hint when that trailing Promise rejects, without tagging ordinary throws.
+ *
+ * Returning the borrowed argument handle is safe here — quickjs-emscripten's
+ * `newFunction` copies the callback's return value into the VM before freeing
+ * the argument handles. Promise detection and its handle-disposal contract live
+ * in `isPromise`/`inspectPromise`.
+ *
+ * Defined read-only / non-configurable / non-enumerable: user declarations
+ * publish to the same `globalThis` (and the VM is persistent), so a plain
+ * writable prop could be reassigned or deleted from a cell and silently break
+ * trailing detection for the rest of the session. Read-only comes from the
+ * VALUE descriptor itself — a QuickJS value property with no get/set defaults to
+ * non-writable (so `globalThis.<m> = …` is ignored in sloppy mode, throws in
+ * strict). `configurable: false` is a SEPARATE guarantee: it blocks redefining
+ * or deleting the marker, NOT reassignment. Non-enumerable keeps it out of the
+ * user's `Object.keys(globalThis)`.
+ *
+ * `__nbTrailing` is internal: the transform only emits it around the trailing
+ * expression. A cell that *directly* calls this hidden marker with a Promise and
+ * then throws can set a misleading hint — an accepted cosmetic edge, not part of
+ * the user API (the marker is non-enumerable and `__nb`-prefixed).
+ */
+function installTrailingMarker(vm: QuickJSContext, sink: Sink): void {
+  const fn = vm.newFunction(TRAILING_MARKER, (handle) => {
+    if (isPromise(vm, handle)) sink.trailingWasPromise = true
+    return handle
+  })
+  // Read-only is the QuickJS default for a value descriptor; `VmPropertyDescriptor`
+  // has no `writable` key, so it can't (and must not) be flipped writable here.
+  vm.defineProp(vm.global, TRAILING_MARKER, { value: fn, configurable: false, enumerable: false })
+  fn.dispose()
+}
+
 /** Inject a minimal console object that pushes into the host-side `items`. */
 function installConsole(vm: QuickJSContext, sink: Sink): void {
   const consoleHandle = vm.newObject()
@@ -375,7 +449,23 @@ function installConsole(vm: QuickJSContext, sink: Sink): void {
  * Best-effort: pulls name/message/stack if shaped like an Error,
  * otherwise serializes the dumped value into the message.
  */
-function toErrorItem(vm: QuickJSContext, errorHandle: QuickJSHandle): OutputItem {
+function toErrorItem(
+  vm: QuickJSContext,
+  errorHandle: QuickJSHandle,
+  depth = 0,
+): Extract<OutputItem, { type: 'error' }> {
+  // A rejection reason can itself be a Promise — `Promise.reject(x)` does NOT
+  // unwrap x. `vm.dump` on a Promise both LEAKS its internal state object
+  // (`{"type":"rejected",...}`) into the message AND disposes the handle, which
+  // the caller then disposes again → double-free (TARDIS-65 H-1). Render it
+  // promise-aware first; `formatPromise` never dumps or disposes `errorHandle`.
+  // `depth` is threaded so the formatPromise↔toErrorItem recursion stays bounded.
+  const asPromise = formatPromise(vm, errorHandle, depth)
+  if (asPromise !== null) {
+    // `name` is intentionally generic here: a Promise reason has no Error class;
+    // the rendered `message` (`Promise { … }`) carries the actual information.
+    return { type: 'error', name: 'Error', message: asPromise }
+  }
   let dumped: unknown
   try {
     dumped = vm.dump(errorHandle) as unknown
@@ -417,10 +507,107 @@ function safeToString(value: unknown): string {
 }
 
 /**
+ * Inspect a handle's Promise state and hand the result to exactly one callback,
+ * owning the handle-disposal contract in ONE place so it cannot drift between
+ * call sites. Disposal follows the `JSPromiseState` contract in
+ * quickjs-emscripten's types (`getPromiseState` is used instead of `vm.dump`,
+ * which on a Promise both leaks its internal state and disposes the handle):
+ *   - non-Promise → `onNotPromise()`; the fulfilled state carries
+ *     `notAPromise: true` and its `value` IS the borrowed input handle (per the
+ *     type's own doc comment) — NOT disposed here.
+ *   - pending     → `onPending()`; no disposable handles (`error` is a throwing
+ *     getter, never read).
+ *   - fulfilled   → `onFulfilled(value)`; `value` is a fresh dup — disposed
+ *     after the callback returns.
+ *   - rejected    → `onRejected(error)`; `error` is a fresh dup — disposed after
+ *     the callback returns.
+ * Callbacks must read the handle synchronously and not retain it.
+ */
+function inspectPromise<T>(
+  vm: QuickJSContext,
+  handle: QuickJSHandle,
+  handlers: {
+    onNotPromise: () => T
+    onPending: () => T
+    onFulfilled: (value: QuickJSHandle) => T
+    onRejected: (error: QuickJSHandle) => T
+  },
+): T {
+  let state: ReturnType<QuickJSContext['getPromiseState']>
+  try {
+    state = vm.getPromiseState(handle)
+  } catch {
+    return handlers.onNotPromise()
+  }
+  if (state.type === 'fulfilled' && state.notAPromise) return handlers.onNotPromise()
+  switch (state.type) {
+    case 'pending':
+      return handlers.onPending()
+    case 'fulfilled':
+      try {
+        return handlers.onFulfilled(state.value)
+      } finally {
+        state.value.dispose()
+      }
+    case 'rejected':
+      try {
+        return handlers.onRejected(state.error)
+      } finally {
+        state.error.dispose()
+      }
+  }
+}
+
+/** True if the handle is a Promise (any state), with correct disposal. */
+function isPromise(vm: QuickJSContext, handle: QuickJSHandle): boolean {
+  return inspectPromise(vm, handle, {
+    onNotPromise: () => false,
+    onPending: () => true,
+    onFulfilled: () => true,
+    onRejected: () => true,
+  })
+}
+
+/**
+ * Render a QuickJS Promise handle Node-style (`Promise { <pending> }`,
+ * `Promise { 42 }`, `Promise { <rejected> TypeError: ... }`), or return null if
+ * the handle is not a Promise. Goes through `inspectPromise` (`getPromiseState`),
+ * never `vm.dump`, which leaks the engine's internal state object and disposes
+ * the handle.
+ */
+function formatPromise(vm: QuickJSContext, handle: QuickJSHandle, depth = 0): string | null {
+  // Cheap gate: only objects can be Promises. Skips the `getPromiseState`
+  // round-trip (a WASM call + allocation) for primitives on the hot console path.
+  if (vm.typeof(handle) !== 'object') return null
+  return inspectPromise<string | null>(vm, handle, {
+    onNotPromise: () => null,
+    onPending: () => 'Promise { <pending> }',
+    onFulfilled: (value) => `Promise { ${stringifyArg(vm, value)} }`,
+    onRejected: (error) => {
+      // Bound the formatPromise → toErrorItem → formatPromise recursion: a
+      // self-rejected or cyclic promise (`Promise.reject(x)` does not unwrap x)
+      // would otherwise overflow the host worker stack. Past the cap, stop and
+      // render a bounded marker instead of recursing into the reason.
+      if (depth >= MAX_PROMISE_DEPTH) return 'Promise { <rejected> [nested promise] }'
+      // The reason is usually an Error, but it can be a Promise (rendered
+      // promise-aware by toErrorItem, which never dumps/disposes a Promise
+      // reason) or any other value.
+      const err = toErrorItem(vm, error, depth + 1)
+      return `Promise { <rejected> ${err.name}: ${err.message} }`
+    },
+  })
+}
+
+/**
  * Stringify a single console.log argument. The argument handle is borrowed
  * from quickjs-emscripten; do NOT dispose it here.
  */
 function stringifyArg(vm: QuickJSContext, handle: QuickJSHandle): string {
+  // Promise-aware FIRST: a bare `vm.dump` of a Promise leaks the engine's
+  // internal `{"type":"rejected"|"fulfilled"|"pending",...}` state object.
+  const asPromise = formatPromise(vm, handle)
+  if (asPromise !== null) return asPromise
+
   let dumped: unknown
   try {
     dumped = vm.dump(handle) as unknown

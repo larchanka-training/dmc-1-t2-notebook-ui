@@ -130,9 +130,6 @@ export function NotebookCell({
   // cell that the user halted is not mistaken for a clean run or a crash.
   const isHalted = status === 'interrupted' || status === 'timeout'
   const isSkipped = status === 'skipped'
-  // An error result is shown raw (red trace) without the "Output" label — the
-  // error message is self-describing, the label would be noise (new-design-v2).
-  const outputHasError = output.some((item) => item.type === 'error')
   // Agent actions come in two tiers (ai-architecture.md §2): in-browser (T1)
   // and cloud (T2). The verb differs by kind — a markdown prompt GENERATES
   // code, a code cell asks for an IMPROVE diff. Labels mirror new-design-v2.
@@ -491,15 +488,15 @@ export function NotebookCell({
 
         {/* Execution result: a cell FOOTER (not a detached card) — split from
             the editor by a plain top rule. Only the cell itself is rounded; the
-            footer's top edge is a straight line (new-design-v2). A clean run
-            gets an "Output [N]" label; an error is shown raw, without it. */}
+            footer's top edge is a straight line (new-design-v2). The "Output [N]"
+            label shows whenever an executed cell has any output, INCLUDING when
+            one of the items is an error — output is an array (logs, results AND
+            an error can coexist), so hiding the label on error misread the run. */}
         {isCode && output.length > 0 ? (
           <div className="overflow-hidden rounded-b-[var(--radius-cell)] border-t border-border">
-            {outputHasError ? null : (
-              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground select-none">
-                Output [{isRunning ? '*' : (executionCount ?? ' ')}]
-              </div>
-            )}
+            <div className="flex items-center gap-2 px-4 pt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground select-none">
+              Output [{isRunning ? '*' : (executionCount ?? ' ')}]
+            </div>
             <OutputView items={output} />
           </div>
         ) : null}

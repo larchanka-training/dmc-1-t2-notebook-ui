@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
@@ -273,7 +273,7 @@ describe('cell updatedAt + id (sync prep)', () => {
 
 describe('loadNotebook (boot)', () => {
   beforeEach(async () => {
-    await notebookStorage.clear()
+    await notebookStorage.clearAll()
     notebookTitleAtom.set('Untitled notebook')
     storageCompatibilityAtom.set('ok')
   })

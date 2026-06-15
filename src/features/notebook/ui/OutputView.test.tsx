@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { OutputView } from './OutputView'
 import type { OutputItem } from '../runtime/types'
 
@@ -45,5 +45,30 @@ describe('OutputView — order preservation', () => {
   test('renders nothing for an empty list', () => {
     const { container } = render(<OutputView items={[]} />)
     expect(container.firstChild).toBeNull()
+  })
+})
+
+describe('OutputView — error hint', () => {
+  test('renders the diagnostic hint as a distinct node within the error block', () => {
+    const items: OutputItem[] = [
+      {
+        type: 'error',
+        name: 'TypeError',
+        message: 'not a function',
+        hint: 'Promise rejected; did you forget await?',
+      },
+    ]
+    render(<OutputView items={items} />)
+    // The hint is its own node, not folded into the message text...
+    const hintNode = screen.getByText('Promise rejected; did you forget await?')
+    expect(hintNode.textContent).toBe('Promise rejected; did you forget await?')
+    // ...nested inside the same error block that carries name + message.
+    expect(hintNode.parentElement?.textContent).toContain('not a function')
+  })
+
+  test('renders no hint node when the error has none', () => {
+    const items: OutputItem[] = [{ type: 'error', name: 'Error', message: 'boom' }]
+    const { container } = render(<OutputView items={items} />)
+    expect(container.textContent).not.toContain('did you forget await')
   })
 })

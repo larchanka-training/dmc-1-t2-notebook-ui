@@ -164,9 +164,11 @@ No configuration file needs updating — docs are just markdown files.
 
 ## Checklist before opening a PR
 
+- [ ] `pnpm typecheck` passes
 - [ ] `pnpm build` passes with no TypeScript errors
 - [ ] `pnpm lint` passes with no warnings
 - [ ] `pnpm test` passes
+- [ ] `pnpm api:check` passes — if the OpenAPI snapshot changed, the regenerated client types are committed
 - [ ] The feature works in the browser (visit the page, test the interaction)
 - [ ] New components are showcased in `CustomComponentsPage` or `ShadcnComponentsPage`
 - [ ] New docs are added if the change introduces a new concept
@@ -175,12 +177,12 @@ No configuration file needs updating — docs are just markdown files.
 
 ## Docs index
 
-| Topic           | Files                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------------- |
-| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md`                    |
-| Architecture    | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` |
-| Notebook        | `docs/notebook/how-it-works.md` · `adding-cells.md`                                      |
-| Browser LLM     | `docs/browser-llm/README.md` · `how-it-works.md` · `models.md` · `architecture.md`       |
-| Components      | `docs/components/shadcn.md` · `custom.md`                                                |
-| Contributing    | `docs/contributing.md`                                                                   |
-| CI/CD           | `docs/ci-cd.md`                                                                          |
+| Topic           | Files                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| Getting started | `docs/getting-started/overview.md` · `installation.md` · `running.md`                                       |
+| Architecture    | `docs/architecture/folder-structure.md` · `routing.md` · `path-aliases.md` · `reatom.md` · `remote-sync.md` |
+| Notebook        | `docs/notebook/how-it-works.md` · `adding-cells.md`                                                         |
+| Browser LLM     | `docs/browser-llm/README.md` · `how-it-works.md` · `models.md` · `architecture.md`                          |
+| Components      | `docs/components/shadcn.md` · `custom.md`                                                                   |
+| Contributing    | `docs/contributing.md`                                                                                      |
+| CI/CD           | `docs/ci-cd.md`                                                                                             |

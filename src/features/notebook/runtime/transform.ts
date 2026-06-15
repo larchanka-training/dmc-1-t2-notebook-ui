@@ -19,8 +19,13 @@
 //      (`globalThis.x`) — mutations are observed everywhere (Jupyter-like).
 //
 //   2. TRAILING EXPRESSION — if the last top-level node is an
-//      ExpressionStatement, it becomes `return <expression>` so the value
-//      populates the `result` OutputItem (REPL-like behaviour).
+//      ExpressionStatement, it becomes `return __nbTrailing(<expression>)` so
+//      the value populates the `result` OutputItem (REPL-like behaviour).
+//      `__nbTrailing` (injected by the kernel) is an identity function that
+//      records whether the trailing value is a Promise, so the kernel can
+//      attach a "did you forget await?" hint when that Promise rejects — a
+//      rejected trailing Promise is otherwise indistinguishable from a throw
+//      once the async IIFE has adopted it.
 //
 // Re-running a cell with `const x = 1` is safe: it is just a re-assignment of
 // `globalThis.x`, never a redeclaration.
@@ -57,6 +62,14 @@ export interface TransformResult {
   /** Rewritten source: declarations published to globalThis + return trailer. */
   code: string
 }
+
+/**
+ * Name of the identity marker the trailing expression is wrapped in. Shared
+ * contract: `transform` emits a call to it, the kernel (`quickjs.ts`) injects a
+ * function of this exact name. Keep both sides on this constant — a literal on
+ * one side and a rename on the other would only fail at runtime.
+ */
+export const TRAILING_MARKER = '__nbTrailing'
 
 class UnsupportedSyntaxError extends Error {
   constructor(message: string) {
@@ -249,7 +262,12 @@ function patternToGlobalTarget(pattern: Pattern, source: string): string {
 }
 
 function rewriteTrailingExpression(node: ExpressionStatement, source: string): string {
-  return `return ${sliceNode(source, node.expression as Expression)}`
+  // Wrap in the kernel's identity marker so a rejected trailing Promise can be
+  // told apart from an ordinary throw (see header §2). The expression gets its
+  // OWN inner parens: a bare SequenceExpression (`a, b`) would otherwise be
+  // parsed as two call ARGUMENTS, so the marker would see only `a` and the cell
+  // would return the wrong operand (JS sequence semantics yield the last).
+  return `return ${TRAILING_MARKER}((${sliceNode(source, node.expression as Expression)}))`
 }
 
 function sliceNode(source: string, node: Node): string {

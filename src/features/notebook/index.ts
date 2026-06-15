@@ -34,6 +34,8 @@ export {
   saveNow,
 } from './model/autosave'
 export type { SaveStatus } from './model/autosave'
+export { startRemoteSync, pauseRemoteSync, remoteSyncStatusAtom } from './model/remoteSync'
+export type { RemoteSyncStatus } from './model/remoteSync'
 export {
   runCell,
   runAll,
@@ -88,3 +90,16 @@ export { runInWorker, restartWorker } from './runtime/workerHost'
 export type { OutputItem, RuntimeStatus, SerializedValue } from './runtime/types'
 export { codeGeneratorAtom, loadedModelAtom } from './model/codeGenerator'
 export { cloudGenerateAndInsertCodeAction } from './model/cloudCodeGenerator'
+export { aiContextModeAtom } from './model/context-ai/aiContextMode'
+export type { AiContextMode } from './model/context-ai/aiContextMode'
+export {
+  startAiContextSync,
+  persistedContextAtom,
+  whenContextReady,
+} from './model/context-ai/aiContext'
+export {
+  buildNotebookContext,
+  contextToPromptBlock,
+  CONTEXT_BYTE_CAP,
+  DEFAULT_CONTEXT_WINDOW,
+} from './model/context-ai/contextBuilder'

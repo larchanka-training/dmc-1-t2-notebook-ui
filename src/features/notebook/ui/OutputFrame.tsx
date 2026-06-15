@@ -21,9 +21,12 @@
 //      `while(true){}`), and we unmount the iframe — which tears down its
 //      execution context — and show a notice instead.
 //
-// Sizing strategy: a small default height, expanded on demand via the
-// content's `document.documentElement.scrollHeight` reported through
-// postMessage. Anything bigger than MAX_HEIGHT scrolls inside the frame.
+// Sizing strategy: a small default height, expanded on demand. The shell
+// measures an intrinsic content wrapper (#output-root) — NOT the iframe
+// viewport — and reports it through postMessage; the parent applies it
+// verbatim (clamped) and ignores no-op updates, so a steady heartbeat at a
+// stable size can't inflate the frame. Anything bigger than MAX_HEIGHT scrolls
+// inside the frame.
 
 import { useEffect, useRef, useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
@@ -56,6 +59,10 @@ interface OutputFrameProps {
 export function OutputFrame({ html }: OutputFrameProps) {
   const ref = useRef<HTMLIFrameElement | null>(null)
   const [height, setHeight] = useState(MIN_HEIGHT)
+  // Mirror of the applied height, used to drop no-op resize pings. A ref (not
+  // derived from `height`) so the comparison survives the effect re-running on
+  // `html` changes and is readable synchronously inside the message handler.
+  const heightRef = useRef(MIN_HEIGHT)
   const [stalled, setStalled] = useState(false)
 
   // The iframe shell pings its scrollHeight on a heartbeat interval. The
@@ -76,14 +83,24 @@ export function OutputFrame({ html }: OutputFrameProps) {
       if (event.source !== ref.current?.contentWindow) return
       const data = event.data as { kind?: string; height?: number } | null
       if (data?.kind === 'iframe-resize' && typeof data.height === 'number') {
-        // Heartbeat is updated on EVERY ping (cheap) so the liveness window
-        // stays accurate; only the visual setHeight is throttled.
+        // Heartbeat is updated on EVERY ping (cheap, before any early return)
+        // so the liveness window stays accurate even for no-op resizes.
         lastPing = Date.now()
-        pendingHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height) + 4))
+        // Apply the reported content height verbatim (clamped). No growth fudge
+        // factor: adding pixels here would feed back into the next heartbeat
+        // and inflate the frame on every tick (the original feedback loop).
+        const next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height)))
+        // Ignore no-op updates: the heartbeat re-pings the same height every
+        // second; re-rendering on each would be pure churn.
+        if (next === heightRef.current) return
+        pendingHeight = next
         if (frameId === null) {
           frameId = requestAnimationFrame(() => {
             frameId = null
-            if (pendingHeight !== null) setHeight(pendingHeight)
+            if (pendingHeight !== null) {
+              heightRef.current = pendingHeight
+              setHeight(pendingHeight)
+            }
           })
         }
       }
@@ -153,29 +170,36 @@ const IFRAME_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:"
 
 /**
- * Wrap user HTML in a tiny shell that reports its size back to the
- * parent. Keeping the shell minimal: no fonts, no resets — the user's
- * HTML decides how it looks.
+ * Wrap user HTML in a shell-owned element (#output-root) that carries the
+ * padding/font defaults and is the single box we measure. html/body stay at
+ * margin:0; min-height:0 so the reported value is the intrinsic content height,
+ * independent of the iframe viewport. Measuring document.documentElement
+ * instead would track the (parent-controlled) viewport height and feed a growth
+ * loop: parent enlarges the iframe -> documentElement grows -> next ping
+ * reports the larger value -> repeat to MAX_HEIGHT.
  *
- * The shell pings on three triggers: once on load, on every size mutation
- * (ResizeObserver), and on a steady heartbeat interval. The heartbeat is what
- * the parent's liveness watchdog relies on — as long as the iframe's event
- * loop is turning it keeps pinging; a wedged thread (infinite loop) stops, and
- * the parent tears the frame down.
+ * The shell pings on three triggers: once on load, on every size mutation of
+ * the wrapper (ResizeObserver), and on a steady heartbeat interval. The
+ * heartbeat is what the parent's liveness watchdog relies on — as long as the
+ * iframe's event loop is turning it keeps pinging; a wedged thread (infinite
+ * loop) stops, and the parent tears the frame down.
  */
 function buildSrcDoc(userHtml: string): string {
   return `<!doctype html>
-<html>
+<html style="margin:0; min-height:0;">
 <head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${IFRAME_CSP}"></head>
-<body style="margin:0; padding:8px; font-family: system-ui, sans-serif;">
+<body style="margin:0; min-height:0;">
+<main id="output-root" style="padding:8px; font-family: system-ui, sans-serif;">
 ${userHtml}
+</main>
 <script>
+  const root = document.getElementById('output-root');
   const post = () => parent.postMessage({
     kind: 'iframe-resize',
-    height: document.documentElement.scrollHeight,
+    height: Math.max(root.scrollHeight, root.offsetHeight),
   }, '*');
   post();
-  new ResizeObserver(post).observe(document.documentElement);
+  new ResizeObserver(post).observe(root);
   setInterval(post, ${HEARTBEAT_INTERVAL_MS});
 </script>
 </body>

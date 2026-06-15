@@ -149,12 +149,12 @@ export const LoginForm = reatomComponent(() => {
         </form>
       ) : (
         <div className="space-y-4">
-          {/* #9 — client-side env guard as defence-in-depth: even if the backend
-              accidentally returns an OTP in production, it won't be shown in a
-              production build. */}
-          {import.meta.env.DEV && devData ? (
-            <DevOtpBanner otp={devData.otp} expiresAt={devData.expiresAt} />
-          ) : null}
+          {/* Gated by the response alone (docs/auth.md §14.2): the backend
+              returns the otp only in dev-like envs (APP_ENV) and 204 in
+              production, so prod never has devData. No build-time env gate —
+              preview deployments are production builds talking to a dev
+              backend and must still show the banner. */}
+          {devData ? <DevOtpBanner otp={devData.otp} expiresAt={devData.expiresAt} /> : null}
 
           <form onSubmit={onVerify} className="space-y-4">
             <div className="space-y-2.5">

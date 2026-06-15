@@ -1,0 +1,20 @@
+# Normalize line endings to LF across the repo. The toolchain
+# (openapi-typescript, prettier, eslint) emits LF; without this,
+# core.autocrlf=true smudges checkouts to CRLF and regenerating committed
+# files (e.g. src/shared/api/generated/**) shows spurious EOL-only diffs.
+* text=auto eol=lf
+
+# Binary assets — never normalize or diff.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.wasm binary

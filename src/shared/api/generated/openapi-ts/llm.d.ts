@@ -44,7 +44,7 @@ export interface components {
         };
         LlmContextCell: {
             /** @enum {string} */
-            kind: "code" | "markdown" | "text";
+            kind: "code" | "markdown" | "text" | "output" | "globals" | "summary";
             source: string;
         };
         GenerateResponse: {

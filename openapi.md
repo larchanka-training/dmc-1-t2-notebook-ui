@@ -2,6 +2,8 @@
 
 Ветка: `feat_add_openapi_generator`
 
+> **Историческая записка (PoC/решение).** notebook-генерация с тех пор переехала на vendored-срез бэкенд-контракта (`openapi/backend/openapi.json`); ручной `openapi/notebook.openapi.yaml` удалён. Актуальный flow — [`docs/architecture/api-layer.md`](docs/architecture/api-layer.md) и `openapi/backend/README.md`. Ниже — исходный PoC как есть.
+
 ---
 
 ## 1. Контекст и проблема

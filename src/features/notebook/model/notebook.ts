@@ -1,11 +1,11 @@
 import { action, atom, wrap } from '@reatom/core'
-import * as notebookStorage from '../persistence/storage'
+import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
-import { bumpNotebookRevision } from './revision'
+import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
 
@@ -76,14 +76,17 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
   cellsAtom.set(fromJSON(stored))
   // One bump for the whole restore (cells + title + metadata replaced at once).
   bumpNotebookRevision()
+  // Signal a wholesale content replacement so remote-sync re-seeds its
+  // delete-detection baseline (the cell set just changed without a user edit).
+  bumpNotebookRestored()
   clearHistory()
 }, 'notebook.restore')
 
 /**
- * Load the local notebook from IndexedDB on startup. If a notebook is stored,
- * its cells and metadata replace the in-memory seed; otherwise the seed is
- * persisted as the initial "Welcome" notebook so a reload before any edit
- * still finds it.
+ * Load the local notebook from the active storage backend on startup. If a
+ * notebook is stored, its cells and metadata replace the in-memory seed;
+ * otherwise the seed is persisted as the initial "Welcome" notebook so a
+ * reload before any edit still finds it.
  *
  * Best-effort by design: ANY storage failure — an unreadable read OR a failed
  * seed write — is swallowed, leaving the in-memory seed in place. The action

@@ -91,8 +91,12 @@ components:
       required: [kind, source]
       properties:
         kind:
+          # code/markdown/text are verbatim neighbour-cell source; output is a
+          # truncated cell output; globals is a compact name/type/shape digest of
+          # the notebook's declared globals; summary is the budget-aware roll-up
+          # of older history (docs/ai-architecture.md §4.3).
           type: string
-          enum: [code, markdown, text]
+          enum: [code, markdown, text, output, globals, summary]
         source:
           type: string
           maxLength: 8000

@@ -3,10 +3,19 @@ import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
 import { LOGIN_PATH } from '@/shared/lib/paths'
 import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
-import { accessTokenAtom, clearSession, refreshTokenAtom, userAtom } from '@/entities/session'
+import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
-import { loadNotebook, markBootRestored, startAutosave } from '@/features/notebook'
+import {
+  aiContextModeAtom,
+  loadNotebook,
+  LOCAL_NOTEBOOK_ID,
+  markBootRestored,
+  startAiContextSync,
+  startAutosave,
+  startRemoteSync,
+} from '@/features/notebook'
+import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
 // #8 — one-time migration: the pre-OTP model stored a single JWT under
@@ -76,12 +85,9 @@ setRefreshHandlers({
       refreshTokenAtom.set(refreshToken)
     })
   },
-  onSessionExpired: () => {
-    rootFrame.run(() => clearSession())
-    if (window.location.pathname !== LOGIN_PATH) {
-      window.location.replace(`${LOGIN_PATH}?reason=session_expired`)
-    }
-  },
+  // Pause background sync + clear the session (no local wipe — INV-4), then
+  // redirect. Extracted to `sessionExpiry.ts` so this auth↔sync seam is testable.
+  onSessionExpired: handleSessionExpired,
 })
 
 // Restore session if a token was persisted from a previous run.
@@ -120,6 +126,17 @@ rootFrame.run(async () => {
     if (restored) markBootRestored()
   } finally {
     startAutosave()
+    // Background remote sync (#134): push local changes to the backend for the
+    // authorized user. Starts unconditionally — it self-guards on auth, staying
+    // idle while signed out and flushing the persisted queue once a token exists.
+    startRemoteSync(LOCAL_NOTEBOOK_ID)
+    // Mode B (persisted AI context, Epic 07 / #116): load the saved context and
+    // keep it in sync with edits/deletes. Opt-in via VITE_AI_CONTEXT_MODE; the
+    // default 'at-send' mode builds context lazily at generate time and needs no
+    // backend round-trip here.
+    if (aiContextModeAtom() === 'persisted') {
+      startAiContextSync(LOCAL_NOTEBOOK_ID)
+    }
   }
 })
 
