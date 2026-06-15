@@ -205,8 +205,17 @@ export const loadNotebook = action(async () => {
       // legacy lookup key only; if user hydration has not completed yet, fail this
       // boot attempt instead of letting the legacy id leak into autosave/remoteSync.
       const demoId = await wrap(resolveDemoNotebookId())
-      await wrap(migrateLegacySeedIfNeeded(demoId))
+      // Flip the active id to the per-user demo id BEFORE the (best-effort) legacy
+      // migration. If migration threw first, the active id would stay on the legacy
+      // floor and the slot would refuse to bind autosave/remote-sync — leaving the
+      // editor unsynced for the whole session. Migration is non-critical cleanup,
+      // so its failure must never strand the slot on the legacy id.
       activeNotebookIdAtom.set(demoId)
+      try {
+        await wrap(migrateLegacySeedIfNeeded(demoId))
+      } catch (migrationError) {
+        console.warn('notebook: legacy seed migration failed; continuing', migrationError)
+      }
     }
     const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (stored) {

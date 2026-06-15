@@ -226,7 +226,7 @@ export function NotebookCell({
                     className={RUN_BTN_STOP}
                     onClick={onStop}
                   >
-                    <Square className="size-[15px] fill-current" />
+                    <Square className="size-4.5 fill-current" />
                   </button>
                 }
               />
@@ -244,9 +244,9 @@ export function NotebookCell({
                     onClick={onRun}
                   >
                     {isRunning ? (
-                      <Loader2 className="size-[15px] animate-spin" />
+                      <Loader2 className="size-4.5 animate-spin" />
                     ) : (
-                      <Play className="size-[15px]" />
+                      <Play className="size-4.5" />
                     )}
                   </button>
                 }
@@ -268,7 +268,7 @@ export function NotebookCell({
 
           {/* Cell toolbar: all actions are visible buttons revealed on cell
               hover/focus (new-design-v2 — no "⋯" overflow menu). */}
-          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-within:opacity-100">
+          <div className="ml-auto flex items-center gap-0.5 opacity-20 transition-opacity group-hover/cell:opacity-100 focus-within:opacity-100">
             {/* Agent actions (new-design-v2): two explicit tiers per
                 ai-architecture.md §2 — in-browser (T1) and cloud (T2). The label
                 differs by kind (generate vs improve-diff). Presentational only:
@@ -290,9 +290,9 @@ export function NotebookCell({
                       onClick={onInBrowserGenerate}
                     >
                       {isGenerating ? (
-                        <Loader2 className="size-[15px] animate-spin" />
+                        <Loader2 className="size-4.5 animate-spin" />
                       ) : (
-                        <Bot className="size-[15px]" />
+                        <Bot className="size-4.5" />
                       )}
                     </button>
                   }
@@ -315,9 +315,9 @@ export function NotebookCell({
                       onClick={onCloudGenerate}
                     >
                       {isCloudGenerating ? (
-                        <Loader2 className="size-[15px] animate-spin" />
+                        <Loader2 className="size-4.5 animate-spin" />
                       ) : (
-                        <Cloud className="size-[15px]" />
+                        <Cloud className="size-4.5" />
                       )}
                     </button>
                   }
@@ -336,11 +336,7 @@ export function NotebookCell({
                       className={TOOL_BTN}
                       onClick={() => onViewModeChange(showPreview ? 'edit' : 'preview')}
                     >
-                      {showPreview ? (
-                        <Pencil className="size-[15px]" />
-                      ) : (
-                        <Eye className="size-[15px]" />
-                      )}
+                      {showPreview ? <Pencil className="size-4.5" /> : <Eye className="size-4.5" />}
                     </button>
                   }
                 />
@@ -361,7 +357,7 @@ export function NotebookCell({
                       disabled={isFirst}
                       onClick={onMoveUp}
                     >
-                      <ChevronUp className="size-[15px]" />
+                      <ChevronUp className="size-4.5" />
                     </button>
                   }
                 />
@@ -380,7 +376,7 @@ export function NotebookCell({
                       disabled={isLast}
                       onClick={onMoveDown}
                     >
-                      <ChevronDown className="size-[15px]" />
+                      <ChevronDown className="size-4.5" />
                     </button>
                   }
                 />
@@ -398,7 +394,7 @@ export function NotebookCell({
                       className={cn(TOOL_BTN, 'hover:bg-destructive/10 hover:text-destructive')}
                       onClick={onDelete}
                     >
-                      <Trash2 className="size-[15px]" />
+                      <Trash2 className="size-4.5" />
                     </button>
                   }
                 />
