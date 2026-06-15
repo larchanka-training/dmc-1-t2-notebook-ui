@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Code2, Sparkles, Type } from 'lucide-react'
+import { appPath } from '@/shared/lib/paths'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import {
@@ -327,19 +328,26 @@ export const NotebookView = reatomComponent(() => {
               viewport edge on a long notebook; dnd-kit cancels an in-flight
               drag on Esc out of the box (pointer + keyboard sensors). */}
             {cells.length === 0 ? (
-              // Minimal functional empty-state (#135): open-into-slot can now load a
-              // 0-cell notebook (created via the sidebar "+"), and `deleteCell`
-              // guards the last cell, so an empty notebook must offer a way out. The
-              // end-inserter's Code/Text buttons already call addCell('code'|'markdown'),
-              // so wrapping them with a caption is the whole feature — no new logic.
-              // Final visual design (illustration, copy, layout) is #67 §6.
-              <div className="flex flex-col items-center gap-4 py-16 text-center">
-                <p className="text-sm text-muted-foreground">
-                  This notebook is empty. Add your first cell to get started.
+              <div className="flex flex-col items-center border border-dashed border-border bg-[color-mix(in_oklch,var(--muted)_32%,var(--card))] px-6 py-[68px] text-center rounded-[var(--radius-card)]">
+                <div className="mb-4 grid size-[54px] place-items-center bg-primary/10 text-primary rounded-[var(--radius-card)]">
+                  <Sparkles className="size-6" />
+                </div>
+                <h2 className="mb-2 text-[22px] font-semibold tracking-tight">
+                  This notebook is empty
+                </h2>
+                <p className="mb-5 max-w-[520px] text-sm leading-relaxed text-muted-foreground">
+                  Add your first cell to get started — write code, jot a note, or describe what you
+                  want and let the agent draft it for you.
                 </p>
                 <div className="w-full max-w-sm">
                   <CellInserter variant="end" />
                 </div>
+                <a
+                  href={appPath('usage')}
+                  className="mt-4 text-sm font-medium text-primary hover:underline"
+                >
+                  See usage examples
+                </a>
               </div>
             ) : (
               <DndContext

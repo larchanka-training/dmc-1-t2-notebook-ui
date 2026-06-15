@@ -29,8 +29,11 @@ describe('NotebookView empty-state (zero cells)', () => {
   test('shows the empty-state caption and add buttons when there are no cells', () => {
     renderView()
     expect(screen.getByText(/this notebook is empty/i)).toBeInTheDocument()
+    expect(screen.getByText(/add your first cell to get started/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^code$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^text$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ask/i })).toBeNull()
+    expect(screen.getByRole('link', { name: /usage examples/i })).toHaveAttribute('href', '/usage')
   })
 
   test('clicking "Code" adds a code cell and leaves the empty state', async () => {

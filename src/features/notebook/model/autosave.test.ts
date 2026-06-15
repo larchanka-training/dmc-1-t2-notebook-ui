@@ -6,6 +6,7 @@ import {
   addCell,
   cellsAtom,
   LOCAL_NOTEBOOK_ID,
+  SEED_TITLE,
   notebookBaseUpdatedAtAtom,
   setNotebookTitle,
   storageCompatibilityAtom,
@@ -246,7 +247,7 @@ describe('notebook autosave', () => {
   test('setNotebookTitle with the same title does not arm a save', async () => {
     const putIfNewer = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
     const stop = startAutosave()
-    setNotebookTitle('Untitled notebook') // identical to the seed title
+    setNotebookTitle(SEED_TITLE) // identical to the seed title
     await vi.advanceTimersByTimeAsync(500)
     expect(putIfNewer).not.toHaveBeenCalled()
     stop()

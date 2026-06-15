@@ -75,6 +75,11 @@ afterEach(() => {
 })
 
 describe('AppSidebar — open-into-slot', () => {
+  test('renders the Usage link in the Info group', () => {
+    renderSidebar()
+    expect(screen.getByRole('link', { name: /usage/i })).toHaveAttribute('href', '/usage')
+  })
+
   test('clicking a backend notebook row opens it into the slot', async () => {
     const user = userEvent.setup()
     renderSidebar()
@@ -125,7 +130,7 @@ describe('AppSidebar — create guard (FU3)', () => {
     await act(async () => {
       resolveCreate({
         id: BACKEND_ID,
-        title: 'Untitled notebook',
+        title: '📓 Untitled notebook',
         ownerId: 'owner-1',
         formatVersion: 1,
         createdAt: 0,
@@ -133,6 +138,9 @@ describe('AppSidebar — create guard (FU3)', () => {
         cells: [],
       })
     })
+    expect(notebookApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '📓 Untitled notebook' }),
+    )
   })
 })
 

@@ -101,13 +101,17 @@ function raceWithTimeout<T>(promise: Promise<T>, what: string, onTimeout?: () =>
  */
 function startBindings(): void {
   stopBindings()
+  const notebookId = activeNotebookIdAtom()
+  if (notebookId === LOCAL_NOTEBOOK_ID) {
+    console.warn('slot: refusing to bind autosave/remoteSync to the legacy floor id')
+    return
+  }
   // Order matches boot: autosave first so its synchronous subscribe observes the
   // just-loaded content (its "skip first emit" guard then avoids a redundant save),
   // then remote-sync, then optional persisted AI context.
   autosaveTeardown = startAutosave()
-  remoteTeardown = startRemoteSync(activeNotebookIdAtom())
-  aiTeardown =
-    aiContextModeAtom() === 'persisted' ? startAiContextSync(activeNotebookIdAtom()) : null
+  remoteTeardown = startRemoteSync(notebookId)
+  aiTeardown = aiContextModeAtom() === 'persisted' ? startAiContextSync(notebookId) : null
 }
 
 /** Tear down the current slot's bindings (remote-sync teardown aborts an in-flight push). */
@@ -138,8 +142,9 @@ async function rearmOrDegrade(flip: () => void | Promise<void>): Promise<void> {
     if (pending instanceof Promise) await wrap(pending)
     startBindings()
   } catch (error) {
-    console.warn('slot: re-arm failed mid-switch; degrading to the local floor', error)
+    console.warn('slot: re-arm failed mid-switch; degrading to the feature-demo floor', error)
     try {
+      // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution.
       activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
       await wrap(loadNotebook())
       startBindings()
@@ -173,7 +178,7 @@ export function stopSlot(): void {
  *
  * This is an account-boundary safety valve, not a device wipe (#136): it clears
  * the in-memory slot away from the previous owner's backend notebook and re-arms
- * bindings on the local floor, while leaving IndexedDB records intact.
+ * bindings on the feature-demo floor, while leaving IndexedDB records intact.
  */
 export const resetSlotToFloorForAccountChange = action(async (): Promise<void> => {
   // Invalidate any in-flight open BEFORE touching the slot (H1): its post-await
@@ -192,6 +197,8 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
       console.warn('slot: draining before the account-change reset failed; continuing', drainError)
     }
     stopBindings()
+    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution, so
+    // the floor becomes THIS owner's deterministic demo notebook.
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook())
     startBindings()
@@ -210,8 +217,8 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
  * Degrade the slot back to the local welcome-seed floor (#135). Called when the
  * notebook currently open in the slot is deleted: leaving the slot on the deleted
  * id would let autosave/remote-sync recreate it. Drains the outgoing notebook's
- * pending save, points the slot at `LOCAL_NOTEBOOK_ID`, reloads it from storage
- * (re-seeding the welcome notebook if absent) and re-arms the bindings on the
+ * pending save, points the slot at `DEMO_NOTEBOOK_ID`, reloads it from storage
+ * (re-seeding the feature-demo notebook if absent) and re-arms the bindings on the
  * floor id.
  *
  * Goes through the shared slot lock (CL-1) so it cannot interleave with an
@@ -225,7 +232,7 @@ export const degradeSlotToFloor = action(async (): Promise<void> => {
     // before tearing anything down. Bounded so a wedged save cannot strand the lock.
     await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (degrade)'))
     stopBindings()
-    // `loadNotebook` reads the active id, so flip to the floor id before loading.
+    // `loadNotebook` reads the active id, so flip to the demo floor id before loading.
     // `wrap` keeps the post-await continuation in-frame (invariant: every awaited
     // promise is `await wrap(...)`), even though nothing reads an atom after it here.
     await wrap(
@@ -268,7 +275,7 @@ export const restoreActiveSlotBindings = action((): void => {
 }, 'notebook.restoreActiveSlotBindings')
 
 /**
- * Phase 3b: the DELETE committed — degrade the slot to the local welcome floor.
+ * Phase 3b: the DELETE committed — degrade the slot to the feature-demo floor.
  * BEST-EFFORT: any failure is logged, never thrown, so the surrounding
  * `withTransaction` delete action cannot roll back a delete that already
  * succeeded server-side (H2). `rearmOrDegrade` guarantees the slot ends bound.

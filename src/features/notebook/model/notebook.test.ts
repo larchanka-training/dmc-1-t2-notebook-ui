@@ -1,7 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { notebookStorage } from '../persistence/activeStorage'
-import { NewerFormatError } from '../persistence/migrations'
-import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { FORMAT_VERSION } from '../persistence/schema'
 import {
   activeNotebookIdAtom,
   addCell,
@@ -9,28 +7,16 @@ import {
   cellsAtom,
   changeCellKind,
   deleteCell,
-  loadNotebook,
   LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
   notebookSnapshot,
-  notebookTitleAtom,
   restoreNotebook,
-  SEED_CODE,
-  storageCompatibilityAtom,
   updateCellCode,
 } from './notebook'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
 
 describe('notebook store', () => {
-  test('starts with exactly one seed cell', () => {
-    const cells = cellsAtom()
-    expect(cells).toHaveLength(1)
-    expect(cells[0].code()).toBe(SEED_CODE)
-    expect(cells[0].status()).toBe('idle')
-    expect(cells[0].output()).toEqual([])
-  })
-
   test('addCell() appends an empty cell to the end', () => {
     const before = cellsAtom()
     addCell()
@@ -139,7 +125,7 @@ describe('notebook store', () => {
     const after = cellsAtom()[0]
     expect(after.id).toBe(cell.id)
     expect(after.kind).toBe('markdown')
-    expect(after.code()).toBe(SEED_CODE)
+    expect(after.code()).toBe('')
     expect(after.executionCount()).toBeNull()
     expect(after.status()).toBe('idle')
     expect(after.output()).toEqual([])
@@ -195,7 +181,7 @@ describe('notebook store', () => {
     updateCellCode(cell.id, 'changed')
     expect(cell.code()).toBe('changed')
     undo()
-    expect(cell.code()).toBe(SEED_CODE)
+    expect(cell.code()).toBe('')
   })
 
   test('running-state-free actions do not pollute history beyond their op', () => {
@@ -271,89 +257,6 @@ describe('cell updatedAt + id (sync prep)', () => {
     expect(cell.updatedAt()).toBeGreaterThan(before)
     undo()
     expect(cell.updatedAt()).toBe(before)
-  })
-})
-
-describe('loadNotebook (boot)', () => {
-  beforeEach(async () => {
-    await notebookStorage.clearAll()
-    notebookTitleAtom.set('Untitled notebook')
-    storageCompatibilityAtom.set('ok')
-  })
-
-  afterEach(() => {
-    // This block spies on storage; restore so the spy never leaks into the
-    // sibling tests above (no global restore in this file).
-    vi.restoreAllMocks()
-  })
-
-  test('seeds and persists a Welcome notebook when storage is empty', async () => {
-    // Seeding is not a restore — the return flag is false so the caller keeps
-    // the indicator idle for a brand-new notebook.
-    expect(await loadNotebook()).toBe(false)
-    // Seed cell stays in memory…
-    expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
-    // …and was written to storage so a reload finds it.
-    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
-    expect(stored?.cells[0].content).toBe(SEED_CODE)
-  })
-
-  test('restores cells and title from a stored notebook', async () => {
-    const stored: NotebookJSON = {
-      formatVersion: FORMAT_VERSION,
-      id: LOCAL_NOTEBOOK_ID,
-      title: 'Restored',
-      createdAt: 1_700_000_000_000,
-      updatedAt: 1_700_000_500_000,
-      cells: [
-        {
-          id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-          kind: 'code',
-          content: 'restored()',
-          updatedAt: 1,
-        },
-      ],
-    }
-    await notebookStorage.put(stored)
-    // Restoring an existing notebook returns true so the caller can show the
-    // saved indicator immediately, seeded from the stored timestamp.
-    expect(await loadNotebook()).toBe(true)
-    expect(cellsAtom().map((c) => c.code())).toEqual(['restored()'])
-    expect(notebookTitleAtom()).toBe('Restored')
-  })
-
-  test('does not record the boot transition in history', async () => {
-    addCell()
-    expect(canUndoAtom()).toBe(true)
-    await loadNotebook()
-    expect(canUndoAtom()).toBe(false)
-  })
-
-  test('stays best-effort when the initial seed write fails', async () => {
-    // Empty storage (so the seed-write branch runs) + a rejecting put: the
-    // documented failure case (quota / private mode / blocked DB). loadNotebook
-    // must NOT reject, so app setup can still start autosave afterwards.
-    vi.spyOn(notebookStorage, 'get').mockResolvedValue(undefined)
-    vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
-    // A failed seed write is not a restore — returns false, never rejects.
-    await expect(loadNotebook()).resolves.toBe(false)
-    // Seed stays in memory (not wiped by the failed load), history is cleared
-    // on the failure path too (clearHistory moved into `finally`).
-    expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
-    expect(canUndoAtom()).toBe(false)
-  })
-
-  test('marks storage as newer-format and keeps the seed when the stored notebook is too new', async () => {
-    vi.spyOn(notebookStorage, 'get').mockRejectedValue(
-      new NewerFormatError(FORMAT_VERSION + 1, FORMAT_VERSION),
-    )
-    // Newer-format is gated, not restored — returns false.
-    await expect(loadNotebook()).resolves.toBe(false)
-    expect(storageCompatibilityAtom()).toBe('newer-format')
-    expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
   })
 })
 

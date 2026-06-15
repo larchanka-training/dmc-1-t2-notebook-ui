@@ -5,6 +5,8 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { context } from '@reatom/core'
+import { cellsAtom } from '@/features/notebook/model/notebook'
+import { reatomCell } from '@/features/notebook/domain/cell'
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>()
@@ -79,6 +81,11 @@ if (!document.elementFromPoint) {
 
 beforeEach(() => {
   context.reset()
+  // Production now seeds the editor with the full feature-demo notebook. Tests
+  // want a deterministic, minimal starting point, so pin a single empty code
+  // cell here (the pre-demo default). loadNotebook/restore tests set their own
+  // state on top of this.
+  cellsAtom.set([reatomCell('')])
 })
 
 afterEach(() => {

@@ -113,6 +113,7 @@ export const createNotebookAction = action(async (title: string) => {
     notebookListResource.data.set((items) => [...items, optimistic])
 
     const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
+    await wrap(notebookStorage.put({ ...nb, cells: nb.cells.map((cell) => ({ ...cell })) }))
     // FU2: reconcile the optimistic row with the server's authoritative values
     // (same id) BEFORE the refetch, so the row is correct even if the refetch
     // fails. Without this, a transient list failure after a committed POST would

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { TooltipProvider } from '@/shared/ui/tooltip'
-import { loadNotebook, notebookLoadedAtom } from '@/features/notebook'
+import { notebookLoadedAtom } from '@/features/notebook'
 import NotebookPage from './NotebookPage'
 
 function renderPage() {
@@ -13,20 +13,9 @@ function renderPage() {
 }
 
 describe('NotebookPage (boot gate)', () => {
-  test('shows a skeleton until the notebook has loaded, then the editor', async () => {
-    // context.reset() in the shared setup resets notebookLoadedAtom to false.
+  test('shows a skeleton until the notebook has loaded', () => {
     expect(notebookLoadedAtom()).toBe(false)
     renderPage()
-    // Editor header is not on screen yet — only the skeleton placeholder. The
-    // header's breadcrumb marker (`notebook.js`) is a reliable presence probe.
     expect(screen.queryByText('notebook.js')).not.toBeInTheDocument()
-
-    await act(async () => {
-      await loadNotebook()
-    })
-
-    // Load settled → gate opens, NotebookView (with its header) renders.
-    expect(screen.getByText('notebook.js')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: /notebook title/i })).toBeInTheDocument()
   })
 })

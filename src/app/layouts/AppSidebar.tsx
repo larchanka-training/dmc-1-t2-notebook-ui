@@ -5,8 +5,6 @@ import {
   Copy,
   LogIn,
   LogOut,
-  LayoutGrid,
-  Puzzle,
   Info,
   MoreHorizontal,
   MoreVertical,
@@ -18,6 +16,7 @@ import {
   Monitor,
   Trash2,
   CircleHelp,
+  BookOpen,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -75,11 +74,6 @@ function initialsOf(label: string): string {
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
 const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '' }]
-
-const navComponents: NavItem[] = [
-  { title: 'Shadcn UI', icon: LayoutGrid, url: 'components/shadcn' },
-  { title: 'Custom', icon: Puzzle, url: 'components/custom' },
-]
 
 const navAi: NavItem[] = [{ title: 'LLM Playground', icon: Bot, url: 'llm-playground' }]
 
@@ -187,6 +181,7 @@ const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavI
 const InfoGroup = reatomComponent(() => {
   const { pathname } = urlAtom()
   const aboutHref = import.meta.env.BASE_URL + 'about'
+  const usageHref = import.meta.env.BASE_URL + 'usage'
   return (
     // mt-auto pins Info to the bottom of the scrollable content area (above the
     // footer's account block), leaving the notebooks list to take the slack.
@@ -202,6 +197,16 @@ const InfoGroup = reatomComponent(() => {
             >
               <Info />
               <span>About</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname === usageHref}
+              className={NAV_ACTIVE}
+              render={<a href={usageHref} />}
+            >
+              <BookOpen />
+              <span>Usage</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
@@ -263,7 +268,15 @@ function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDele
 // Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
 // Open-into-slot, rename and delete are wired here (#135); multi-notebook routing
 // / duplicate stay in epic 04.
+const NEW_NOTEBOOK_EMOJIS = ['📓', '🧪', '🚀', '✨', '🧠'] as const
 const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
+let nextNotebookEmoji = 0
+
+function nextNotebookTitle(): string {
+  const emoji = NEW_NOTEBOOK_EMOJIS[nextNotebookEmoji % NEW_NOTEBOOK_EMOJIS.length]
+  nextNotebookEmoji += 1
+  return `${emoji} ${NEW_NOTEBOOK_TITLE}`
+}
 
 const NotebooksGroup = reatomComponent(() => {
   const user = userAtom()
@@ -290,7 +303,12 @@ const NotebooksGroup = reatomComponent(() => {
   if (!user) return null
 
   const onCreate = wrap(async () => {
-    await createNotebookAction(NEW_NOTEBOOK_TITLE)
+    const created = await wrap(createNotebookAction(nextNotebookTitle()))
+    if (!created) return
+    const outcome = await wrap(openNotebookInSlot(created.id))
+    if (outcome === 'opened' || outcome === 'already') {
+      urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+    }
   })
 
   const filterText = filter.trim().toLowerCase()
@@ -449,7 +467,6 @@ export function AppSidebar() {
       <SidebarContent className="overflow-x-hidden">
         <NavGroup label="Workspace" items={navMain} />
         <NavGroup label="AI" items={navAi} />
-        <NavGroup label="Components" items={navComponents} />
         <NotebooksGroup />
         <InfoGroup />
       </SidebarContent>

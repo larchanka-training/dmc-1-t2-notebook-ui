@@ -23,8 +23,11 @@ export {
   storageCompatibilityAtom,
   restoreNotebook,
   LOCAL_NOTEBOOK_ID,
+  LEGACY_LOCAL_NOTEBOOK_ID,
+  DEMO_NAMESPACE,
+  DEMO_NOTEBOOK_ID,
+  resolveDemoNotebookId,
   activeNotebookIdAtom,
-  SEED_CODE,
 } from './model/notebook'
 export {
   startAutosave,

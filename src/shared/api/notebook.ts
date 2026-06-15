@@ -172,6 +172,13 @@ export async function patch(
  * with no body, so success is read from `response.ok` rather than `request`'s
  * data-or-throw unwrap; a rejected fetch still maps to NetworkError.
  */
+export async function restoreFeaturesDemo(signal?: AbortSignal): Promise<Notebook> {
+  const data = await request<Schemas['NotebookResponse']>(
+    notebookClient.POST('/notebooks/features-demo/restore', { signal }),
+  )
+  return normalizeNotebook(data)
+}
+
 export async function remove(id: string): Promise<void> {
   let response: Response
   let error: unknown

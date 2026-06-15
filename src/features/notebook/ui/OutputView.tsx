@@ -48,13 +48,19 @@ export function OutputView({ items }: OutputViewProps) {
   // flat block, separated by hairlines rather than each being its own card.
   return (
     <div className="flex flex-col divide-y divide-border/60">
-      {toSegments(items).map((seg, i) =>
-        seg.kind === 'stream' ? (
-          <StreamBlock key={i} items={seg.items} />
-        ) : (
-          <SingleItem key={i} item={seg.item} />
-        ),
-      )}
+      {toSegments(items).map((seg, i) => (
+        <div
+          key={i}
+          data-output-segment="true"
+          className="bg-card/40 first:rounded-t-[inherit] last:rounded-b-[inherit]"
+        >
+          {seg.kind === 'stream' ? (
+            <StreamBlock items={seg.items} />
+          ) : (
+            <SingleItem item={seg.item} />
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -83,11 +89,13 @@ function SingleItem({ item }: { item: OutputItem }) {
       return <OutputFrame html={item.html} />
     case 'image':
       return (
-        <img
-          src={`data:${item.mime};base64,${item.data}`}
-          alt="cell output"
-          className="block max-w-full rounded border border-border"
-        />
+        <div className="px-4 py-3">
+          <img
+            src={`data:${item.mime};base64,${item.data}`}
+            alt="cell output"
+            className="block max-w-full rounded border border-border"
+          />
+        </div>
       )
     case 'error':
       // Flat red block (new-design-v2): a destructive-tinted footer slice, not a
