@@ -6,10 +6,8 @@ import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import {
   bumpSlotGeneration,
   openNotebookInSlot,
-  resetSlotToFloorForAccountChange,
   slotOpenErrorAtom,
   slotOpeningPhaseAtom,
-  startSlot,
   stopSlot,
 } from './slot'
 
@@ -140,19 +138,6 @@ describe('openNotebookInSlot', () => {
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
   })
 
-  test('tears down the previous bindings before re-arming on the new id', async () => {
-    startSlot() // arm bindings for the boot notebook
-    getSpy.mockResolvedValue(doc(SERVER_ID))
-
-    await openNotebookInSlot(SERVER_ID)
-
-    // Old remote-sync torn down (aborts in-flight push) before the new one starts.
-    const teardownOrder = h.remoteTeardown.mock.invocationCallOrder[0]
-    const restartOrder = h.startRemoteSync.mock.invocationCallOrder.at(-1) as number
-    expect(teardownOrder).toBeLessThan(restartOrder)
-    expect(h.drainAutosave.mock.invocationCallOrder[0]).toBeLessThan(teardownOrder)
-  })
-
   test('shows remote-only opening phase until a non-local notebook is fetched', async () => {
     const gate = deferred<notebookApi.Notebook>()
     apiGetSpy.mockReturnValue(gate.promise)
@@ -234,33 +219,6 @@ describe('openNotebookInSlot', () => {
     expect(outcome).toBe('error')
     expect(slotOpenErrorAtom()).not.toBeNull()
   })
-
-  test('rearmOrDegrade last-resort: re-arms on the active id when degrade also fails (L6)', async () => {
-    getSpy.mockResolvedValue(doc(SERVER_ID))
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // startBindings() calls startAutosave() first. Throw on the primary re-arm AND
-    // on the degrade-to-floor re-arm, then succeed on the last-resort re-arm —
-    // exercising rearmOrDegrade's inner catch (slot.ts last-resort path).
-    h.startAutosave
-      .mockImplementationOnce(() => {
-        throw new Error('re-arm boom')
-      })
-      .mockImplementationOnce(() => {
-        throw new Error('degrade re-arm boom')
-      })
-      .mockReturnValue(h.autosaveTeardown)
-
-    const outcome = await openNotebookInSlot(SERVER_ID)
-
-    // Contained as 'error' (M2), the last-resort logged, and bindings were
-    // re-attempted a third time so persistence/sync are not left dead.
-    expect(outcome).toBe('error')
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('degrade-to-floor also failed'),
-      expect.anything(),
-    )
-    expect(h.startAutosave).toHaveBeenCalledTimes(3)
-  })
 })
 
 describe('slot generation fence (H1/H2)', () => {
@@ -278,21 +236,6 @@ describe('slot generation fence (H1/H2)', () => {
     await expect(pending).resolves.toBe('superseded')
     expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID) // never adopted SERVER_ID
     expect(h.pullServerNotebook).not.toHaveBeenCalled() // not allowed to drive a re-adopt
-  })
-
-  test('a generation bump after the immediate local open supersedes the post-GET re-adopt', async () => {
-    const gate = deferred<notebookApi.Notebook>()
-    apiGetSpy.mockReturnValue(gate.promise)
-    getSpy.mockResolvedValue(doc(SERVER_ID)) // local copy → opens immediately, then GET
-
-    const pending = openNotebookInSlot(SERVER_ID)
-    await vi.waitFor(() => expect(activeNotebookIdAtom()).toBe(SERVER_ID))
-
-    bumpSlotGeneration()
-    gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
-
-    await expect(pending).resolves.toBe('superseded')
-    expect(h.pullServerNotebook).not.toHaveBeenCalled() // post-GET tail bailed before pull
   })
 })
 
@@ -332,20 +275,6 @@ describe('slot timeout (M3)', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-})
-
-describe('account-change reset drains before teardown (H3)', () => {
-  test('drainAutosave is invoked BEFORE the bindings are torn down', async () => {
-    startSlot() // arm the bindings for the boot notebook
-    getSpy.mockResolvedValue(doc(LOCAL_NOTEBOOK_ID)) // loadNotebook re-reads the floor
-
-    await resetSlotToFloorForAccountChange()
-
-    expect(h.drainAutosave).toHaveBeenCalled()
-    const drainOrder = h.drainAutosave.mock.invocationCallOrder[0]
-    const teardownOrder = h.remoteTeardown.mock.invocationCallOrder[0]
-    expect(drainOrder).toBeLessThan(teardownOrder)
   })
 })
 

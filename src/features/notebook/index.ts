@@ -26,6 +26,7 @@ export {
   LEGACY_LOCAL_NOTEBOOK_ID,
   DEMO_NAMESPACE,
   DEMO_NOTEBOOK_ID,
+  resolveDemoNotebookId,
   activeNotebookIdAtom,
 } from './model/notebook'
 export {

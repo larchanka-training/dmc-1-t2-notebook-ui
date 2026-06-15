@@ -15,7 +15,7 @@ import { action, atom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, DEMO_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
 import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
@@ -101,13 +101,17 @@ function raceWithTimeout<T>(promise: Promise<T>, what: string, onTimeout?: () =>
  */
 function startBindings(): void {
   stopBindings()
+  const notebookId = activeNotebookIdAtom()
+  if (notebookId === LOCAL_NOTEBOOK_ID) {
+    console.warn('slot: refusing to bind autosave/remoteSync to the legacy floor id')
+    return
+  }
   // Order matches boot: autosave first so its synchronous subscribe observes the
   // just-loaded content (its "skip first emit" guard then avoids a redundant save),
   // then remote-sync, then optional persisted AI context.
   autosaveTeardown = startAutosave()
-  remoteTeardown = startRemoteSync(activeNotebookIdAtom())
-  aiTeardown =
-    aiContextModeAtom() === 'persisted' ? startAiContextSync(activeNotebookIdAtom()) : null
+  remoteTeardown = startRemoteSync(notebookId)
+  aiTeardown = aiContextModeAtom() === 'persisted' ? startAiContextSync(notebookId) : null
 }
 
 /** Tear down the current slot's bindings (remote-sync teardown aborts an in-flight push). */
@@ -140,7 +144,8 @@ async function rearmOrDegrade(flip: () => void | Promise<void>): Promise<void> {
   } catch (error) {
     console.warn('slot: re-arm failed mid-switch; degrading to the feature-demo floor', error)
     try {
-      activeNotebookIdAtom.set(DEMO_NOTEBOOK_ID)
+      // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution.
+      activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
       await wrap(loadNotebook())
       startBindings()
     } catch (degradeError) {
@@ -192,7 +197,9 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
       console.warn('slot: draining before the account-change reset failed; continuing', drainError)
     }
     stopBindings()
-    activeNotebookIdAtom.set(DEMO_NOTEBOOK_ID)
+    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution, so
+    // the floor becomes THIS owner's deterministic demo notebook.
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook())
     startBindings()
     slotOpenErrorAtom.set(null)
@@ -230,7 +237,7 @@ export const degradeSlotToFloor = action(async (): Promise<void> => {
     // promise is `await wrap(...)`), even though nothing reads an atom after it here.
     await wrap(
       rearmOrDegrade(async () => {
-        activeNotebookIdAtom.set(DEMO_NOTEBOOK_ID)
+        activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
         await wrap(loadNotebook())
       }),
     )
@@ -277,7 +284,7 @@ export const settleDeletedSlotToFloor = action(async (): Promise<void> => {
   try {
     await wrap(
       rearmOrDegrade(async () => {
-        activeNotebookIdAtom.set(DEMO_NOTEBOOK_ID)
+        activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
         await wrap(loadNotebook())
       }),
     )

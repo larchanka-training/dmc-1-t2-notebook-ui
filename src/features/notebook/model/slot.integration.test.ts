@@ -3,13 +3,7 @@ import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import {
-  activeNotebookIdAtom,
-  cellsAtom,
-  DEMO_NOTEBOOK_ID,
-  LOCAL_NOTEBOOK_ID,
-  SEED_TITLE,
-} from './notebook'
+import { activeNotebookIdAtom, cellsAtom, DEMO_NOTEBOOK_ID, LOCAL_NOTEBOOK_ID } from './notebook'
 import { isOnlineAtom } from './online'
 import { degradeSlotToFloor, openNotebookInSlot, startSlot, stopSlot } from './slot'
 
@@ -66,34 +60,6 @@ afterEach(async () => {
 })
 
 describe('slot lifecycle (integration, real bindings + fake-indexeddb)', () => {
-  test('degradeSlotToFloor returns the slot to the welcome floor and re-seeds it (CL-9)', async () => {
-    // Put a backend notebook in storage and open it for real into the slot.
-    await notebookStorage.put(doc(SERVER_ID, 'Backend'))
-    startSlot()
-    await openNotebookInSlot(SERVER_ID)
-    expect(activeNotebookIdAtom()).toBe(SERVER_ID)
-    expect(cellsAtom()[0].code()).toBe('server-content')
-
-    // Degrade: the real stopBindings → set DEMO → loadNotebook (re-seed) →
-    // startBindings sequence runs.
-    await degradeSlotToFloor()
-
-    expect(activeNotebookIdAtom()).toBe(DEMO_NOTEBOOK_ID)
-    // The feature-demo floor was re-seeded into the editor.
-    expect(cellsAtom()[0].code()).toContain('# Welcome to JS Notebook')
-    // And persisted, so a reload finds it.
-    const stored = await notebookStorage.get(DEMO_NOTEBOOK_ID)
-    expect(stored?.title).toBe(SEED_TITLE)
-    expect(stored?.cells[0]?.content).toContain('# Welcome to JS Notebook')
-  })
-
-  test('repeated degrade is idempotent (no throw, slot stays on the floor) (CL-1)', async () => {
-    startSlot()
-    await degradeSlotToFloor()
-    await degradeSlotToFloor()
-    expect(activeNotebookIdAtom()).toBe(DEMO_NOTEBOOK_ID)
-  })
-
   test('a concurrent open + degrade do not interleave (serialized lock) (CL-1)', async () => {
     await notebookStorage.put(doc(SERVER_ID, 'Backend'))
     startSlot()

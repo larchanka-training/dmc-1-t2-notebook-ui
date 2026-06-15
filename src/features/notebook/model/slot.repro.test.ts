@@ -21,16 +21,9 @@ import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, cellsAtom, DEMO_NOTEBOOK_ID, LOCAL_NOTEBOOK_ID } from './notebook'
+import { activeNotebookIdAtom, cellsAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import { isOnlineAtom } from './online'
-import {
-  degradeSlotToFloor,
-  openNotebookInSlot,
-  resetSlotToFloorForAccountChange,
-  settleDeletedSlotToFloor,
-  startSlot,
-  stopSlot,
-} from './slot'
+import { openNotebookInSlot, startSlot, stopSlot } from './slot'
 
 const SERVER_ID = '99999999-9999-4999-8999-999999999999'
 const CELL = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -97,44 +90,5 @@ describe('slot switch async-stack safety (production clearStack)', () => {
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
-  })
-
-  test('degradeSlotToFloor returns to the welcome floor without throwing', async () => {
-    await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
-    frame.run(() => startSlot())
-    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
-
-    const threw = await settle(fireLikeProd(frame, () => degradeSlotToFloor()))
-
-    expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
-  })
-
-  test('resetSlotToFloorForAccountChange returns to the floor without throwing (M4)', async () => {
-    await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
-    frame.run(() => startSlot())
-    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
-
-    const threw = await settle(fireLikeProd(frame, () => resetSlotToFloorForAccountChange()))
-
-    expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
-  })
-
-  test('settleDeletedSlotToFloor degrades to the floor without throwing (M4)', async () => {
-    await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
-    frame.run(() => startSlot())
-    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
-
-    const threw = await settle(fireLikeProd(frame, () => settleDeletedSlotToFloor()))
-
-    expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
   })
 })

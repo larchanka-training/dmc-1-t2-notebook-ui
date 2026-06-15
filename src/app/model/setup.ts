@@ -88,9 +88,9 @@ setRefreshHandlers({
 })
 
 // Restore session if a token was persisted from a previous run.
-// `clearStack()` requires every action to run inside an active Reatom stack,
-// so dispatch through rootFrame at module init.
-rootFrame.run(() => loadCurrentUserAction())
+// Notebook boot awaits this promise before resolving the per-user feature-demo id;
+// otherwise the legacy floor id can leak into autosave/remoteSync as a real id.
+const currentUserLoaded = rootFrame.run(() => loadCurrentUserAction())
 
 // Keep <html> in sync with the resolved theme for the whole app lifetime.
 // The subscription makes `resolvedThemeAtom` hot (so it recomputes on every
@@ -118,19 +118,29 @@ rootFrame.run(() => {
 // later edit can persist (and surface 'error' on the indicator) instead of
 // being silently disabled for the whole session.
 rootFrame.run(async () => {
+  let bootedNotebook = false
   try {
+    await wrap(currentUserLoaded)
+    // The feature-demo id is derived from user.id. On the login page there is no
+    // user yet, so starting the notebook slot would bind autosave/remoteSync to
+    // the legacy floor id. The userAtom subscription in startNotebookListSync boots
+    // the slot after sign-in.
+    if (userAtom() === null) return
     // A real restore (existing stored notebook) surfaces "Saved · <time>" right
     // away, seeded from the stored timestamp — instead of a blank indicator
     // until the first edit. A fresh seed / newer-format / failure returns false
     // and keeps the idle state.
     const restored = await wrap(loadNotebook())
+    bootedNotebook = true
     if (restored) markBootRestored()
   } finally {
-    // Start the editor slot for the boot notebook: autosave + background
-    // remote-sync (#134, self-guards on auth) + optional persisted AI context
-    // (Mode B), all bound to the active slot id (#135). The slot controller owns
-    // these bindings so open-into-slot can safely switch them to another id.
-    startSlot()
+    if (bootedNotebook) {
+      // Start the editor slot for the boot notebook: autosave + background
+      // remote-sync (#134, self-guards on auth) + optional persisted AI context
+      // (Mode B), all bound to the active slot id (#135). The slot controller owns
+      // these bindings so open-into-slot can safely switch them to another id.
+      startSlot()
+    }
   }
 })
 

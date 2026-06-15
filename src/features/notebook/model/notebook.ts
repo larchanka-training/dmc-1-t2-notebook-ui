@@ -7,6 +7,8 @@ import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
 import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 import { DEMO_CELLS, SEED_TITLE } from './featureDemoNotebook'
+import { userAtom } from '@/entities/session'
+import { uuidV5 } from '@/shared/lib/id'
 
 // The seed title + cells are authored in ./featureDemoNotebook; SEED_TITLE is
 // re-exported here so existing `import { SEED_TITLE } from './notebook'` callers
@@ -17,6 +19,25 @@ export const DEMO_NOTEBOOK_ID = 'bf6f2f5d-9d1e-5e9d-a71d-e8247b073860'
 export const LOCAL_NOTEBOOK_ID = '00000000-0000-4000-8000-000000000001'
 
 export const LEGACY_LOCAL_NOTEBOOK_ID = LOCAL_NOTEBOOK_ID
+
+/**
+ * The feature-demo notebook id for the CURRENT signed-in user, derived
+ * deterministically so the frontend seed and the backend restore agree on the
+ * SAME id (contract: ui/docs/auth.md §12.1.1; backend api/.../demo.py).
+ *
+ * JS `uuidV5(name, namespace)` is the REVERSE argument order of Python
+ * `uuid5(namespace, name)` — owner id goes first here. The owner id is
+ * lowercased to match the backend hashing `str(UUID)`. There is deliberately no
+ * pre-sign-in fallback: the legacy floor id must never become a syncable notebook
+ * identity.
+ */
+export async function resolveDemoNotebookId(): Promise<string> {
+  const ownerId = userAtom()?.id
+  if (!ownerId) {
+    throw new Error('Cannot resolve feature-demo notebook id before user hydration')
+  }
+  return uuidV5(ownerId.toLowerCase(), DEMO_NAMESPACE)
+}
 
 // Single-notebook MVP seed id: the deterministic feature-demo notebook. It is no
 // longer the *only* id the editor can hold — see `activeNotebookIdAtom` below —
@@ -34,7 +55,10 @@ export const activeNotebookIdAtom = atom(LOCAL_NOTEBOOK_ID, 'notebook.activeId')
 // Initial in-memory editor state = the feature-demo notebook itself, so the
 // very first paint already shows the demo content instead of a throwaway
 // placeholder cell while `loadNotebook()` resolves IndexedDB asynchronously.
-export const cellsAtom = atom<Cell[]>(() => fromJSON(freshDemoNotebook()), 'notebook.cells')
+export const cellsAtom = atom<Cell[]>(
+  () => fromJSON(freshDemoNotebook(DEMO_NOTEBOOK_ID)),
+  'notebook.cells',
+)
 
 // Notebook-level metadata, separate from the cell list. There is no title UI
 // yet, but the persistent format carries these fields (aligned with the
@@ -94,10 +118,10 @@ export const setNotebookTitle = action((title: string) => {
  * the active id, so the seed reflects a clean welcome notebook rather than
  * whatever was previously in the editor (e.g. after a slot switch / degrade).
  */
-function freshDemoNotebook(now = Date.now()): NotebookJSON {
+function freshDemoNotebook(demoId: string, now = Date.now()): NotebookJSON {
   return {
     formatVersion: 1,
-    id: DEMO_NOTEBOOK_ID,
+    id: demoId,
     title: SEED_TITLE,
     createdAt: now,
     updatedAt: now,
@@ -105,24 +129,24 @@ function freshDemoNotebook(now = Date.now()): NotebookJSON {
   }
 }
 
-function resetToFreshSeed(): void {
-  restoreNotebook(freshDemoNotebook())
+function resetToFreshSeed(demoId: string): void {
+  restoreNotebook(freshDemoNotebook(demoId))
 }
 
-async function migrateLegacySeedIfNeeded(): Promise<void> {
+async function migrateLegacySeedIfNeeded(demoId: string): Promise<void> {
   const [demo, legacy] = await Promise.all([
-    wrap(notebookStorage.get(DEMO_NOTEBOOK_ID)),
+    wrap(notebookStorage.get(demoId)),
     wrap(notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID)),
   ])
   if (!demo && legacy) {
-    const migrated: NotebookJSON = { ...legacy, id: DEMO_NOTEBOOK_ID }
+    const migrated: NotebookJSON = { ...legacy, id: demoId }
     await wrap(notebookStorage.put(migrated))
     const legacyState = await wrap(notebookStorage.getSyncState(LEGACY_LOCAL_NOTEBOOK_ID))
     if (legacyState) {
       await wrap(
         notebookStorage.putSyncState({
           ...legacyState,
-          notebookId: DEMO_NOTEBOOK_ID,
+          notebookId: demoId,
           remoteCreated: false,
           dirty: true,
           deletedCells: legacyState.deletedCells,
@@ -176,8 +200,13 @@ export const loadNotebook = action(async () => {
   let restored = false
   try {
     if (activeNotebookIdAtom() === LOCAL_NOTEBOOK_ID) {
-      await wrap(migrateLegacySeedIfNeeded())
-      activeNotebookIdAtom.set(DEMO_NOTEBOOK_ID)
+      // Per-user deterministic demo id (matches the backend), so two accounts on
+      // the same device never contend for one shared id. `LOCAL_NOTEBOOK_ID` is a
+      // legacy lookup key only; if user hydration has not completed yet, fail this
+      // boot attempt instead of letting the legacy id leak into autosave/remoteSync.
+      const demoId = await wrap(resolveDemoNotebookId())
+      await wrap(migrateLegacySeedIfNeeded(demoId))
+      activeNotebookIdAtom.set(demoId)
     }
     const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (stored) {
@@ -191,7 +220,7 @@ export const loadNotebook = action(async () => {
       // reset, degrading the slot to the floor would persist (and keep showing) the
       // deleted notebook's content under LOCAL_NOTEBOOK_ID instead of a clean
       // welcome notebook (caught by the slot CL-9 integration test).
-      resetToFreshSeed()
+      resetToFreshSeed(activeNotebookIdAtom())
       const seed = notebookSnapshot()
       await wrap(notebookStorage.put(seed))
       notebookBaseUpdatedAtAtom.set(seed.updatedAt)
@@ -200,6 +229,9 @@ export const loadNotebook = action(async () => {
     if (error instanceof NewerFormatError) {
       storageCompatibilityAtom.set('newer-format')
       notebookBaseUpdatedAtAtom.set(null)
+    } else if (error instanceof Error && error.message.includes('user hydration')) {
+      activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+      throw error
     }
     // Corrupt/unreadable storage OR a failed seed write — keep the in-memory
     // seed. Never block the editor or autosave startup on storage I/O.

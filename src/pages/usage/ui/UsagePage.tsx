@@ -2,7 +2,7 @@ import { Check, Copy, RefreshCcw } from 'lucide-react'
 import { action, atom, computed, withAsync, withAsyncData, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
-import { DEMO_NOTEBOOK_ID } from '@/features/notebook'
+import { resolveDemoNotebookId } from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
 import { Button } from '@/shared/ui/button'
@@ -212,10 +212,10 @@ const UsagePage = reatomComponent(() => {
   )
 }, 'UsagePage')
 
-const demoPresenceResource = computed(
-  async () => Boolean(await wrap(notebookStorage.get(DEMO_NOTEBOOK_ID))),
-  'usage.demoPresence',
-).extend(withAsyncData({ initState: true }))
+const demoPresenceResource = computed(async () => {
+  const demoId = await wrap(resolveDemoNotebookId())
+  return Boolean(await wrap(notebookStorage.get(demoId)))
+}, 'usage.demoPresence').extend(withAsyncData({ initState: true }))
 
 const restoreDemo = action(async () => {
   const restored = await wrap(notebookApi.restoreFeaturesDemo())
