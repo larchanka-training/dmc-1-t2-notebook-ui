@@ -18,21 +18,12 @@ import {
   notebookSnapshot,
   notebookTitleAtom,
   restoreNotebook,
-  SEED_CODE,
   storageCompatibilityAtom,
   updateCellCode,
 } from './notebook'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
 
 describe('notebook store', () => {
-  test('starts with exactly one seed cell', () => {
-    const cells = cellsAtom()
-    expect(cells).toHaveLength(1)
-    expect(cells[0].code()).toBe(SEED_CODE)
-    expect(cells[0].status()).toBe('idle')
-    expect(cells[0].output()).toEqual([])
-  })
-
   test('addCell() appends an empty cell to the end', () => {
     const before = cellsAtom()
     addCell()
@@ -141,7 +132,7 @@ describe('notebook store', () => {
     const after = cellsAtom()[0]
     expect(after.id).toBe(cell.id)
     expect(after.kind).toBe('markdown')
-    expect(after.code()).toBe(SEED_CODE)
+    expect(after.code()).toBe('')
     expect(after.executionCount()).toBeNull()
     expect(after.status()).toBe('idle')
     expect(after.output()).toEqual([])
@@ -197,7 +188,7 @@ describe('notebook store', () => {
     updateCellCode(cell.id, 'changed')
     expect(cell.code()).toBe('changed')
     undo()
-    expect(cell.code()).toBe(SEED_CODE)
+    expect(cell.code()).toBe('')
   })
 
   test('running-state-free actions do not pollute history beyond their op', () => {
@@ -298,7 +289,7 @@ describe('loadNotebook (boot)', () => {
     expect(cellsAtom().some((cell) => cell.code().includes('display({ type: "html"'))).toBe(true)
     // …and were written to storage so a reload finds them.
     const stored = await notebookStorage.get(DEMO_NOTEBOOK_ID)
-    expect(stored?.title).toBe('📓 My first notebook full of features')
+    expect(stored?.title).toBe('📗 My first notebook, full of features')
     expect(stored?.cells.length).toBeGreaterThan(1)
   })
 
@@ -442,7 +433,7 @@ describe('loadNotebook (boot)', () => {
     await expect(loadNotebook()).resolves.toBe(false)
     expect(storageCompatibilityAtom()).toBe('newer-format')
     expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    expect(cellsAtom()[0].code()).toBe('')
   })
 })
 

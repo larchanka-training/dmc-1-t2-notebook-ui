@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
-import { cellsAtom, SEED_CODE, updateCellCode } from '../model/notebook'
+import { cellsAtom, updateCellCode } from '../model/notebook'
 import { slotOpeningPhaseAtom } from '../model/slot'
 
 function renderView() {
@@ -44,13 +44,6 @@ describe('NotebookView (RTL integration)', () => {
     })
   })
 
-  test('renders a single seed cell on mount', async () => {
-    renderView()
-    const editors = getCodeEditors()
-    expect(editors).toHaveLength(1)
-    await waitFor(() => expect(editors[0].textContent).toContain(SEED_CODE))
-  })
-
   test('adding a cell renders one more editor', async () => {
     const user = userEvent.setup()
     renderView()
@@ -82,7 +75,7 @@ describe('NotebookView (RTL integration)', () => {
     await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
     const [first, second] = cellsAtom()
-    expect(first.code()).toBe(SEED_CODE)
+    expect(first.code()).toBe('')
     expect(second.code()).toBe('')
 
     await act(async () => {

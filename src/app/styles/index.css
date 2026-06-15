@@ -61,9 +61,9 @@
   --sidebar-ring: oklch(0.52 0.16 258);
 
   /* Layout scale (new-design-v2) — consumed by topbar/drawers (T2/T3). */
-  --editor-width: 800px;
   --sidebar-width: 264px;
   --outline-width: 264px;
+  --editor-width: calc(100vw - var(--sidebar-width) - var(--outline-width) - 80px);
   --shadow-pop: 0 4px 12px rgb(15 15 15 / 0.08), 0 1px 2px rgb(15 15 15 / 0.06);
 
   /* Syntax-highlight tokens (new-design-v2) — consumed by cell restyle (T5). */
@@ -359,5 +359,11 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .notebook-caret {
     animation: none;
+  }
+}
+
+@media (max-width: 1279px) {
+  :root {
+    --editor-width: calc(100vw - 80px);
   }
 }

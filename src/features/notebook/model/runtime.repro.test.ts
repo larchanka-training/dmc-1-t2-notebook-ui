@@ -19,7 +19,8 @@
 // beforeEach would throw on the next test — afterEach re-seeds one root frame.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { clearStack, context, STACK, wrap } from '@reatom/core'
-import { addCell, cellsAtom, deleteCell, updateCellCode } from './notebook'
+import { addCell, cellsAtom, updateCellCode } from './notebook'
+import { reatomCell } from '../domain/cell'
 import {
   resumeQueue,
   restartKernel,
@@ -35,9 +36,9 @@ beforeEach(() => {
   // Fresh isolated context per test → clean atom state (seed notebook).
   frame = context.start()
   frame.run(() => restartKernel())
-  const ids = frame.run(() => cellsAtom().map((c) => c.id))
-  for (let i = 1; i < ids.length; i++) frame.run(() => deleteCell(ids[i]))
-  frame.run(() => cellsAtom()[0].code.set(''))
+  // Production seeds the full demo notebook; these async-stack tests want a
+  // single empty CODE cell as a deterministic starting point.
+  frame.run(() => cellsAtom.set([reatomCell('')]))
 })
 
 afterEach(() => {

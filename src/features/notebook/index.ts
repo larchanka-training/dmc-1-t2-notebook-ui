@@ -27,7 +27,6 @@ export {
   DEMO_NAMESPACE,
   DEMO_NOTEBOOK_ID,
   activeNotebookIdAtom,
-  SEED_CODE,
 } from './model/notebook'
 export {
   startAutosave,

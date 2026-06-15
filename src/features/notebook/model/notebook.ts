@@ -6,44 +6,17 @@ import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
 import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
+import { DEMO_CELLS, SEED_TITLE } from './featureDemoNotebook'
 
-export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
-export const SEED_TITLE = '📓 My first notebook full of features'
+// The seed title + cells are authored in ./featureDemoNotebook; SEED_TITLE is
+// re-exported here so existing `import { SEED_TITLE } from './notebook'` callers
+// keep working unchanged.
+export { SEED_TITLE }
 export const DEMO_NAMESPACE = '7f3a2b14-9c8d-4e6f-b1a2-c3d4e5f60718'
 export const DEMO_NOTEBOOK_ID = 'bf6f2f5d-9d1e-5e9d-a71d-e8247b073860'
 export const LOCAL_NOTEBOOK_ID = '00000000-0000-4000-8000-000000000001'
 
 export const LEGACY_LOCAL_NOTEBOOK_ID = LOCAL_NOTEBOOK_ID
-
-const DEMO_CELLS: NotebookJSON['cells'] = [
-  {
-    id: '11111111-1111-4111-8111-111111111111',
-    kind: 'markdown',
-    content:
-      '# Welcome to JS Notebook\n\nThis feature demo is stored in this browser first. Sign in to sync notebooks to the server; until sync succeeds, local browser storage is the only durable copy.',
-    updatedAt: 1,
-  },
-  {
-    id: '22222222-2222-4222-8222-222222222222',
-    kind: 'code',
-    content: 'console.log("stdout is grouped")\nconsole.error("stderr stays in order")\n42',
-    updatedAt: 1,
-  },
-  {
-    id: '33333333-3333-4333-8333-333333333333',
-    kind: 'code',
-    content:
-      'display({ type: "html", value: `<div style="font: 16px system-ui; padding: 12px; border-radius: 12px; background: linear-gradient(135deg, #dbeafe, #f5d0fe);">HTML output runs in a sandboxed iframe.</div>` })',
-    updatedAt: 1,
-  },
-  {
-    id: '44444444-4444-4444-8444-444444444444',
-    kind: 'code',
-    content:
-      'display({ type: "image", mime: "image/svg+xml", data: btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120"><rect width="360" height="120" rx="18" fill="#111827"/><text x="24" y="70" fill="#f9fafb" font-size="28" font-family="system-ui">Inline image output</text></svg>`) })',
-    updatedAt: 1,
-  },
-]
 
 // Single-notebook MVP seed id: the deterministic feature-demo notebook. It is no
 // longer the *only* id the editor can hold — see `activeNotebookIdAtom` below —
@@ -58,7 +31,10 @@ const DEMO_CELLS: NotebookJSON['cells'] = [
 // slot actually switches, behaviour is identical to the pre-#135 constant.
 export const activeNotebookIdAtom = atom(LOCAL_NOTEBOOK_ID, 'notebook.activeId')
 
-export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
+// Initial in-memory editor state = the feature-demo notebook itself, so the
+// very first paint already shows the demo content instead of a throwaway
+// placeholder cell while `loadNotebook()` resolves IndexedDB asynchronously.
+export const cellsAtom = atom<Cell[]>(() => fromJSON(freshDemoNotebook()), 'notebook.cells')
 
 // Notebook-level metadata, separate from the cell list. There is no title UI
 // yet, but the persistent format carries these fields (aligned with the
