@@ -13,12 +13,20 @@ import {
   startNotebookListSync,
 } from './notebookList'
 
-// Delete vacates the slot via the slot controller when the deleted notebook is
-// open. Mock it so this suite asserts the delete action's own orchestration
-// (slot vacate → optimistic row removal → server DELETE → local cleanup) without
-// booting the real autosave/remote-sync/AI bindings the controller starts.
-const slotMock = vi.hoisted(() => ({ degradeSlotToFloor: vi.fn() }))
-vi.mock('./slot', () => ({ degradeSlotToFloor: slotMock.degradeSlotToFloor }))
+// Delete drives the slot controller's two-phase active-delete API (quiesce before
+// the server DELETE; settle/restore after). Mock those so this suite asserts the
+// delete action's own orchestration and ordering without booting the real
+// autosave/remote-sync/AI bindings the controller starts.
+const slotMock = vi.hoisted(() => ({
+  quiesceActiveSlot: vi.fn(),
+  restoreActiveSlotBindings: vi.fn(),
+  settleDeletedSlotToFloor: vi.fn(),
+}))
+vi.mock('./slot', () => ({
+  quiesceActiveSlot: slotMock.quiesceActiveSlot,
+  restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,
+  settleDeletedSlotToFloor: slotMock.settleDeletedSlotToFloor,
+}))
 
 // A fixed client UUID so the create payload (FU1) is deterministic to assert.
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
@@ -145,8 +153,9 @@ describe('deleteNotebookAction', () => {
   const NB_ID = '55555555-5555-4555-8555-555555555555'
 
   beforeEach(() => {
-    slotMock.degradeSlotToFloor.mockClear()
-    slotMock.degradeSlotToFloor.mockResolvedValue(undefined)
+    slotMock.quiesceActiveSlot.mockReset().mockResolvedValue(undefined)
+    slotMock.restoreActiveSlotBindings.mockReset()
+    slotMock.settleDeletedSlotToFloor.mockReset().mockResolvedValue(undefined)
     vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
     vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
@@ -167,8 +176,9 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([other])
     expect(notebookStorage.delete).toHaveBeenCalledWith(NB_ID)
     expect(notebookStorage.deleteSyncState).toHaveBeenCalledWith(NB_ID)
-    // Not the active notebook → the slot is left alone.
-    expect(slotMock.degradeSlotToFloor).not.toHaveBeenCalled()
+    // Not the active notebook → the slot is left alone (no quiesce / settle).
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
   })
 
   test('rolls the row back when the server DELETE fails', async () => {
@@ -181,32 +191,63 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([other, listItem(NB_ID, 'Doomed')])
   })
 
-  test('vacates the slot AFTER a successful delete of the active notebook (CL-4)', async () => {
+  test('quiesces the slot BEFORE the server DELETE, then settles to the floor AFTER (H1)', async () => {
     activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
     notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
     const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
 
     await deleteNotebookAction(NB_ID)
 
-    // Degrade happens only after the server delete commits, so a failed delete
-    // (next test) cannot leave the slot degraded with the row rolled back.
-    expect(slotMock.degradeSlotToFloor).toHaveBeenCalledTimes(1)
+    // H1: id-bound work is stopped BEFORE the destructive request (so an in-flight
+    // push can't recreate the id), and the slot only degrades AFTER the commit.
+    expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.settleDeletedSlotToFloor).toHaveBeenCalledTimes(1)
+    const quiesceOrder = slotMock.quiesceActiveSlot.mock.invocationCallOrder[0]
     const removeOrder = removeSpy.mock.invocationCallOrder[0]
-    const degradeOrder = slotMock.degradeSlotToFloor.mock.invocationCallOrder[0]
-    expect(removeOrder).toBeLessThan(degradeOrder)
+    const settleOrder = slotMock.settleDeletedSlotToFloor.mock.invocationCallOrder[0]
+    expect(quiesceOrder).toBeLessThan(removeOrder)
+    expect(removeOrder).toBeLessThan(settleOrder)
   })
 
-  test('does NOT degrade the slot when deleting the active notebook fails (CL-4)', async () => {
+  test('re-arms the slot and rolls the row back when the active-notebook DELETE fails (H1)', async () => {
     activeNotebookIdAtom.set(NB_ID) // open in the slot
     notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
     vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
 
     await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
 
-    // The server delete failed → the slot must stay intact (not degraded), and the
-    // optimistic row is rolled back.
-    expect(slotMock.degradeSlotToFloor).not.toHaveBeenCalled()
+    // Quiesced before the (failed) DELETE, then re-armed on the same id so the user
+    // keeps the open notebook; the slot is NOT degraded; the row rolls back.
+    expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.restoreActiveSlotBindings).toHaveBeenCalledTimes(1)
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
     expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Doomed')])
+  })
+
+  test('does not roll back a committed DELETE even if settling the slot fails (H2)', async () => {
+    activeNotebookIdAtom.set(NB_ID)
+    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    // settle is best-effort: even if it rejected, the action must NOT reject (which
+    // would roll back the committed server delete). The real settle never throws;
+    // here we assert the action swallows a hypothetical settle failure.
+    slotMock.settleDeletedSlotToFloor.mockRejectedValue(new Error('degrade boom'))
+
+    await expect(deleteNotebookAction(NB_ID)).resolves.toBeUndefined()
+    // Row stays removed (delete committed), not resurrected by a rollback.
+    expect(peek(notebookListResource.data)).toEqual([])
+  })
+
+  test('refuses to delete the local welcome floor (M5)', async () => {
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
+
+    await deleteNotebookAction(LOCAL_NOTEBOOK_ID)
+
+    // Guarded no-op: no server call, no row mutation, no slot teardown.
+    expect(removeSpy).not.toHaveBeenCalled()
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
   })
 })
 
@@ -284,5 +325,18 @@ describe('startNotebookListSync (refresh on account change)', () => {
 
     expect(resetSpy).not.toHaveBeenCalled()
     expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('loads only the lightweight list — never prefetches per-document GETs (AC2 / M6)', async () => {
+    // AC2: sign-in bootstrap pulls the lightweight `GET /notebooks` list only;
+    // full documents are fetched lazily on open. Pin the ABSENCE of a mass
+    // prefetch so a future "warm documents on sign-in" refactor trips this test.
+    const getSpy = vi.spyOn(notebookApi, 'get')
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    userAtom.set(BOB) // account change triggers a list refetch (retry), not gets
+    await Promise.resolve()
+
+    expect(getSpy).not.toHaveBeenCalled()
   })
 })

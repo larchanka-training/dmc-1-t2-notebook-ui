@@ -375,15 +375,23 @@ export function startAutosave(): () => void {
   // teardown without a drain still cancels the timer (the unflushed edit stays in
   // the editor and re-arms on the next change), matching the pre-#135 behaviour.
   const teardown = () => {
+    // Always tear down THIS instance's own per-instance resources (timer +
+    // subscriptions are captured in this closure, so this is safe even for a
+    // stale handle).
     if (timer !== null) clearTimeout(timer)
-    flushPendingSave = null
     unsubscribe()
     unsubscribeFocusChecks()
-    channel?.close()
-    channel = null
-    // Only clear the module pointer if this instance is still the live one — a
-    // newer start may have already replaced it (and torn this one down).
-    if (activeAutosaveTeardown === teardown) activeAutosaveTeardown = null
+    // The cross-tab channel and the flush pointer are MODULE-level singletons
+    // shared with whatever instance is currently live. Only touch them if THIS
+    // instance is still the live one (L2): a stale teardown running after a newer
+    // `startAutosave()` must not close the live channel or wipe the live flush
+    // pointer (which would silently disable cross-tab sync + drain-flush).
+    if (activeAutosaveTeardown === teardown) {
+      flushPendingSave = null
+      channel?.close()
+      channel = null
+      activeAutosaveTeardown = null
+    }
   }
   activeAutosaveTeardown = teardown
   return teardown

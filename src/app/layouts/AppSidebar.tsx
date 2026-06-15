@@ -399,7 +399,13 @@ const NotebooksGroup = reatomComponent(() => {
                   </SidebarMenuButton>
                   <NotebookRowMenu
                     onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title }))}
-                    onDelete={wrap(() => deleteTargetAtom.set({ id: nb.id, title }))}
+                    // Defence-in-depth (M5): never offer Delete for the local
+                    // welcome floor, even if it ever appears as a list row.
+                    onDelete={
+                      nb.id === LOCAL_NOTEBOOK_ID
+                        ? undefined
+                        : wrap(() => deleteTargetAtom.set({ id: nb.id, title }))
+                    }
                   />
                 </SidebarMenuItem>
               )

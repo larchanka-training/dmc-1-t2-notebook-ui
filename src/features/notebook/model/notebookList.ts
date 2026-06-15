@@ -12,8 +12,8 @@ import { userAtom } from '@/entities/session'
 import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { notebookStorage } from '../persistence/activeStorage'
-import { activeNotebookIdAtom } from './notebook'
-import { degradeSlotToFloor } from './slot'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { quiesceActiveSlot, restoreActiveSlotBindings, settleDeletedSlotToFloor } from './slot'
 
 export const notebookListResource = computed(
   async () => await wrap(notebookApi.list()),
@@ -130,24 +130,56 @@ export const createNotebookAction = action(async (title: string) => {
  * so it is never deletable; callers gate the Delete affordance on that.
  */
 export const deleteNotebookAction = action(async (id: string): Promise<void> => {
+  // M5 guard: the local welcome floor has no backend identity and is regenerated
+  // on boot, so it is never deletable. Reject early — before any list mutation or
+  // server call — so a stray listed row or a direct model call can't destroy it
+  // (a DELETE would 404 and the optimistic removal would churn the list).
+  if (id === LOCAL_NOTEBOOK_ID) {
+    console.warn('notebook.delete: refusing to delete the local welcome floor')
+    return
+  }
+
   const wasActive = id === activeNotebookIdAtom()
+
+  // H1: if the notebook is open, quiesce its id-bound work BEFORE the server
+  // DELETE — flush the pending save and stop autosave/remote-sync — so no
+  // in-flight push or fresh edit can re-create the id mid-delete. The id is NOT
+  // flipped yet, so the slot can be restored verbatim if the DELETE fails.
+  if (wasActive) {
+    await wrap(quiesceActiveSlot())
+  }
+
   // Optimistically remove the row; a failed DELETE rolls it back (withTransaction).
   notebookListResource.data.set((items) => items.filter((it) => it.id !== id))
-  // Server delete FIRST. If it throws (offline/500), withTransaction rolls the row
-  // back and — crucially — the slot is still intact (CL-4): we have not degraded it
-  // yet, so a failed delete of the OPEN notebook leaves the user exactly where they
-  // were, pending edits and all.
-  await wrap(notebookApi.remove(id))
-  // Delete committed. Only now vacate the slot if the deleted notebook was open:
-  // `degradeSlotToFloor` drains the pending edit, stops the bindings (so autosave /
-  // remote-sync cannot recreate the id) and re-seeds the welcome floor.
-  if (wasActive) {
-    await wrap(degradeSlotToFloor())
+
+  try {
+    await wrap(notebookApi.remove(id))
+  } catch (error) {
+    // The DELETE failed (offline/5xx). withTransaction will roll the row back; we
+    // must also re-arm the slot we quiesced, so the user is left exactly where
+    // they were (open notebook, bindings live, pending edits intact). Re-throw so
+    // the transaction rolls back and the dialog surfaces the failure.
+    if (wasActive) restoreActiveSlotBindings()
+    throw error
   }
-  // Drop the local copy + its sync queue. Best-effort: a storage hiccup here must
-  // not roll the row back (the notebook IS deleted server-side). Log the failure
-  // (CL-6) instead of swallowing it silently — an orphaned dirty sync-state left
-  // behind can later block re-opening that server id.
+
+  // DELETE committed. From here nothing may throw out of the action, or
+  // withTransaction would roll back a delete that already succeeded server-side
+  // (H2). Both remaining steps are best-effort.
+  if (wasActive) {
+    // Degrade the slot to the welcome floor. `settleDeletedSlotToFloor` is itself
+    // best-effort, but wrap it here too (defence in depth, H2): NOTHING after the
+    // committed DELETE may reject out of this `withTransaction` action, or it
+    // would roll back a delete that already succeeded server-side.
+    try {
+      await wrap(settleDeletedSlotToFloor())
+    } catch (error) {
+      console.error('notebook.delete: settling the slot to the floor failed', error)
+    }
+  }
+  // Drop the local copy + its sync queue. Best-effort: a storage hiccup must not
+  // rethrow (the notebook IS deleted server-side). Log instead of swallowing
+  // silently — an orphaned dirty sync-state can later block re-opening that id.
   try {
     await wrap(notebookStorage.delete(id))
     await wrap(notebookStorage.deleteSyncState(id))

@@ -3,7 +3,7 @@ import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
-import { openNotebookInSlot, startSlot, stopSlot } from './slot'
+import { openNotebookInSlot, slotOpenErrorAtom, startSlot, stopSlot } from './slot'
 
 // The slot controller drives the id-dependent bindings (autosave / remote-sync /
 // AI context) and the pull helper. Mock those collaborators so this suite asserts
@@ -88,7 +88,8 @@ describe('openNotebookInSlot', () => {
 
     await openNotebookInSlot(SERVER_ID)
 
-    expect(apiGetSpy).toHaveBeenCalledWith(SERVER_ID)
+    // The GET is passed the id plus an AbortSignal (M3: abortable on timeout).
+    expect(apiGetSpy).toHaveBeenCalledWith(SERVER_ID, expect.any(AbortSignal))
     expect(h.pullServerNotebook).toHaveBeenCalledWith(server)
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
     expect(h.startRemoteSync).toHaveBeenCalledWith(SERVER_ID)
@@ -184,5 +185,18 @@ describe('openNotebookInSlot', () => {
     gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
     expect(await first).toBe('opened')
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
+  })
+
+  test('contains a mid-switch throw: returns "error", surfaces a message, keeps the slot (M2)', async () => {
+    slotOpenErrorAtom.set(null)
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+    // A throw AFTER the target resolves (here: the drain step) must not escape the
+    // action as an unhandled rejection — it is contained as the `'error'` outcome.
+    h.drainAutosave.mockRejectedValue(new Error('drain boom'))
+
+    const outcome = await openNotebookInSlot(SERVER_ID)
+
+    expect(outcome).toBe('error')
+    expect(slotOpenErrorAtom()).not.toBeNull()
   })
 })

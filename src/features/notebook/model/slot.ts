@@ -56,10 +56,15 @@ class SlotTimeoutError extends Error {
  * Callers therefore do `await wrap(raceWithTimeout(...))`, keeping one wrapped
  * await with no detached continuation in between.
  */
-function raceWithTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
+function raceWithTimeout<T>(promise: Promise<T>, what: string, onTimeout?: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new SlotTimeoutError(what)), SLOT_OP_TIMEOUT_MS)
+    timer = setTimeout(() => {
+      // Cancel the underlying work where possible (M3: abort a hung GET) so it
+      // does not leak a detached request; the lock is freed by the rejection.
+      onTimeout?.()
+      reject(new SlotTimeoutError(what))
+    }, SLOT_OP_TIMEOUT_MS)
   })
   return Promise.race([promise, deadline]).finally(() => {
     if (timer !== undefined) clearTimeout(timer)
@@ -172,6 +177,58 @@ export const degradeSlotToFloor = action(async (): Promise<void> => {
   })
 }, 'notebook.degradeSlotToFloor')
 
+// ---------------------------------------------------------------------------
+// Two-phase active-notebook delete (review v2 H1 + H2)
+// ---------------------------------------------------------------------------
+// Deleting the notebook open in the slot must not (H1) let an in-flight push /
+// autosave recreate the id during the server DELETE, and must not (H2) let a
+// post-commit slot failure roll the committed DELETE back. So the delete action
+// drives three phases around its own server request:
+//   1. `quiesceActiveSlot()`  — BEFORE the DELETE: flush + stop id-bound bindings
+//      (the id is NOT flipped, so the slot can be restored if the DELETE fails).
+//   2. the server DELETE (owned by the delete action).
+//   3a. on failure → `restoreActiveSlotBindings()` re-arms on the same id.
+//   3b. on success → `settleDeletedSlotToFloor()` degrades to the floor, BEST-EFFORT
+//       (never throws), so a committed DELETE is never rolled back.
+//
+// These run WITHOUT `runExclusive`: the delete action is serialized with itself by
+// `withTransaction`, and the destructive request must never be skipped because the
+// switch lock happens to be held. A concurrent open is prevented in practice by the
+// modal, non-dismissable delete dialog (review M4, accepted residual).
+
+/** Phase 1: flush the pending save and stop the id-bound bindings before a delete. */
+export const quiesceActiveSlot = action(async (): Promise<void> => {
+  await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (delete)'))
+  stopBindings()
+}, 'notebook.quiesceActiveSlot')
+
+/** Phase 3a: the DELETE failed — re-arm bindings on the still-active id. */
+export const restoreActiveSlotBindings = action((): void => {
+  startBindings()
+}, 'notebook.restoreActiveSlotBindings')
+
+/**
+ * Phase 3b: the DELETE committed — degrade the slot to the local welcome floor.
+ * BEST-EFFORT: any failure is logged, never thrown, so the surrounding
+ * `withTransaction` delete action cannot roll back a delete that already
+ * succeeded server-side (H2). `rearmOrDegrade` guarantees the slot ends bound.
+ */
+export const settleDeletedSlotToFloor = action(async (): Promise<void> => {
+  try {
+    await wrap(
+      rearmOrDegrade(async () => {
+        activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+        await wrap(loadNotebook())
+      }),
+    )
+  } catch (error) {
+    console.error(
+      'slot: settling to the floor after a delete failed; slot may need a reload',
+      error,
+    )
+  }
+}, 'notebook.settleDeletedSlotToFloor')
+
 /**
  * Run `op` under the shared slot lock. If the lock is held, the caller is told via
  * `false` (open returns a distinct outcome; degrade simply skips — a concurrent
@@ -232,48 +289,65 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
 
   let outcome: OpenOutcome = 'error'
   const ran = await runExclusive('open', async () => {
-    // 1. ALWAYS fetch the server version first so a click picks up edits made on
-    //    another device (the user's #1 concern: a stale local copy must not win).
-    //    `pullServerNotebook` reconciles it under the conflict rule — it accepts
-    //    the server doc only when the local copy is clean/absent and KEEPS a
-    //    locally-dirty copy (its unsynced edits push first). If the fetch fails
-    //    (offline / 5xx) we fall back to whatever is in local storage, so an
-    //    already-downloaded notebook still opens offline.
-    let server: notebookApi.Notebook | undefined
     try {
-      server = await wrap(raceWithTimeout(wrap(notebookApi.get(id)), 'notebook fetch'))
-    } catch (error) {
-      console.warn('slot: failed to fetch notebook; falling back to a local copy', error)
-    }
-    if (server) {
-      // accept-server-if-clean (keeps a dirty local copy); ignores the outcome —
-      // we read the reconciled document back from storage next either way.
-      await wrap(pullServerNotebook(server))
-    }
-    const target = await wrap(notebookStorage.get(id))
-    if (!target) {
-      // No server doc (offline / rejected payload) AND no local copy → cannot open.
-      // Leave the working slot untouched rather than blank the editor.
-      console.warn('slot: could not load the notebook; keeping the current slot')
-      slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
-      outcome = 'unavailable'
-      return
-    }
-    const loaded = target
+      // 1. ALWAYS fetch the server version first so a click picks up edits made on
+      //    another device (the user's #1 concern: a stale local copy must not win).
+      //    `pullServerNotebook` reconciles it under the conflict rule — it accepts
+      //    the server doc only when the local copy is clean/absent and KEEPS a
+      //    locally-dirty copy (its unsynced edits push first). If the fetch fails
+      //    (offline / 5xx) we fall back to whatever is in local storage, so an
+      //    already-downloaded notebook still opens offline.
+      //    M3: the GET takes an AbortSignal aborted on the deadline, so a hung
+      //    fetch is cancelled (not left detached) when the lock is released.
+      let server: notebookApi.Notebook | undefined
+      const fetchAbort = new AbortController()
+      try {
+        server = await wrap(
+          raceWithTimeout(wrap(notebookApi.get(id, fetchAbort.signal)), 'notebook fetch', () =>
+            fetchAbort.abort(),
+          ),
+        )
+      } catch (error) {
+        console.warn('slot: failed to fetch notebook; falling back to a local copy', error)
+      }
+      if (server) {
+        // accept-server-if-clean (keeps a dirty local copy); ignores the outcome —
+        // we read the reconciled document back from storage next either way.
+        await wrap(pullServerNotebook(server))
+      }
+      const target = await wrap(notebookStorage.get(id))
+      if (!target) {
+        // No server doc (offline / rejected payload) AND no local copy → cannot open.
+        // Leave the working slot untouched rather than blank the editor.
+        console.warn('slot: could not load the notebook; keeping the current slot')
+        slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
+        outcome = 'unavailable'
+        return
+      }
+      const loaded = target
 
-    // 2. Persist the outgoing notebook's pending edits under its own (still-active)
-    //    id, and wait for any in-flight write to land. Bounded (CL-3).
-    await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
-    // 3. Drop the outgoing bindings; remote-sync teardown aborts an in-flight push.
-    stopBindings()
-    // 4+5. Flip to the target and re-arm; a mid-switch throw degrades to the floor
-    //      rather than leaving the slot unbound (CL-2).
-    // `wrap` re-binds the frame so `slotOpenErrorAtom.set(null)` below runs
-    // IN-FRAME. A bare `await rearmOrDegrade(...)` drops the async stack and makes
-    // the next atom write throw `missing async stack` under production clearStack().
-    await wrap(rearmOrDegrade(() => restoreNotebook(loaded)))
-    slotOpenErrorAtom.set(null)
-    outcome = 'opened'
+      // 2. Persist the outgoing notebook's pending edits under its own (still-active)
+      //    id, and wait for any in-flight write to land. Bounded (CL-3).
+      await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
+      // 3. Drop the outgoing bindings; remote-sync teardown aborts an in-flight push.
+      stopBindings()
+      // 4+5. Flip to the target and re-arm; a mid-switch throw degrades to the floor
+      //      rather than leaving the slot unbound (CL-2).
+      // `wrap` re-binds the frame so `slotOpenErrorAtom.set(null)` below runs
+      // IN-FRAME. A bare `await rearmOrDegrade(...)` drops the async stack and makes
+      // the next atom write throw `missing async stack` under production clearStack().
+      await wrap(rearmOrDegrade(() => restoreNotebook(loaded)))
+      slotOpenErrorAtom.set(null)
+      outcome = 'opened'
+    } catch (error) {
+      // M2: contain ALL throws at the op boundary so the documented `'error'`
+      // outcome is real (not dead code) and the sidebar never sees an unhandled
+      // rejection. Reachable throws: a drain-timeout `SlotTimeoutError`, a
+      // `NewerFormatError` from storage.get, a rearm double-failure rethrow.
+      console.warn('slot: open failed', error)
+      slotOpenErrorAtom.set('Could not open the notebook. Please try again.')
+      outcome = 'error'
+    }
   })
   if (!ran) return 'busy'
   return outcome
