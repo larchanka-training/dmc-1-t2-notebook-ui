@@ -147,6 +147,30 @@ export function stopSlot(): void {
 }
 
 /**
+ * Reset the visible editor slot when the signed-in owner changes (#135).
+ *
+ * This is an account-boundary safety valve, not a device wipe (#136): it clears
+ * the in-memory slot away from the previous owner's backend notebook and re-arms
+ * bindings on the local floor, while leaving IndexedDB records intact.
+ */
+export const resetSlotToFloorForAccountChange = action(async (): Promise<void> => {
+  try {
+    stopBindings()
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    await wrap(loadNotebook())
+    startBindings()
+    slotOpenErrorAtom.set(null)
+  } catch (error) {
+    console.error('slot: failed to reset to the local floor after account change', error)
+    try {
+      startBindings()
+    } catch (rearmError) {
+      console.error('slot: failed to re-arm after account-change reset failure', rearmError)
+    }
+  }
+}, 'notebook.resetSlotToFloorForAccountChange')
+
+/**
  * Degrade the slot back to the local welcome-seed floor (#135). Called when the
  * notebook currently open in the slot is deleted: leaving the slot on the deleted
  * id would let autosave/remote-sync recreate it. Drains the outgoing notebook's

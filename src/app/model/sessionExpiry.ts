@@ -3,7 +3,7 @@
 
 import { rootFrame } from '@/setup'
 import { clearSession } from '@/entities/session'
-import { pauseRemoteSync } from '@/features/notebook'
+import { pauseRemoteSync, resetSlotToFloorForAccountChange } from '@/features/notebook'
 import { LOGIN_PATH } from '@/shared/lib/paths'
 
 /**
@@ -16,6 +16,7 @@ export function handleSessionExpired(): void {
   rootFrame.run(() => {
     pauseRemoteSync()
     clearSession()
+    void resetSlotToFloorForAccountChange()
   })
   if (window.location.pathname !== LOGIN_PATH) {
     window.location.replace(`${LOGIN_PATH}?reason=session_expired`)

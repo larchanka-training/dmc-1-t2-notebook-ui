@@ -13,7 +13,12 @@ import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { notebookStorage } from '../persistence/activeStorage'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
-import { quiesceActiveSlot, restoreActiveSlotBindings, settleDeletedSlotToFloor } from './slot'
+import {
+  quiesceActiveSlot,
+  resetSlotToFloorForAccountChange,
+  restoreActiveSlotBindings,
+  settleDeletedSlotToFloor,
+} from './slot'
 
 export const notebookListResource = computed(
   async () => await wrap(notebookApi.list()),
@@ -47,7 +52,8 @@ export function startNotebookListSync(): () => void {
     }
     if (ownerId === lastOwnerId) return
     lastOwnerId = ownerId
-    // Drop the previous account's rows before anything can render them.
+    // Drop the previous account's editor slot and rows before foreign state can render.
+    void resetSlotToFloorForAccountChange()
     notebookListResource.reset()
     // Signed in → load the new account's list; signed out → leave it empty.
     if (ownerId !== null) void notebookListResource.retry()

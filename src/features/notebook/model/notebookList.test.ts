@@ -19,11 +19,13 @@ import {
 // autosave/remote-sync/AI bindings the controller starts.
 const slotMock = vi.hoisted(() => ({
   quiesceActiveSlot: vi.fn(),
+  resetSlotToFloorForAccountChange: vi.fn(),
   restoreActiveSlotBindings: vi.fn(),
   settleDeletedSlotToFloor: vi.fn(),
 }))
 vi.mock('./slot', () => ({
   quiesceActiveSlot: slotMock.quiesceActiveSlot,
+  resetSlotToFloorForAccountChange: slotMock.resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,
   settleDeletedSlotToFloor: slotMock.settleDeletedSlotToFloor,
 }))
@@ -265,6 +267,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
   let retrySpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    slotMock.resetSlotToFloorForAccountChange.mockReset().mockResolvedValue(undefined)
     resetSpy = vi.spyOn(notebookListResource, 'reset').mockImplementation(() => undefined as never)
     retrySpy = vi
       .spyOn(notebookListResource, 'retry')
@@ -286,7 +289,8 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set(BOB) // switch account
     await Promise.resolve()
 
-    // Alice's cached rows are dropped, then Bob's list is fetched.
+    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched.
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).toHaveBeenCalledTimes(1)
   })
@@ -300,6 +304,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set(null) // sign out
     await Promise.resolve()
 
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).not.toHaveBeenCalled()
   })
@@ -310,6 +315,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     await Promise.resolve()
 
     // The first synchronous emit is skipped — starting the sync touches nothing.
+    expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
     expect(resetSpy).not.toHaveBeenCalled()
     expect(retrySpy).not.toHaveBeenCalled()
   })
@@ -323,6 +329,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set({ ...ALICE }) // same id, new object reference
     await Promise.resolve()
 
+    expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
     expect(resetSpy).not.toHaveBeenCalled()
     expect(retrySpy).not.toHaveBeenCalled()
   })
