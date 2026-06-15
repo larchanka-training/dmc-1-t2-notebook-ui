@@ -26,9 +26,9 @@ export const AgentChatDialog = reatomComponent(() => {
     }
   }
 
-  function handleOpenChange(next: boolean) {
+  const handleOpenChange = wrap((next: boolean) => {
     if (!next) closeAgentChatAction()
-  }
+  })
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
