@@ -15,7 +15,8 @@
 // `startBindings` threw `missing async stack`. Unit tests with mocked bindings
 // could not catch it because they don't run under clearStack().
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { clearStack, context, STACK, wrap } from '@reatom/core'
+import { context } from '@reatom/core'
+import { fireLikeProd, reseedGlobalStack, settle } from '@/test/clearStack'
 import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
@@ -68,37 +69,15 @@ beforeEach(async () => {
 afterEach(() => {
   frame.run(() => stopSlot())
   vi.restoreAllMocks()
-  // Re-seed the global stack emptied by clearStack() so the shared
-  // `context.reset()` in src/test/setup.ts doesn't throw on the next test.
-  if (STACK.length === 0) STACK.push(context.start())
+  reseedGlobalStack()
 })
-
-/**
- * Fire an action the way the wrapped sidebar handler does: capture context at
- * render time (inside the frame) via `wrap`, then empty the global stack and
- * invoke "later" (the click). This is the boundary that throws
- * `missing async stack` if the action drops context after an await.
- */
-function fireLikeProd<T>(fn: () => T): T {
-  const handler = frame.run(() => wrap(fn))
-  clearStack()
-  return handler()
-}
-
-async function settle(value: unknown): Promise<unknown> {
-  let threw: unknown = null
-  await Promise.resolve(value).catch((e) => {
-    threw = e
-  })
-  return threw
-}
 
 describe('slot switch async-stack safety (production clearStack)', () => {
   test('openNotebookInSlot switches the slot without throwing missing async stack', async () => {
     await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
     frame.run(() => startSlot())
 
-    const threw = await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    const threw = await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
@@ -114,7 +93,7 @@ describe('slot switch async-stack safety (production clearStack)', () => {
       ownerId: 'o',
     } as Awaited<ReturnType<typeof notebookApi.get>>)
 
-    const threw = await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    const threw = await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
@@ -123,10 +102,10 @@ describe('slot switch async-stack safety (production clearStack)', () => {
   test('degradeSlotToFloor returns to the welcome floor without throwing', async () => {
     await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
     frame.run(() => startSlot())
-    await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
 
-    const threw = await settle(fireLikeProd(() => degradeSlotToFloor()))
+    const threw = await settle(fireLikeProd(frame, () => degradeSlotToFloor()))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
@@ -136,10 +115,10 @@ describe('slot switch async-stack safety (production clearStack)', () => {
   test('resetSlotToFloorForAccountChange returns to the floor without throwing (M4)', async () => {
     await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
     frame.run(() => startSlot())
-    await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
 
-    const threw = await settle(fireLikeProd(() => resetSlotToFloorForAccountChange()))
+    const threw = await settle(fireLikeProd(frame, () => resetSlotToFloorForAccountChange()))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
@@ -149,10 +128,10 @@ describe('slot switch async-stack safety (production clearStack)', () => {
   test('settleDeletedSlotToFloor degrades to the floor without throwing (M4)', async () => {
     await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
     frame.run(() => startSlot())
-    await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    await settle(fireLikeProd(frame, () => openNotebookInSlot(SERVER_ID)))
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
 
-    const threw = await settle(fireLikeProd(() => settleDeletedSlotToFloor()))
+    const threw = await settle(fireLikeProd(frame, () => settleDeletedSlotToFloor()))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
