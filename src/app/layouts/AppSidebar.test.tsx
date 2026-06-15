@@ -5,7 +5,13 @@ import { TooltipProvider } from '@/shared/ui/tooltip'
 import { SidebarProvider } from '@/shared/ui/sidebar'
 import { setSession, clearSession } from '@/entities/session'
 import { notebook as notebookApi } from '@/shared/api'
-import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, notebookListResource } from '@/features/notebook'
+import {
+  activeNotebookIdAtom,
+  deleteTargetAtom,
+  LOCAL_NOTEBOOK_ID,
+  notebookListResource,
+  slotOpenErrorAtom,
+} from '@/features/notebook'
 import { AppSidebar } from './AppSidebar'
 
 // AppSidebar opens a notebook into the slot via the `openNotebookInSlot` action
@@ -50,6 +56,10 @@ beforeEach(() => {
     refreshToken: 'ref',
     user: { id: 'u1', email: 'a@b.com', roles: [] },
   })
+  // Stabilise the list: mock the underlying fetch too, so a reactive resource
+  // refetch (e.g. createNotebookAction.retry in another test) can't asynchronously
+  // overwrite the seeded rows and bleed an empty list into a later test.
+  vi.spyOn(notebookApi, 'list').mockResolvedValue([listItem(BACKEND_ID, 'Backend notebook')])
   notebookListResource.data.set([listItem(BACKEND_ID, 'Backend notebook')])
 })
 
@@ -57,7 +67,11 @@ afterEach(() => {
   cleanup()
   clearSession()
   notebookListResource.data.set([])
-  act(() => activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID))
+  act(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    slotOpenErrorAtom.set(null)
+    deleteTargetAtom.set(null)
+  })
 })
 
 describe('AppSidebar — open-into-slot', () => {
@@ -119,5 +133,59 @@ describe('AppSidebar — create guard (FU3)', () => {
         cells: [],
       })
     })
+  })
+})
+
+// M7: assert the observable UI contract, not just spy calls — navigation gating,
+// the rendered open-error, Delete wiring and the floor-Delete guard.
+describe('AppSidebar — UI contract (M7)', () => {
+  test('surfaces the open-slot error to the user when an open fails', () => {
+    act(() => slotOpenErrorAtom.set('Could not open the notebook. Please try again.'))
+    renderSidebar()
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/could not open the notebook/i)
+  })
+
+  test('does not navigate when the open is unavailable (route gated on success)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(openNotebookInSlot).mockResolvedValue('unavailable')
+    renderSidebar()
+
+    await user.click(screen.getByText('Backend notebook'))
+
+    // The controller was invoked, but a non-opened outcome must NOT navigate
+    // (the sidebar gates `urlAtom.set` on 'opened' | 'already'). The pathname
+    // stays at the test origin's root rather than moving to the notebook route.
+    expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(BACKEND_ID)
+  })
+
+  test('wires Delete on a backend row to the confirm-dialog target', async () => {
+    const user = userEvent.setup()
+    renderSidebar()
+
+    // Two "…" menus render: the synthetic floor row (active id = local floor, not
+    // in the list) and the backend row. The backend row is the LAST one.
+    const menus = screen.getAllByRole('button', { name: /notebook actions/i })
+    await user.click(menus[menus.length - 1])
+    // base-ui mounts the menu content in a portal asynchronously — await it.
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }))
+
+    // Delete is wired to the confirm-dialog target (not a direct destructive call).
+    expect(deleteTargetAtom()).toEqual({ id: BACKEND_ID, title: 'Backend notebook' })
+  })
+
+  test('offers no Delete for the local welcome floor row (M5 defence-in-depth)', async () => {
+    const user = userEvent.setup()
+    // Default state: active id is the local floor, shown as the synthetic top row
+    // (it is not in the backend list). Its "…" menu is the FIRST one.
+    renderSidebar()
+
+    const menus = screen.getAllByRole('button', { name: /notebook actions/i })
+    await user.click(menus[0])
+
+    // Rename appears once the menu is open; the floor row offers no Delete (M5).
+    expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
   })
 })
