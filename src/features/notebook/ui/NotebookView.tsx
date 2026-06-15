@@ -221,7 +221,7 @@ export const NotebookView = reatomComponent(() => {
 
   // Whether the outline pane actually occupies space right now: only on wide
   // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
-  // the user hasn't collapsed it, and when there are ≥ 2 headings to show. When
+  // the user hasn't collapsed it, and when there is ≥ 1 heading to show. When
   // it does NOT, the editor column reclaims the outline's width — matching the
   // prototype's `.editor-wrap[data-outline="off"] .editor-col` widening.
   const isNarrow = useIsMobile()

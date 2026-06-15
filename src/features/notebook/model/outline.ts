@@ -34,10 +34,11 @@ export const outlineEntriesAtom = computed<OutlineEntry[]>(() => {
   return entries
 }, 'notebook.outlineEntries')
 
-// The outline earns its space only with something to navigate. A single heading
-// is its own context, so it takes ≥ 2 to show the pane (and, on wide layouts,
-// to keep the editor column at its narrower width).
+// The outline earns its space as soon as there is a single heading to navigate
+// to: even one `# heading` is a useful anchor, and showing the pane then keeps
+// behaviour predictable (it appears the moment a heading exists, on wide
+// layouts also pinning the editor column to its narrower width).
 export const hasOutlineAtom = computed(
-  () => outlineEntriesAtom().length >= 2,
+  () => outlineEntriesAtom().length >= 1,
   'notebook.hasOutline',
 )

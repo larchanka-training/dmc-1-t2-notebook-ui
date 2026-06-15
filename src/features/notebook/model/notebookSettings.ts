@@ -33,7 +33,7 @@ export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbe
  * Whether the notebook outline pane is visible on wide (>1280px) layouts,
  * where it is an inline sticky column. Toggled from the global topbar's
  * outline button (`aria-pressed` mirrors this). On by default; the outline
- * still self-hides when there are < 2 headings to navigate.
+ * still self-hides when there are no headings to navigate.
  */
 export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outlineVisible').extend(
   withLocalStorage('notebook.settings.outlineVisible'),
