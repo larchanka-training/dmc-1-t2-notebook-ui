@@ -54,11 +54,22 @@ export const loadModelAction = action(async () => {
 }, 'webLlm.loadModel').extend(withAsync())
 
 export const sendMessageAction = action(async (input: string) => {
-  const engine = engineAtom()
-  if (!engine || !input.trim()) return
+  if (!input.trim()) return
 
+  const engine = engineAtom()
   const userMsg: ChatMessage = { role: 'user', content: input.trim() }
   messagesAtom.set((msgs) => [...msgs, userMsg])
+
+  if (!engine) {
+    // No model loaded — show a placeholder so the Local column isn't silent
+    // while Cloud responds.
+    messagesAtom.set((msgs) => [
+      ...msgs,
+      { role: 'assistant', content: '— Load a model to see a local response —' },
+    ])
+    return
+  }
+
   streamingResponseAtom.set('')
 
   // Pre-capture Reatom context NOW (sync, before any await).
