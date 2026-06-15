@@ -34,6 +34,27 @@ let aiTeardown: (() => void) | null = null
 // subscriptions (CL-1/CL-2). A single shared lock instead of a per-entry flag.
 let slotOpInFlight = false
 
+// Generation fence for in-flight opens (review v4 H1/H2). `openNotebookInSlot`
+// runs lock-free mutators (account-change reset, two-phase delete) can interleave
+// with — they are NOT serialized by `slotOpInFlight` and are triggered
+// non-modally (a `userAtom` subscription, a 401 session-expiry). `runExclusive`
+// only guards open-vs-open. So an open parked at its lazy GET could resolve AFTER
+// such a mutator cleared the slot and re-adopt the previous owner's / a just-
+// deleted notebook. Every reset/delete bumps this counter; an open captures it
+// before its first await and re-checks after each await, bailing (`superseded`)
+// instead of re-adopting a stale target.
+let slotGeneration = 0
+
+/**
+ * Invalidate any in-flight `openNotebookInSlot` (review v4 H1/H2). Called by the
+ * lock-free slot mutators (account-change reset, notebook delete) BEFORE they
+ * clear/replace the slot, so an open that started earlier bails on its next
+ * post-await re-check instead of re-adopting a now-stale notebook id + content.
+ */
+export function bumpSlotGeneration(): void {
+  slotGeneration += 1
+}
+
 /** Deadline for a slot switch's awaits (drain + lazy GET) so a wedged save / hung
  *  fetch cannot strand the lock forever (CL-3). */
 const SLOT_OP_TIMEOUT_MS = 15_000
@@ -155,7 +176,21 @@ export function stopSlot(): void {
  * bindings on the local floor, while leaving IndexedDB records intact.
  */
 export const resetSlotToFloorForAccountChange = action(async (): Promise<void> => {
+  // Invalidate any in-flight open BEFORE touching the slot (H1): its post-await
+  // tail then bails (`superseded`) instead of re-adopting the previous owner's
+  // notebook after we reset to the floor — the cross-account leak guard.
+  bumpSlotGeneration()
   try {
+    // Flush the outgoing (previous owner's) pending edit to its own local id
+    // before tearing bindings down (H3): autosave teardown cancels the pending
+    // debounce, so skipping the drain drops the last in-memory edit. Best-effort
+    // + bounded: a wedged/failed drain must never block an account-boundary reset
+    // (it leaves local data intact — not a device wipe, that is #136).
+    try {
+      await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (account reset)'))
+    } catch (drainError) {
+      console.warn('slot: draining before the account-change reset failed; continuing', drainError)
+    }
     stopBindings()
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook())
@@ -284,8 +319,11 @@ async function runExclusive(label: 'open' | 'degrade', op: () => Promise<void>):
  *   - `busy`       — another slot op is in flight; nothing changed.
  *   - `unavailable`— fetch failed / payload rejected / storage miss; slot kept.
  *   - `error`      — an unexpected throw; slot kept or safely degraded.
+ *   - `superseded` — an account-change reset / delete invalidated this open
+ *                    mid-flight (generation fence, H1/H2); the slot was left to
+ *                    that mutator. The sidebar must NOT navigate on this.
  */
-export type OpenOutcome = 'opened' | 'already' | 'busy' | 'unavailable' | 'error'
+export type OpenOutcome = 'opened' | 'already' | 'busy' | 'unavailable' | 'error' | 'superseded'
 
 /** Last open-into-slot failure, for the UI to surface; cleared on a successful open. */
 export const slotOpenErrorAtom = atom<string | null>(null, 'notebook.slotOpenError')
@@ -341,10 +379,18 @@ async function openResolvedNotebook(stored: NotebookJSON): Promise<void> {
 export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome> => {
   if (id === activeNotebookIdAtom()) return 'already'
 
+  // Capture the slot generation before any await: a lock-free reset/delete that
+  // runs while we await bumps it, and each post-await re-check below then bails
+  // (`superseded`) instead of re-adopting a now-stale notebook (H1/H2).
+  const myGeneration = slotGeneration
   let outcome: OpenOutcome = 'error'
   const ran = await runExclusive('open', async () => {
     try {
       const local = await wrap(notebookStorage.get(id))
+      if (myGeneration !== slotGeneration) {
+        outcome = 'superseded'
+        return
+      }
       slotOpeningPhaseAtom.set(local ? 'local-first' : 'remote-only')
 
       if (local) {
@@ -358,6 +404,13 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
       // changes the stored document, reload the slot from storage. Dirty local docs
       // are preserved by `pullServerNotebook` and therefore re-read unchanged.
       const server = await wrap(fetchServerNotebook(id))
+      // The GET is the widest await window; bail before pulling/re-adopting if a
+      // reset/delete landed meanwhile (H1/H2). The local-first open above is left
+      // for that mutator's teardown-first re-arm to supersede.
+      if (myGeneration !== slotGeneration) {
+        outcome = 'superseded'
+        return
+      }
       if (server) await wrap(pullServerNotebook(server))
 
       const target = await wrap(notebookStorage.get(id))
@@ -368,6 +421,12 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
         return
       }
 
+      // Final guard before re-adopting the resolved target (a reset/delete may
+      // have landed during the pull + read-back).
+      if (myGeneration !== slotGeneration) {
+        outcome = 'superseded'
+        return
+      }
       if (!local || target.updatedAt !== local.updatedAt) {
         await wrap(openResolvedNotebook(target))
       }

@@ -249,3 +249,38 @@ describe('startAiContextSync', () => {
     unsubscribe()
   })
 })
+
+describe('startAiContextSync teardown (H4: generation fence + reset)', () => {
+  test('a slow load resolving after teardown is dropped (stale, not written)', async () => {
+    // Gate the load so it is still in flight when we tear the sync down.
+    let resolveLoad!: (value: ReturnType<typeof stored>) => void
+    vi.mocked(aiContextApi.get).mockReturnValue(
+      new Promise((res) => (resolveLoad = res)) as Promise<ReturnType<typeof stored>>,
+    )
+
+    const unsubscribe = startAiContextSync(NB)
+    // Teardown calls resetAiContextSync(), bumping syncGeneration → the in-flight
+    // load becomes stale and must NOT write the shared atoms.
+    unsubscribe()
+
+    resolveLoad(stored([{ kind: 'code', source: 'late' }]))
+    await new Promise((res) => setTimeout(res, 0))
+
+    expect(persistedContextAtom()).toBeNull()
+  })
+
+  test('teardown clears the persisted context + contributions cache', async () => {
+    const unsubscribe = startAiContextSync(NB)
+    await new Promise((res) => setTimeout(res, 0))
+    // The default mocked GET resolves a saved context → the atom is populated.
+    expect(persistedContextAtom()).not.toBeNull()
+
+    unsubscribe()
+
+    expect(persistedContextAtom()).toBeNull()
+    expect(contextLoadFailedAtom()).toBe(false)
+    // contributionsAtom is module-private; assembleGenerationContext reads it, so
+    // an empty assembly proves the per-cell cache was cleared too.
+    expect(assembleGenerationContext()).toEqual([])
+  })
+})

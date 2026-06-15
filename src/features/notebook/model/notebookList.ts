@@ -14,6 +14,7 @@ import { FORMAT_VERSION } from '../persistence/schema'
 import { notebookStorage } from '../persistence/activeStorage'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import {
+  bumpSlotGeneration,
   quiesceActiveSlot,
   resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings,
@@ -146,6 +147,13 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
   }
 
   const wasActive = id === activeNotebookIdAtom()
+
+  // Invalidate any in-flight open BEFORE the delete touches the slot/server (H2):
+  // a local-first open of THIS id may still have its background GET in flight, and
+  // would otherwise re-adopt the notebook we are deleting after the DELETE +
+  // local cleanup. Bumping the generation makes that open bail (`superseded`).
+  // Done for inactive deletes too — an open of `id` need not be the active slot.
+  bumpSlotGeneration()
 
   // H1: if the notebook is open, quiesce its id-bound work BEFORE the server
   // DELETE — flush the pending save and stop autosave/remote-sync — so no

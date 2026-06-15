@@ -17,7 +17,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { clearStack, context, STACK, wrap } from '@reatom/core'
 import { notebookStorage } from '../persistence/activeStorage'
-import { saveNow, saveStatusAtom } from './autosave'
+import { hasLocalChangesAtom, saveNow, saveStatusAtom } from './autosave'
+import { notebookRevisionAtom } from './revision'
 
 let frame: ReturnType<typeof context.start>
 
@@ -51,5 +52,39 @@ describe('autosave async-stack safety (production clearStack)', () => {
     const threw = await settle(run())
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => saveStatusAtom())).toBe('saved')
+  })
+
+  test('runSaveLoop survives a 2nd iteration (saveAgainAfterCurrent) without missing async stack (C1)', async () => {
+    // C1 regression: with a bare `await runConditionalSave()` the loop's 2nd
+    // iteration resumes on an empty stack and the `while`-condition atom reads
+    // (hasLocalChangesAtom / saveStatusAtom) throw `missing async stack` under
+    // production clearStack(). With `await wrap(runConditionalSave())` it survives.
+    let resolveFirst!: (value: { ok: true }) => void
+    let calls = 0
+    vi.spyOn(notebookStorage, 'putIfNewer').mockImplementation(() => {
+      calls += 1
+      if (calls === 1) return new Promise<{ ok: true }>((res) => (resolveFirst = res))
+      return Promise.resolve({ ok: true })
+    })
+
+    // Capture two wrapped handlers (render time), then fire them with an empty stack.
+    const run = frame.run(() => wrap(() => saveNow()))
+    const runAgain = frame.run(() => wrap(() => saveNow()))
+    clearStack()
+
+    const p1 = settle(run())
+    // First iteration is parked at putIfNewer. Dirty the editor again and request
+    // another save so the loop runs a SECOND iteration once the first is released.
+    frame.run(() => notebookRevisionAtom.set((revision) => revision + 1))
+    const p2 = settle(runAgain())
+    resolveFirst({ ok: true })
+
+    const threw1 = await p1
+    const threw2 = await p2
+    expect(threw1 && String(threw1)).toBe(null)
+    expect(threw2 && String(threw2)).toBe(null)
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(frame.run(() => saveStatusAtom())).not.toBe('error')
+    expect(frame.run(() => hasLocalChangesAtom())).toBe(false)
   })
 })

@@ -4,7 +4,9 @@ import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import {
+  bumpSlotGeneration,
   openNotebookInSlot,
+  resetSlotToFloorForAccountChange,
   slotOpenErrorAtom,
   slotOpeningPhaseAtom,
   startSlot,
@@ -35,6 +37,7 @@ vi.mock('./context-ai/aiContext', () => ({ startAiContextSync: h.startAiContextS
 vi.mock('./pull', () => ({ pullServerNotebook: h.pullServerNotebook }))
 
 const SERVER_ID = '99999999-9999-4999-8999-999999999999'
+const OTHER_ID = '22222222-2222-4222-8222-222222222222'
 const CELL = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 
 function doc(id: string, title = 'Doc'): NotebookJSON {
@@ -253,5 +256,91 @@ describe('openNotebookInSlot', () => {
       expect.anything(),
     )
     expect(h.startAutosave).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('slot generation fence (H1/H2)', () => {
+  test('a concurrent generation bump supersedes the in-flight open (remote-only, no re-adopt)', async () => {
+    const gate = deferred<notebookApi.Notebook>()
+    apiGetSpy.mockReturnValue(gate.promise)
+    getSpy.mockResolvedValue(undefined) // no local copy → parked at the lazy GET
+
+    const pending = openNotebookInSlot(SERVER_ID)
+    await vi.waitFor(() => expect(slotOpeningPhaseAtom()).toBe('remote-only'))
+
+    bumpSlotGeneration() // a concurrent account-reset / delete invalidates this open
+    gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
+
+    await expect(pending).resolves.toBe('superseded')
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID) // never adopted SERVER_ID
+    expect(h.pullServerNotebook).not.toHaveBeenCalled() // not allowed to drive a re-adopt
+  })
+
+  test('a generation bump after the immediate local open supersedes the post-GET re-adopt', async () => {
+    const gate = deferred<notebookApi.Notebook>()
+    apiGetSpy.mockReturnValue(gate.promise)
+    getSpy.mockResolvedValue(doc(SERVER_ID)) // local copy → opens immediately, then GET
+
+    const pending = openNotebookInSlot(SERVER_ID)
+    await vi.waitFor(() => expect(activeNotebookIdAtom()).toBe(SERVER_ID))
+
+    bumpSlotGeneration()
+    gate.resolve({ ...doc(SERVER_ID), ownerId: 'o' } as unknown as notebookApi.Notebook)
+
+    await expect(pending).resolves.toBe('superseded')
+    expect(h.pullServerNotebook).not.toHaveBeenCalled() // post-GET tail bailed before pull
+  })
+})
+
+describe('slot timeout (M3)', () => {
+  test('a hung GET aborts its signal and releases the lock after the 15s deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let captured: AbortSignal | undefined
+      apiGetSpy.mockImplementation((_id: string, signal?: AbortSignal) => {
+        captured = signal
+        return new Promise<notebookApi.Notebook>(() => {}) // never resolves
+      })
+      getSpy.mockResolvedValue(undefined) // no local copy → goes straight to the GET
+
+      const pending = openNotebookInSlot(SERVER_ID)
+      await vi.advanceTimersByTimeAsync(15_000)
+
+      // The GET times out → `fetchServerNotebook` catches the `SlotTimeoutError`
+      // and returns undefined → with no local copy the re-read is also empty, so
+      // the documented outcome is `'unavailable'` (the timeout never surfaces as a
+      // throw / `'error'`). Asserting the exact value catches a regression that
+      // would let the timeout escape as `'error'` instead.
+      const outcome = await pending
+      expect(outcome).toBe('unavailable')
+      expect(slotOpenErrorAtom()).not.toBeNull()
+      // The controller aborted the in-flight GET on timeout (onTimeout → abort()).
+      expect(captured?.aborted).toBe(true)
+
+      // The lock was released: a subsequent open is NOT reported as 'busy'.
+      apiGetSpy.mockResolvedValue({
+        ...doc(OTHER_ID),
+        ownerId: 'o',
+      } as unknown as notebookApi.Notebook)
+      getSpy.mockResolvedValue(doc(OTHER_ID))
+      const second = await openNotebookInSlot(OTHER_ID)
+      expect(second).not.toBe('busy')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('account-change reset drains before teardown (H3)', () => {
+  test('drainAutosave is invoked BEFORE the bindings are torn down', async () => {
+    startSlot() // arm the bindings for the boot notebook
+    getSpy.mockResolvedValue(doc(LOCAL_NOTEBOOK_ID)) // loadNotebook re-reads the floor
+
+    await resetSlotToFloorForAccountChange()
+
+    expect(h.drainAutosave).toHaveBeenCalled()
+    const drainOrder = h.drainAutosave.mock.invocationCallOrder[0]
+    const teardownOrder = h.remoteTeardown.mock.invocationCallOrder[0]
+    expect(drainOrder).toBeLessThan(teardownOrder)
   })
 })

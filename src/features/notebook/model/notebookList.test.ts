@@ -18,12 +18,14 @@ import {
 // delete action's own orchestration and ordering without booting the real
 // autosave/remote-sync/AI bindings the controller starts.
 const slotMock = vi.hoisted(() => ({
+  bumpSlotGeneration: vi.fn(),
   quiesceActiveSlot: vi.fn(),
   resetSlotToFloorForAccountChange: vi.fn(),
   restoreActiveSlotBindings: vi.fn(),
   settleDeletedSlotToFloor: vi.fn(),
 }))
 vi.mock('./slot', () => ({
+  bumpSlotGeneration: slotMock.bumpSlotGeneration,
   quiesceActiveSlot: slotMock.quiesceActiveSlot,
   resetSlotToFloorForAccountChange: slotMock.resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,

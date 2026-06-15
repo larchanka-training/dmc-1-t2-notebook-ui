@@ -136,7 +136,13 @@ async function runSaveLoop(): Promise<void> {
   try {
     do {
       saveAgainAfterCurrent = false
-      await runConditionalSave()
+      // `wrap` re-binds the Reatom frame across this await so the `while`-condition
+      // atom reads (and the `catch`'s `saveStatusAtom.set`) run IN-FRAME. A bare
+      // `await runConditionalSave()` resumes after `wrap`'s frame was popped, so a
+      // 2nd iteration (edit burst / `drainAutosave` on a slot switch) would read
+      // `hasLocalChangesAtom()` on an empty stack -> `missing async stack` under
+      // production `clearStack()` (invariant: every awaited promise is `await wrap`).
+      await wrap(runConditionalSave())
     } while (saveAgainAfterCurrent && hasLocalChangesAtom() && saveStatusAtom() !== 'conflict')
   } catch (error) {
     if (error instanceof NewerFormatError) {

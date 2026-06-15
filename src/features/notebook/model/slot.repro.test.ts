@@ -22,7 +22,14 @@ import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, cellsAtom, LOCAL_NOTEBOOK_ID, SEED_CODE } from './notebook'
 import { isOnlineAtom } from './online'
-import { degradeSlotToFloor, openNotebookInSlot, startSlot, stopSlot } from './slot'
+import {
+  degradeSlotToFloor,
+  openNotebookInSlot,
+  resetSlotToFloorForAccountChange,
+  settleDeletedSlotToFloor,
+  startSlot,
+  stopSlot,
+} from './slot'
 
 const SERVER_ID = '99999999-9999-4999-8999-999999999999'
 const CELL = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -120,6 +127,32 @@ describe('slot switch async-stack safety (production clearStack)', () => {
     expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
 
     const threw = await settle(fireLikeProd(() => degradeSlotToFloor()))
+
+    expect(threw && String(threw)).toBe(null)
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
+    expect(frame.run(() => cellsAtom()[0].code())).toBe(SEED_CODE)
+  })
+
+  test('resetSlotToFloorForAccountChange returns to the floor without throwing (M4)', async () => {
+    await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
+    frame.run(() => startSlot())
+    await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
+
+    const threw = await settle(fireLikeProd(() => resetSlotToFloorForAccountChange()))
+
+    expect(threw && String(threw)).toBe(null)
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
+    expect(frame.run(() => cellsAtom()[0].code())).toBe(SEED_CODE)
+  })
+
+  test('settleDeletedSlotToFloor degrades to the floor without throwing (M4)', async () => {
+    await frame.run(() => notebookStorage.put(doc(SERVER_ID, 'Backend')))
+    frame.run(() => startSlot())
+    await settle(fireLikeProd(() => openNotebookInSlot(SERVER_ID)))
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(SERVER_ID)
+
+    const threw = await settle(fireLikeProd(() => settleDeletedSlotToFloor()))
 
     expect(threw && String(threw)).toBe(null)
     expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
