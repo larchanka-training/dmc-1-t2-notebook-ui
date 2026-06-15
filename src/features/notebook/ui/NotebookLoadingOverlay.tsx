@@ -4,8 +4,14 @@ export function NotebookLoadingOverlay() {
   const skeleton = 'relative overflow-hidden rounded-[5px] bg-muted'
 
   return (
+    // The overlay fills the whole (possibly tall) notebook scroll content, so the
+    // background + skeletons dim every scroll position. The card must NOT be
+    // centered over that full height (it would sink below the fold on a long
+    // notebook) — it is `sticky` so it stays centered in the visible scroll port.
+    // No `overflow-hidden` here: that would make this element the sticky scroll
+    // container (re-introducing the sink); the skeleton layer below clips itself.
     <div
-      className="absolute inset-0 z-30 grid place-items-center overflow-hidden bg-background/60 backdrop-blur-[7px]"
+      className="absolute inset-0 z-30 bg-background/60 backdrop-blur-[7px]"
       aria-busy="true"
       aria-label="Loading notebook"
       role="status"
@@ -20,7 +26,7 @@ export function NotebookLoadingOverlay() {
         </div>
       </div>
 
-      <div className="relative flex w-[min(348px,86%)] flex-col items-center rounded-[var(--radius-modal)] border border-border bg-card/95 px-9 py-8 text-center shadow-[var(--shadow-pop)]">
+      <div className="sticky top-1/2 mx-auto flex w-[min(348px,86%)] -translate-y-1/2 flex-col items-center rounded-[var(--radius-modal)] border border-border bg-card/95 px-9 py-8 text-center shadow-[var(--shadow-pop)]">
         <div className="relative mb-[18px] grid size-[72px] place-items-center">
           <div className="absolute inset-0 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
           <div className="grid size-[52px] place-items-center rounded-[14px] bg-primary font-mono text-[21px] font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,black_8%,transparent)]">
