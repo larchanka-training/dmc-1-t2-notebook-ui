@@ -35,7 +35,12 @@ export const DeleteNotebookDialog = reatomComponent(() => {
   const confirm = wrap(async () => {
     if (!target) return
     try {
-      await deleteNotebookAction(target.id)
+      // Inner `wrap` re-binds the Reatom frame across the await so the
+      // `deleteTargetAtom.set(null)` continuation runs IN-FRAME under production
+      // `clearStack()` (invariant: every awaited promise is `await wrap(...)`).
+      // A bare `await` here drops the async stack and the set throws
+      // `missing async stack` in the browser, leaving the dialog stuck open.
+      await wrap(deleteNotebookAction(target.id))
       // Close only after the delete actually committed (server + cleanup).
       deleteTargetAtom.set(null)
     } catch {

@@ -6,9 +6,18 @@ import { notebookStorage } from '../persistence/activeStorage'
 
 // The dialog drives the REAL `deleteNotebookAction` (it now reads the action's
 // `.ready()`/`.error()` for pending/error ownership — CL-18), so mock the seams
-// the action depends on (server DELETE + local cleanup + slot degrade), not the
-// action itself.
-vi.mock('../model/slot', () => ({ degradeSlotToFloor: vi.fn().mockResolvedValue(undefined) }))
+// the action depends on (server DELETE + local cleanup + slot orchestration), not
+// the action itself. The action imports these slot symbols at module load and
+// calls `bumpSlotGeneration()` unconditionally, so the mock MUST export every one
+// it imports — a stale mock (e.g. only `degradeSlotToFloor`) makes the action
+// throw `TypeError` before `notebookApi.remove` and fails the whole suite.
+vi.mock('../model/slot', () => ({
+  bumpSlotGeneration: vi.fn(),
+  quiesceActiveSlot: vi.fn().mockResolvedValue(undefined),
+  resetSlotToFloorForAccountChange: vi.fn().mockResolvedValue(undefined),
+  restoreActiveSlotBindings: vi.fn(),
+  settleDeletedSlotToFloor: vi.fn().mockResolvedValue(undefined),
+}))
 
 import { DeleteNotebookDialog } from './DeleteNotebookDialog'
 import { deleteTargetAtom } from '../model/notebookSettings'
