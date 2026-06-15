@@ -3,7 +3,13 @@ import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, cellsAtom, LOCAL_NOTEBOOK_ID, SEED_CODE } from './notebook'
+import {
+  activeNotebookIdAtom,
+  cellsAtom,
+  DEMO_NOTEBOOK_ID,
+  LOCAL_NOTEBOOK_ID,
+  SEED_TITLE,
+} from './notebook'
 import { isOnlineAtom } from './online'
 import { degradeSlotToFloor, openNotebookInSlot, startSlot, stopSlot } from './slot'
 
@@ -11,7 +17,7 @@ import { degradeSlotToFloor, openNotebookInSlot, startSlot, stopSlot } from './s
 // other suite (`slot.test.ts` stubs ./autosave + ./remoteSync; `notebookList.test`
 // stubs ./slot). This integration suite exercises the REAL collaborators —
 // `notebook.ts`, autosave, remote-sync — over `fake-indexeddb`, so the sequence
-// `stopBindings → set LOCAL → await loadNotebook (re-seed) → startBindings` is
+// `stopBindings → set DEMO → await loadNotebook (re-seed) → startBindings` is
 // genuinely run. It is exactly what proves the CL-1/CL-2/CL-4 fixes hold end to end.
 //
 // Signed OUT on purpose: the remote-sync engine self-guards on auth, so it stays
@@ -68,23 +74,24 @@ describe('slot lifecycle (integration, real bindings + fake-indexeddb)', () => {
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
     expect(cellsAtom()[0].code()).toBe('server-content')
 
-    // Degrade: the real stopBindings → set LOCAL → loadNotebook (re-seed) →
+    // Degrade: the real stopBindings → set DEMO → loadNotebook (re-seed) →
     // startBindings sequence runs.
     await degradeSlotToFloor()
 
-    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
-    // The welcome floor was re-seeded into the editor.
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    expect(activeNotebookIdAtom()).toBe(DEMO_NOTEBOOK_ID)
+    // The feature-demo floor was re-seeded into the editor.
+    expect(cellsAtom()[0].code()).toContain('# Welcome to JS Notebook')
     // And persisted, so a reload finds it.
-    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
-    expect(stored?.cells[0]?.content).toBe(SEED_CODE)
+    const stored = await notebookStorage.get(DEMO_NOTEBOOK_ID)
+    expect(stored?.title).toBe(SEED_TITLE)
+    expect(stored?.cells[0]?.content).toContain('# Welcome to JS Notebook')
   })
 
   test('repeated degrade is idempotent (no throw, slot stays on the floor) (CL-1)', async () => {
     startSlot()
     await degradeSlotToFloor()
     await degradeSlotToFloor()
-    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+    expect(activeNotebookIdAtom()).toBe(DEMO_NOTEBOOK_ID)
   })
 
   test('a concurrent open + degrade do not interleave (serialized lock) (CL-1)', async () => {
@@ -97,9 +104,9 @@ describe('slot lifecycle (integration, real bindings + fake-indexeddb)', () => {
     await Promise.all([openNotebookInSlot(SERVER_ID), degradeSlotToFloor()])
 
     const activeId = activeNotebookIdAtom()
-    expect([SERVER_ID, LOCAL_NOTEBOOK_ID]).toContain(activeId)
+    expect([SERVER_ID, DEMO_NOTEBOOK_ID]).toContain(activeId)
     // The editor content is consistent with the winning id.
-    const expectedContent = activeId === SERVER_ID ? 'server-content' : SEED_CODE
+    const expectedContent = activeId === SERVER_ID ? 'server-content' : '# Welcome to JS Notebook'
     expect(cellsAtom()[0].code()).toBe(expectedContent)
   })
 })

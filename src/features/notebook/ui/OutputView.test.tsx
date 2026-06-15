@@ -27,6 +27,16 @@ describe('OutputView — order preservation', () => {
     expect(segments[2].textContent).toContain('⟹')
   })
 
+  test('marks each visual segment for uniform separators', () => {
+    const items: OutputItem[] = [
+      { type: 'stdout', text: 'a' },
+      { type: 'result', value: { kind: 'primitive', value: 1 } },
+      { type: 'image', mime: 'image/svg+xml', data: 'PHN2Zy8+' },
+    ]
+    const { container } = render(<OutputView items={items} />)
+    expect(container.querySelectorAll('[data-output-segment="true"]')).toHaveLength(3)
+  })
+
   test('merges only consecutive stdout/stderr into one block', () => {
     const items: OutputItem[] = [
       { type: 'stdout', text: 'a' },

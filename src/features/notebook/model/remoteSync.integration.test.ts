@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
-import { cellsAtom, LOCAL_NOTEBOOK_ID, loadNotebook, updateCellCode } from './notebook'
+import { cellsAtom, DEMO_NOTEBOOK_ID, loadNotebook, updateCellCode } from './notebook'
 import { startAutosave } from './autosave'
 import { isOnlineAtom } from './online'
 import { startRemoteSync } from './remoteSync'
@@ -43,7 +43,7 @@ describe('autosave → storage → remote-sync integration', () => {
 
   test('a real edit autosaves locally then pushes the persisted snapshot', async () => {
     const createSpy = vi.spyOn(notebookApi, 'create').mockImplementation(async (input) => ({
-      id: LOCAL_NOTEBOOK_ID,
+      id: DEMO_NOTEBOOK_ID,
       title: input.title,
       ownerId: 'owner-1',
       formatVersion: input.formatVersion,
@@ -54,7 +54,7 @@ describe('autosave → storage → remote-sync integration', () => {
 
     await loadNotebook() // seed + boot the local notebook
     stopAutosave = startAutosave()
-    stopSync = startRemoteSync(LOCAL_NOTEBOOK_ID)
+    stopSync = startRemoteSync(DEMO_NOTEBOOK_ID)
 
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'integration-edit')
@@ -67,7 +67,7 @@ describe('autosave → storage → remote-sync integration', () => {
     const body = createSpy.mock.calls[0][0]
     expect(body.cells?.some((c) => c.content === 'integration-edit')).toBe(true)
     // The pushed cells are exactly what is persisted locally (local-first).
-    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
+    const stored = await notebookStorage.get(DEMO_NOTEBOOK_ID)
     expect(body.cells?.map((c) => c.content)).toEqual(stored?.cells.map((c) => c.content))
   })
 })

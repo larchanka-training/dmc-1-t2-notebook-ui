@@ -21,7 +21,7 @@ import { notebook as notebookApi } from '@/shared/api'
 import { accessTokenAtom, userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, cellsAtom, LOCAL_NOTEBOOK_ID, SEED_CODE } from './notebook'
+import { activeNotebookIdAtom, cellsAtom, DEMO_NOTEBOOK_ID, LOCAL_NOTEBOOK_ID } from './notebook'
 import { isOnlineAtom } from './online'
 import {
   degradeSlotToFloor,
@@ -108,8 +108,8 @@ describe('slot switch async-stack safety (production clearStack)', () => {
     const threw = await settle(fireLikeProd(frame, () => degradeSlotToFloor()))
 
     expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toBe(SEED_CODE)
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
+    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
   })
 
   test('resetSlotToFloorForAccountChange returns to the floor without throwing (M4)', async () => {
@@ -121,8 +121,8 @@ describe('slot switch async-stack safety (production clearStack)', () => {
     const threw = await settle(fireLikeProd(frame, () => resetSlotToFloorForAccountChange()))
 
     expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toBe(SEED_CODE)
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
+    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
   })
 
   test('settleDeletedSlotToFloor degrades to the floor without throwing (M4)', async () => {
@@ -134,7 +134,7 @@ describe('slot switch async-stack safety (production clearStack)', () => {
     const threw = await settle(fireLikeProd(frame, () => settleDeletedSlotToFloor()))
 
     expect(threw && String(threw)).toBe(null)
-    expect(frame.run(() => activeNotebookIdAtom())).toBe(LOCAL_NOTEBOOK_ID)
-    expect(frame.run(() => cellsAtom()[0].code())).toBe(SEED_CODE)
+    expect(frame.run(() => activeNotebookIdAtom())).toBe(DEMO_NOTEBOOK_ID)
+    expect(frame.run(() => cellsAtom()[0].code())).toContain('# Welcome to JS Notebook')
   })
 })

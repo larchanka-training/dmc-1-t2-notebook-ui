@@ -19,6 +19,15 @@ describe('ShortcutsHelp', () => {
     expect(await screen.findByText('Keyboard shortcuts')).toBeInTheDocument()
   })
 
+  test('shows a Usage link at the bottom', async () => {
+    render(<ShortcutsHelp />)
+    await act(async () => shortcutsOpenAtom.set(true))
+    expect(await screen.findByRole('link', { name: /open usage/i })).toHaveAttribute(
+      'href',
+      '/usage',
+    )
+  })
+
   test('Escape closes the open dialog', async () => {
     const user = userEvent.setup()
     render(<ShortcutsHelp />)

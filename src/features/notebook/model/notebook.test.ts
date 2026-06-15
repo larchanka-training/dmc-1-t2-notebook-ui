@@ -10,7 +10,9 @@ import {
   changeCellKind,
   deleteCell,
   loadNotebook,
+  LEGACY_LOCAL_NOTEBOOK_ID,
   LOCAL_NOTEBOOK_ID,
+  DEMO_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
   notebookSnapshot,
@@ -287,22 +289,109 @@ describe('loadNotebook (boot)', () => {
     vi.restoreAllMocks()
   })
 
-  test('seeds and persists a Welcome notebook when storage is empty', async () => {
+  test('seeds and persists the feature-demo notebook when storage is empty', async () => {
     // Seeding is not a restore — the return flag is false so the caller keeps
     // the indicator idle for a brand-new notebook.
     expect(await loadNotebook()).toBe(false)
-    // Seed cell stays in memory…
-    expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
-    // …and was written to storage so a reload finds it.
-    const stored = await notebookStorage.get(LOCAL_NOTEBOOK_ID)
-    expect(stored?.cells[0].content).toBe(SEED_CODE)
+    // Demo cells stay in memory…
+    expect(cellsAtom().length).toBeGreaterThan(1)
+    expect(cellsAtom().some((cell) => cell.code().includes('display({ type: "html"'))).toBe(true)
+    // …and were written to storage so a reload finds them.
+    const stored = await notebookStorage.get(DEMO_NOTEBOOK_ID)
+    expect(stored?.title).toBe('📓 My first notebook full of features')
+    expect(stored?.cells.length).toBeGreaterThan(1)
+  })
+
+  test('migrates the legacy local seed to the deterministic demo id', async () => {
+    const legacy: NotebookJSON = {
+      formatVersion: FORMAT_VERSION,
+      id: LEGACY_LOCAL_NOTEBOOK_ID,
+      title: 'Legacy local notebook',
+      createdAt: 1,
+      updatedAt: 2,
+      cells: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          kind: 'code',
+          content: 'legacy()',
+          updatedAt: 2,
+        },
+      ],
+    }
+    await notebookStorage.put(legacy)
+    await notebookStorage.putSyncState({
+      notebookId: LEGACY_LOCAL_NOTEBOOK_ID,
+      remoteCreated: true,
+      dirty: false,
+      ownerId: 'owner-1',
+      deletedCells: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', deletedAt: 3 }],
+    })
+
+    expect(await loadNotebook()).toBe(true)
+    const migrated = await notebookStorage.get(DEMO_NOTEBOOK_ID)
+    const legacyAfter = await notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID)
+    const sync = await notebookStorage.getSyncState(DEMO_NOTEBOOK_ID)
+
+    expect(migrated).toMatchObject({
+      id: DEMO_NOTEBOOK_ID,
+      title: 'Legacy local notebook',
+      updatedAt: 2,
+    })
+    expect(legacyAfter).toBeUndefined()
+    expect(sync).toMatchObject({
+      notebookId: DEMO_NOTEBOOK_ID,
+      remoteCreated: false,
+      dirty: true,
+      ownerId: 'owner-1',
+      deletedCells: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', deletedAt: 3 }],
+    })
+  })
+
+  test('cleans up legacy seed when deterministic demo already exists', async () => {
+    const demo: NotebookJSON = {
+      formatVersion: FORMAT_VERSION,
+      id: DEMO_NOTEBOOK_ID,
+      title: 'Server demo',
+      createdAt: 1,
+      updatedAt: 3,
+      cells: [
+        {
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          kind: 'code',
+          content: 'demo()',
+          updatedAt: 3,
+        },
+      ],
+    }
+    const legacy: NotebookJSON = {
+      formatVersion: FORMAT_VERSION,
+      id: LEGACY_LOCAL_NOTEBOOK_ID,
+      title: 'Legacy duplicate',
+      createdAt: 1,
+      updatedAt: 2,
+      cells: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          kind: 'code',
+          content: 'legacy()',
+          updatedAt: 2,
+        },
+      ],
+    }
+    await notebookStorage.put(demo)
+    await notebookStorage.put(legacy)
+
+    expect(await loadNotebook()).toBe(true)
+
+    expect(await notebookStorage.get(DEMO_NOTEBOOK_ID)).toMatchObject({ title: 'Server demo' })
+    expect(await notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID)).toBeUndefined()
+    expect(cellsAtom()[0].code()).toBe('demo()')
   })
 
   test('restores cells and title from a stored notebook', async () => {
     const stored: NotebookJSON = {
       formatVersion: FORMAT_VERSION,
-      id: LOCAL_NOTEBOOK_ID,
+      id: DEMO_NOTEBOOK_ID,
       title: 'Restored',
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_500_000,
@@ -338,10 +427,10 @@ describe('loadNotebook (boot)', () => {
     vi.spyOn(notebookStorage, 'put').mockRejectedValue(new Error('QuotaExceededError'))
     // A failed seed write is not a restore — returns false, never rejects.
     await expect(loadNotebook()).resolves.toBe(false)
-    // Seed stays in memory (not wiped by the failed load), history is cleared
+    // Demo seed stays in memory (not wiped by the failed load), history is cleared
     // on the failure path too (clearHistory moved into `finally`).
-    expect(cellsAtom()).toHaveLength(1)
-    expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+    expect(cellsAtom().length).toBeGreaterThan(1)
+    expect(cellsAtom()[0].code()).toContain('Welcome to JS Notebook')
     expect(canUndoAtom()).toBe(false)
   })
 

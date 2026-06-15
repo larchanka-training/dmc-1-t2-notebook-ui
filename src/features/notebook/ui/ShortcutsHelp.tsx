@@ -1,4 +1,5 @@
 import { atom, wrap } from '@reatom/core'
+import { appPath } from '@/shared/lib/paths'
 import { reatomComponent } from '@reatom/react'
 import {
   Dialog,
@@ -89,6 +90,12 @@ export const ShortcutsHelp = reatomComponent(() => {
               </ul>
             </section>
           ))}
+        </div>
+        <div className="border-t border-border pt-4 text-sm text-muted-foreground">
+          Need runnable examples?{' '}
+          <a href={appPath('usage')} className="font-medium text-primary hover:underline">
+            Open Usage
+          </a>
         </div>
       </DialogContent>
     </Dialog>
