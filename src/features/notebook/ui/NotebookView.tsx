@@ -48,6 +48,14 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import {
+  cloudGenerateAndInsertCodeAction,
+  cloudGeneratingCellIdAtom,
+  cloudGenerateErrorsAtom,
+} from '../model/cloudCodeGenerator'
+import { openAgentChatAction } from '../model/agentChat'
+import { AgentChatDialog } from './AgentChatDialog'
+import { RateLimitedError } from '@/shared/api/errors'
 import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
@@ -73,6 +81,24 @@ function runAndInsertBelow(cellId: string) {
   enterEdit(inserted.id)
 }
 
+function formatCloudGenerateError(err: Error): string {
+  if (err instanceof RateLimitedError) {
+    const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
+    return `Rate limit reached.${wait}`
+  }
+  const msg = err.message.toLowerCase()
+  if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
+    return 'Prompt was flagged by the safety filter.'
+  }
+  if (msg.includes('llm_timeout') || msg.includes('timeout')) {
+    return 'Cloud generation timed out. Try the local model instead.'
+  }
+  if (msg.includes('503') || msg.includes('502') || msg.includes('unavailable')) {
+    return 'Cloud AI is temporarily unavailable. Try the local model instead.'
+  }
+  return `Cloud generation failed: ${err.message}`
+}
+
 interface NotebookRowProps {
   cell: Cell
   isFirst: boolean
@@ -85,6 +111,8 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const hasGenerator = !!codeGeneratorAtom()
   const isGenerating = !generateAndInsertCodeAction.ready()
   const generateError = generateAndInsertCodeAction.error()
+  const isCloudGenerating = cloudGeneratingCellIdAtom() === cell.id
+  const cloudGenerateError = cloudGenerateErrorsAtom().get(cell.id) ?? null
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
   // re-render the entire cell (card + toolbar + output) on every search
@@ -136,10 +164,21 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         }
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
+        onCloudGenerate={
+          cell.kind === 'markdown'
+            ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
+            : undefined
+        }
+        isCloudGenerating={isCloudGenerating}
       />
       {generateError && (
         <p className="px-3 py-1 text-xs text-destructive">
           Generate failed: {generateError.message}
+        </p>
+      )}
+      {cloudGenerateError && (
+        <p className="px-3 py-1 text-xs text-destructive">
+          {formatCloudGenerateError(cloudGenerateError)}
         </p>
       )}
     </div>
@@ -202,6 +241,13 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
         <button type="button" onClick={onAddText} className={pill}>
           <Type className="size-[13px]" /> Text
         </button>
+        <button
+          type="button"
+          onClick={wrap(() => openAgentChatAction(afterId))}
+          className={cn(pill, 'text-primary hover:border-primary hover:text-primary')}
+        >
+          <Sparkles className="size-[13px]" /> Ask agent
+        </button>
       </span>
     </div>
   )
@@ -253,89 +299,92 @@ export const NotebookView = reatomComponent(() => {
   }, [])
 
   return (
-    // No own scroll port here: the shell's content area (AppLayout) scrolls, so
-    // <main> and the sticky outline share one scroll context. The row must size
-    // to its content height (NOT flex-1, which would cap it at one viewport and
-    // make the sticky outline detach halfway down) so the outline stays pinned
-    // for the whole scroll. min-h-full keeps a short notebook filling the area.
-    <div className="relative flex min-h-full">
-      {showNotebookLoader ? <NotebookLoadingOverlay /> : null}
-      <main className="flex-1">
-        <div
-          className="mx-auto w-full px-6 py-8"
-          style={{
-            // editor-width when the outline is visible; reclaim its width + gap
-            // when it is hidden, so cells grow to fill the freed space.
-            maxWidth: outlineTakesSpace
-              ? 'var(--editor-width)'
-              : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
-          }}
-        >
-          {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
+    <>
+      {/* No own scroll port here: the shell's content area (AppLayout) scrolls, so
+        <main> and the sticky outline share one scroll context. The row must size
+        to its content height (NOT flex-1, which would cap it at one viewport and
+        make the sticky outline detach halfway down) so the outline stays pinned
+        for the whole scroll. min-h-full keeps a short notebook filling the area. */}
+      <div className="relative flex min-h-full">
+        {showNotebookLoader ? <NotebookLoadingOverlay /> : null}
+        <main className="flex-1">
+          <div
+            className="mx-auto w-full px-6 py-8"
+            style={{
+              // editor-width when the outline is visible; reclaim its width + gap
+              // when it is hidden, so cells grow to fill the freed space.
+              maxWidth: outlineTakesSpace
+                ? 'var(--editor-width)'
+                : 'calc(var(--editor-width) + var(--outline-width) + 40px)',
+            }}
+          >
+            {/* Notebook-wide controls (autosave, search, run/kernel toolbar)
               live in the global AppTopbar. SearchBar stays mounted here
               (toggled by the topbar button / ⌘F). */}
-          <NotebookHeader />
-          <SearchBar />
+            <NotebookHeader />
+            <SearchBar />
 
-          {/* autoScroll keeps the page scrolling when a drag nears the
+            {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
               drag on Esc out of the box (pointer + keyboard sensors). */}
-          {cells.length === 0 ? (
-            <div className="flex flex-col items-center text-center px-6 py-[68px] border border-dashed border-border rounded-[var(--radius-card)] bg-[color-mix(in_oklch,var(--muted)_32%,var(--card))]">
-              <div className="mb-4 grid size-[54px] place-items-center rounded-[var(--radius-card)] bg-primary/10 text-primary">
-                <Sparkles className="size-6" />
-              </div>
-              <h2 className="mb-2 text-[22px] font-semibold tracking-tight">
-                This notebook is empty
-              </h2>
-              <p className="mb-5 max-w-[520px] text-sm leading-relaxed text-muted-foreground">
-                Add your first cell to get started — write code, jot a note, or describe what you
-                want and let the agent draft it for you.
-              </p>
-              <div className="w-full max-w-sm">
-                <CellInserter variant="end" />
-              </div>
-              <a
-                href={appPath('usage')}
-                className="mt-4 text-sm font-medium text-primary hover:underline"
-              >
-                See usage examples
-              </a>
-            </div>
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={onDragEnd}
-              autoScroll={{ threshold: { x: 0, y: 0.15 } }}
-            >
-              <SortableContext
-                items={cells.map((c) => c.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="flex flex-col gap-3">
-                  {cells.map((cell, idx) => (
-                    <div key={cell.id} className="flex flex-col gap-3">
-                      <SortableCell id={cell.id}>
-                        <NotebookRow
-                          cell={cell}
-                          isFirst={idx === 0}
-                          isLast={idx === cells.length - 1}
-                        />
-                      </SortableCell>
-                      {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
-                    </div>
-                  ))}
-
-                  <CellInserter afterId={cells[cells.length - 1].id} variant="end" />
+            {cells.length === 0 ? (
+              <div className="flex flex-col items-center border border-dashed border-border bg-[color-mix(in_oklch,var(--muted)_32%,var(--card))] px-6 py-[68px] text-center rounded-[var(--radius-card)]">
+                <div className="mb-4 grid size-[54px] place-items-center bg-primary/10 text-primary rounded-[var(--radius-card)]">
+                  <Sparkles className="size-6" />
                 </div>
-              </SortableContext>
-            </DndContext>
-          )}
-        </div>
-      </main>
+                <h2 className="mb-2 text-[22px] font-semibold tracking-tight">
+                  This notebook is empty
+                </h2>
+                <p className="mb-5 max-w-[520px] text-sm leading-relaxed text-muted-foreground">
+                  Add your first cell to get started — write code, jot a note, or describe what you
+                  want and let the agent draft it for you.
+                </p>
+                <div className="w-full max-w-sm">
+                  <CellInserter variant="end" />
+                </div>
+                <a
+                  href={appPath('usage')}
+                  className="mt-4 text-sm font-medium text-primary hover:underline"
+                >
+                  See usage examples
+                </a>
+              </div>
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={onDragEnd}
+                autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+              >
+                <SortableContext
+                  items={cells.map((c) => c.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="flex flex-col gap-3">
+                    {cells.map((cell, idx) => (
+                      <div key={cell.id} className="flex flex-col gap-3">
+                        <SortableCell id={cell.id}>
+                          <NotebookRow
+                            cell={cell}
+                            isFirst={idx === 0}
+                            isLast={idx === cells.length - 1}
+                          />
+                        </SortableCell>
+                        {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+                      </div>
+                    ))}
 
-      <NotebookOutline />
-    </div>
+                    <CellInserter afterId={cells[cells.length - 1].id} variant="end" />
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
+          </div>
+        </main>
+
+        <NotebookOutline />
+      </div>
+      <AgentChatDialog />
+    </>
   )
 }, 'NotebookView')

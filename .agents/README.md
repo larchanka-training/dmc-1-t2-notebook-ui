@@ -9,14 +9,15 @@ humans who want a precise reference.
 
 ## Available skills
 
-| File                      | Skill                      | Use when                                   |
-| ------------------------- | -------------------------- | ------------------------------------------ |
-| `add-page.md`             | Add a new page             | Need a new route + sidebar entry           |
-| `add-shadcn.md`           | Install a shadcn component | Adding a UI primitive from shadcn registry |
-| `add-custom-component.md` | Create a custom component  | Building a new reusable component          |
-| `add-doc.md`              | Write a new doc            | Documenting a new feature or concept       |
-| `add-endpoint.md`         | Add an HTTP endpoint       | Wiring a new backend call into the facade  |
-| `fix-shadcn-placement.md` | Fix shadcn file location   | After any `shadcn add` command             |
+| File                              | Skill                          | Use when                                                  |
+| --------------------------------- | ------------------------------ | --------------------------------------------------------- |
+| `add-page.md`                     | Add a new page                 | Need a new route + sidebar entry                          |
+| `add-shadcn.md`                   | Install a shadcn component     | Adding a UI primitive from shadcn registry                |
+| `add-custom-component.md`         | Create a custom component      | Building a new reusable component                         |
+| `add-doc.md`                      | Write a new doc                | Documenting a new feature or concept                      |
+| `add-endpoint.md`                 | Add an HTTP endpoint           | Wiring a new backend call into the facade                 |
+| `fix-shadcn-placement.md`         | Fix shadcn file location       | After any `shadcn add` command                            |
+| `implement-cloud-llm-generate.md` | Wire cloud LLM code generation | Implementing the Cloud button → `POST /llm/generate` flow |
 
 ## How to use
 
