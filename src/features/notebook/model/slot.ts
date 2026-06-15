@@ -44,19 +44,26 @@ class SlotTimeoutError extends Error {
   }
 }
 
-/** Reject if `promise` does not settle within the slot-op deadline. The underlying
- *  work is not cancelled here (best-effort liveness): the timeout only frees the
- *  lock so the slot stays switchable. */
-async function withTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
+/**
+ * Race `promise` against a deadline so a wedged save / hung fetch cannot strand
+ * the slot lock forever (CL-3). The underlying work is not cancelled (best-effort
+ * liveness): the timeout only lets the lock release so the slot stays switchable.
+ *
+ * Deliberately NOT `async` and does NOT `await` internally. Reatom's invariant in
+ * this codebase is that every awaited promise is `await wrap(promise)`; an extra
+ * unwrapped `await` (which `Promise.race` inside an `async` helper introduces)
+ * drops the async stack and makes the next atom write throw `missing async stack`.
+ * Callers therefore do `await wrap(raceWithTimeout(...))`, keeping one wrapped
+ * await with no detached continuation in between.
+ */
+function raceWithTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new SlotTimeoutError(what)), SLOT_OP_TIMEOUT_MS)
   })
-  try {
-    return await Promise.race([promise, deadline])
-  } finally {
+  return Promise.race([promise, deadline]).finally(() => {
     if (timer !== undefined) clearTimeout(timer)
-  }
+  })
 }
 
 /**
@@ -95,7 +102,13 @@ function stopBindings(): void {
  */
 async function rearmOrDegrade(flip: () => void | Promise<void>): Promise<void> {
   try {
-    await flip()
+    // Reatom: if `flip` is async, re-bind the stack with `wrap` so the atom reads
+    // in `startBindings()` run IN-FRAME. A bare `await flip()` drops the async
+    // stack and makes `startBindings`/`activeNotebookIdAtom.set` throw
+    // `missing async stack` under production `clearStack()`. A sync `flip`
+    // (restoreNotebook) needs no await — `startBindings` then runs synchronously.
+    const pending = flip()
+    if (pending instanceof Promise) await wrap(pending)
     startBindings()
   } catch (error) {
     console.warn('slot: re-arm failed mid-switch; degrading to the local floor', error)
@@ -145,13 +158,17 @@ export const degradeSlotToFloor = action(async (): Promise<void> => {
   await runExclusive('degrade', async () => {
     // Flush the outgoing notebook's pending edit under its own (still-active) id
     // before tearing anything down. Bounded so a wedged save cannot strand the lock.
-    await withTimeout(wrap(drainAutosave()), 'drainAutosave (degrade)')
+    await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (degrade)'))
     stopBindings()
     // `loadNotebook` reads the active id, so flip to the floor id before loading.
-    await rearmOrDegrade(async () => {
-      activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
-      await wrap(loadNotebook())
-    })
+    // `wrap` keeps the post-await continuation in-frame (invariant: every awaited
+    // promise is `await wrap(...)`), even though nothing reads an atom after it here.
+    await wrap(
+      rearmOrDegrade(async () => {
+        activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+        await wrap(loadNotebook())
+      }),
+    )
   })
 }, 'notebook.degradeSlotToFloor')
 
@@ -167,7 +184,10 @@ async function runExclusive(label: 'open' | 'degrade', op: () => Promise<void>):
   }
   slotOpInFlight = true
   try {
-    await op()
+    // `wrap` re-binds the Reatom frame across `op`'s boundary so this helper's
+    // continuation (and the outer action's continuation after `await runExclusive`)
+    // runs in-frame under production `clearStack()` (invariant: `await wrap(x)`).
+    await wrap(op())
     return true
   } finally {
     slotOpInFlight = false
@@ -219,7 +239,7 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
     if (!target) {
       let server: notebookApi.Notebook
       try {
-        server = await withTimeout(wrap(notebookApi.get(id)), 'notebook fetch')
+        server = await wrap(raceWithTimeout(wrap(notebookApi.get(id)), 'notebook fetch'))
       } catch (error) {
         console.warn('slot: failed to fetch notebook; keeping the current slot', error)
         slotOpenErrorAtom.set('Could not open the notebook. Check your connection and try again.')
@@ -243,12 +263,15 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
 
     // 2. Persist the outgoing notebook's pending edits under its own (still-active)
     //    id, and wait for any in-flight write to land. Bounded (CL-3).
-    await withTimeout(wrap(drainAutosave()), 'drainAutosave (open)')
+    await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
     // 3. Drop the outgoing bindings; remote-sync teardown aborts an in-flight push.
     stopBindings()
     // 4+5. Flip to the target and re-arm; a mid-switch throw degrades to the floor
     //      rather than leaving the slot unbound (CL-2).
-    await rearmOrDegrade(() => restoreNotebook(loaded))
+    // `wrap` re-binds the frame so `slotOpenErrorAtom.set(null)` below runs
+    // IN-FRAME. A bare `await rearmOrDegrade(...)` drops the async stack and makes
+    // the next atom write throw `missing async stack` under production clearStack().
+    await wrap(rearmOrDegrade(() => restoreNotebook(loaded)))
     slotOpenErrorAtom.set(null)
     outcome = 'opened'
   })

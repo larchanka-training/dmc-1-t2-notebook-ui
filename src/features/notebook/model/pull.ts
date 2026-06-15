@@ -55,7 +55,10 @@ export async function pullServerNotebook(server: notebookApi.Notebook): Promise<
   // Boundary validation (§11): a malformed 2xx must never reach storage, where it
   // could pose as authoritative content.
   if (!isNotebookJSON(json)) return 'rejected'
-  if (await hasUnsyncedLocalChanges(json.id)) return 'kept-local-dirty'
+  // `wrap` re-binds the Reatom frame across this await so the wrapped reads below
+  // (and `pullServerNotebook`'s caller continuation) run IN-FRAME under production
+  // `clearStack()` (invariant: every awaited promise is `await wrap(...)`).
+  if (await wrap(hasUnsyncedLocalChanges(json.id))) return 'kept-local-dirty'
   // Server wins for a clean/absent copy — but write under a compare-and-swap, not
   // an unconditional put (CL-17): a local-first write (another tab, a slow IDB)
   // can land between the dirty-check above and this write. `putIfNewer` re-reads
