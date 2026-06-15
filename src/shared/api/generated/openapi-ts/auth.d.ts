@@ -175,6 +175,15 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
+        /** @description Rate limit exceeded */
+        TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ApiErrorResponse"];
+            };
+        };
         /** @description Validation error */
         ValidationError: {
             headers: {
@@ -223,6 +232,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     verifyOtp: {
@@ -250,6 +260,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     refreshTokens: {
