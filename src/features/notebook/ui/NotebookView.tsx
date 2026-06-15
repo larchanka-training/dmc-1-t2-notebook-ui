@@ -21,6 +21,7 @@ import { cn } from '@/shared/lib/cn'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
 import { NotebookHeader } from './NotebookHeader'
+import { NotebookLoadingOverlay } from './NotebookLoadingOverlay'
 import { useCommandModeHotkeys } from './commandHotkeys'
 import { SearchBar } from './SearchBar'
 import { SortableCell } from './CellDragHandle'
@@ -46,6 +47,7 @@ import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
 
@@ -215,10 +217,11 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
+  const showNotebookLoader = slotOpeningPhaseAtom() === 'remote-only'
 
   // Whether the outline pane actually occupies space right now: only on wide
   // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
-  // the user hasn't collapsed it, and when there are ≥ 2 headings to show. When
+  // the user hasn't collapsed it, and when there is ≥ 1 heading to show. When
   // it does NOT, the editor column reclaims the outline's width — matching the
   // prototype's `.editor-wrap[data-outline="off"] .editor-col` widening.
   const isNarrow = useIsMobile()
@@ -263,7 +266,8 @@ export const NotebookView = reatomComponent(() => {
     // to its content height (NOT flex-1, which would cap it at one viewport and
     // make the sticky outline detach halfway down) so the outline stays pinned
     // for the whole scroll. min-h-full keeps a short notebook filling the area.
-    <div className="flex min-h-full">
+    <div className="relative flex min-h-full">
+      {showNotebookLoader ? <NotebookLoadingOverlay /> : null}
       <main className="flex-1">
         <div
           className="mx-auto w-full px-6 py-8"
@@ -284,34 +288,51 @@ export const NotebookView = reatomComponent(() => {
           {/* autoScroll keeps the page scrolling when a drag nears the
               viewport edge on a long notebook; dnd-kit cancels an in-flight
               drag on Esc out of the box (pointer + keyboard sensors). */}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={onDragEnd}
-            autoScroll={{ threshold: { x: 0, y: 0.15 } }}
-          >
-            <SortableContext items={cells.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-3">
-                {cells.map((cell, idx) => (
-                  <div key={cell.id} className="flex flex-col gap-3">
-                    <SortableCell id={cell.id}>
-                      <NotebookRow
-                        cell={cell}
-                        isFirst={idx === 0}
-                        isLast={idx === cells.length - 1}
-                      />
-                    </SortableCell>
-                    {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
-                  </div>
-                ))}
-
-                <CellInserter
-                  afterId={cells.length > 0 ? cells[cells.length - 1].id : undefined}
-                  variant="end"
-                />
+          {cells.length === 0 ? (
+            // Minimal functional empty-state (#135): open-into-slot can now load a
+            // 0-cell notebook (created via the sidebar "+"), and `deleteCell`
+            // guards the last cell, so an empty notebook must offer a way out. The
+            // end-inserter's Code/Text buttons already call addCell('code'|'markdown'),
+            // so wrapping them with a caption is the whole feature — no new logic.
+            // Final visual design (illustration, copy, layout) is #67 §6.
+            <div className="flex flex-col items-center gap-4 py-16 text-center">
+              <p className="text-sm text-muted-foreground">
+                This notebook is empty. Add your first cell to get started.
+              </p>
+              <div className="w-full max-w-sm">
+                <CellInserter variant="end" />
               </div>
-            </SortableContext>
-          </DndContext>
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onDragEnd}
+              autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+            >
+              <SortableContext
+                items={cells.map((c) => c.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="flex flex-col gap-3">
+                  {cells.map((cell, idx) => (
+                    <div key={cell.id} className="flex flex-col gap-3">
+                      <SortableCell id={cell.id}>
+                        <NotebookRow
+                          cell={cell}
+                          isFirst={idx === 0}
+                          isLast={idx === cells.length - 1}
+                        />
+                      </SortableCell>
+                      {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
+                    </div>
+                  ))}
+
+                  <CellInserter afterId={cells[cells.length - 1].id} variant="end" />
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
         </div>
       </main>
 

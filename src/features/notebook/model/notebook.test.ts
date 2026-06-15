@@ -3,6 +3,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { FORMAT_VERSION, type NotebookJSON } from '../persistence/schema'
 import {
+  activeNotebookIdAtom,
   addCell,
   addCellAt,
   cellsAtom,
@@ -12,7 +13,9 @@ import {
   LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
+  notebookSnapshot,
   notebookTitleAtom,
+  restoreNotebook,
   SEED_CODE,
   storageCompatibilityAtom,
   updateCellCode,
@@ -351,5 +354,34 @@ describe('loadNotebook (boot)', () => {
     expect(storageCompatibilityAtom()).toBe('newer-format')
     expect(cellsAtom()).toHaveLength(1)
     expect(cellsAtom()[0].code()).toBe(SEED_CODE)
+  })
+})
+
+describe('activeNotebookIdAtom (slot id source)', () => {
+  afterEach(() => {
+    // Restore the default slot id so a switched id never leaks into siblings.
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('defaults to the local notebook id', () => {
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('restoreNotebook adopts the stored id, and the snapshot follows it', () => {
+    const otherId = '11111111-1111-4111-8111-111111111111'
+    restoreNotebook({
+      formatVersion: FORMAT_VERSION,
+      id: otherId,
+      title: 'Other',
+      createdAt: 1,
+      updatedAt: 2,
+      cells: [
+        { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', kind: 'code', content: 'x', updatedAt: 1 },
+      ],
+    })
+    // The id is now first-class slot state, not the hard-wired constant: the
+    // serializer keys the snapshot by the active id so autosave writes under it.
+    expect(activeNotebookIdAtom()).toBe(otherId)
+    expect(notebookSnapshot().id).toBe(otherId)
   })
 })

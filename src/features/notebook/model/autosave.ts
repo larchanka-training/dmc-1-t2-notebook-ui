@@ -18,7 +18,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { openCrossTabChannel } from '../persistence/crosstab'
 import {
-  LOCAL_NOTEBOOK_ID,
+  activeNotebookIdAtom,
   notebookBaseUpdatedAtAtom,
   notebookSnapshot,
   restoreNotebook,
@@ -82,6 +82,11 @@ function snapshotAfter(minUpdatedAt: number): ReturnType<typeof notebookSnapshot
 
 let saveInFlight = false
 let saveAgainAfterCurrent = false
+// The currently running save loop, or null when idle. Exposed via `drainAutosave`
+// so the slot controller (#135) can await an in-flight write before switching the
+// active notebook id — otherwise the flip could retarget a mid-flight write to the
+// new id.
+let currentSave: Promise<void> | null = null
 
 async function runConditionalSave(): Promise<void> {
   const base = notebookBaseUpdatedAtAtom()
@@ -111,15 +116,33 @@ export async function saveNow(): Promise<void> {
   }
   if (saveInFlight) {
     saveAgainAfterCurrent = true
+    // Await the running loop instead of resolving early, so a caller that needs
+    // the write to land (e.g. `drainAutosave` on a slot switch) actually waits.
+    if (currentSave) await currentSave
     return
   }
 
+  currentSave = runSaveLoop()
+  try {
+    await currentSave
+  } finally {
+    currentSave = null
+  }
+}
+
+async function runSaveLoop(): Promise<void> {
   saveInFlight = true
   saveStatusAtom.set('saving')
   try {
     do {
       saveAgainAfterCurrent = false
-      await runConditionalSave()
+      // `wrap` re-binds the Reatom frame across this await so the `while`-condition
+      // atom reads (and the `catch`'s `saveStatusAtom.set`) run IN-FRAME. A bare
+      // `await runConditionalSave()` resumes after `wrap`'s frame was popped, so a
+      // 2nd iteration (edit burst / `drainAutosave` on a slot switch) would read
+      // `hasLocalChangesAtom()` on an empty stack -> `missing async stack` under
+      // production `clearStack()` (invariant: every awaited promise is `await wrap`).
+      await wrap(runConditionalSave())
     } while (saveAgainAfterCurrent && hasLocalChangesAtom() && saveStatusAtom() !== 'conflict')
   } catch (error) {
     if (error instanceof NewerFormatError) {
@@ -143,7 +166,7 @@ export async function saveNow(): Promise<void> {
  */
 export async function reloadFromStorage(): Promise<boolean> {
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (!stored) return false
     restoreNotebook(stored)
     acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
@@ -173,7 +196,7 @@ export async function saveMine(): Promise<void> {
   }
   saveStatusAtom.set('saving')
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     const snapshotRevision = notebookRevisionAtom()
     const snapshot = snapshotAfter(
       Math.max(notebookBaseUpdatedAtAtom() ?? 0, stored?.updatedAt ?? 0),
@@ -218,6 +241,30 @@ export function markBootRestored(): void {
  */
 let channel: ReturnType<typeof openCrossTabChannel> | null = null
 
+// Set by the active autosave subscription: synchronously promotes a pending
+// debounced save so it runs now instead of 500 ms later. `drainAutosave` calls it
+// before a slot switch; null while autosave is not running.
+let flushPendingSave: (() => void) | null = null
+
+// The teardown handle of the live autosave instance, or null when stopped. Used
+// to make `startAutosave` teardown-first (mirroring `startRemoteSync`): a repeated
+// start (slot switch, HMR, test re-init) must stop the previous instance before
+// re-arming, otherwise the old `notebookRevisionAtom` subscription, focus/
+// visibility listeners and BroadcastChannel leak and double-write for the session.
+let activeAutosaveTeardown: (() => void) | null = null
+
+/**
+ * Flush a pending debounced save and await any in-flight write. The slot
+ * controller (#135) awaits this BEFORE flipping `activeNotebookIdAtom`, so the
+ * previous notebook's edits are persisted under its own id and no write is still
+ * running across the id change. Safe to call when autosave is stopped (no pending
+ * flush, no in-flight save) — it then resolves immediately.
+ */
+export async function drainAutosave(): Promise<void> {
+  flushPendingSave?.()
+  if (currentSave) await currentSave
+}
+
 async function handleExternalSave(updatedAt: number): Promise<void> {
   if (storageCompatibilityAtom() === 'newer-format') {
     saveStatusAtom.set('outdated')
@@ -237,7 +284,7 @@ async function handleExternalSave(updatedAt: number): Promise<void> {
 
 async function checkStoredVersion(): Promise<void> {
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (!stored) return
     await handleExternalSave(stored.updatedAt)
   } catch (error) {
@@ -271,6 +318,11 @@ function subscribeToFocusChecks(): () => void {
 }
 
 export function startAutosave(): () => void {
+  // Teardown-first (H-3, mirrors startRemoteSync): drop any prior instance's
+  // subscription / listeners / channel before wiring a new one, so a repeated
+  // start cannot leak a second autosave or a second cross-tab channel.
+  activeAutosaveTeardown?.()
+
   let timer: ReturnType<typeof setTimeout> | null = null
   let primed = false
 
@@ -304,23 +356,49 @@ export function startAutosave(): () => void {
   // isolated, so #136 must gate this channel by device mode before enabling it.
   channel = openCrossTabChannel(
     wrap((message) => {
-      if (message.id !== LOCAL_NOTEBOOK_ID) return
+      if (message.id !== activeNotebookIdAtom()) return
       void handleExternalSave(message.updatedAt)
     }),
   )
   const unsubscribeFocusChecks = subscribeToFocusChecks()
 
-  // Teardown drops the debounce timer, subscriptions and the cross-tab channel,
-  // but does NOT cancel a save already in flight — that storage write runs to
-  // completion by design (a sub-ms IndexedDB op). In-flight cancellation lives in
-  // #134's remoteSync layer instead (a `generation` guard that discards a stale
-  // push's result; the notebook facade takes no AbortSignal yet), where the
-  // network push has a window long enough to matter.
-  return () => {
+  // Expose a synchronous flush of the pending debounce so a slot switch can force
+  // the last edit to persist now (via `drainAutosave`) rather than lose it to the
+  // teardown's `clearTimeout`. No pending timer / newer-format / clean editor are
+  // all no-ops, mirroring the subscription's own guards.
+  flushPendingSave = () => {
+    if (timer === null) return
+    clearTimeout(timer)
+    timer = null
+    if (storageCompatibilityAtom() === 'newer-format') return
+    if (!hasLocalChangesAtom()) return
+    void saveNow()
+  }
+
+  // Teardown drops the debounce timer, subscriptions and the cross-tab channel.
+  // It no longer silently discards a pending edit: a slot switch first calls
+  // `drainAutosave` (flush + await) so the write lands under the old id. A bare
+  // teardown without a drain still cancels the timer (the unflushed edit stays in
+  // the editor and re-arms on the next change), matching the pre-#135 behaviour.
+  const teardown = () => {
+    // Always tear down THIS instance's own per-instance resources (timer +
+    // subscriptions are captured in this closure, so this is safe even for a
+    // stale handle).
     if (timer !== null) clearTimeout(timer)
     unsubscribe()
     unsubscribeFocusChecks()
-    channel?.close()
-    channel = null
+    // The cross-tab channel and the flush pointer are MODULE-level singletons
+    // shared with whatever instance is currently live. Only touch them if THIS
+    // instance is still the live one (L2): a stale teardown running after a newer
+    // `startAutosave()` must not close the live channel or wipe the live flush
+    // pointer (which would silently disable cross-tab sync + drain-flush).
+    if (activeAutosaveTeardown === teardown) {
+      flushPendingSave = null
+      channel?.close()
+      channel = null
+      activeAutosaveTeardown = null
+    }
   }
+  activeAutosaveTeardown = teardown
+  return teardown
 }

@@ -38,7 +38,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
 import { isNotebookJSON, type NotebookJSON } from '../persistence/schema'
 import type { NotebookSyncState } from '../persistence/storageAdapter'
-import { cellsAtom, LOCAL_NOTEBOOK_ID, notebookBaseUpdatedAtAtom } from './notebook'
+import { activeNotebookIdAtom, cellsAtom, notebookBaseUpdatedAtAtom } from './notebook'
 import { notebookRestoredAtom } from './revision'
 import { hasLocalChangesAtom, localSaveCommittedAtom, reloadFromStorage } from './autosave'
 import { isOnlineAtom, startOnlineTracking } from './online'
@@ -118,11 +118,12 @@ function isRetryable(error: unknown): boolean {
     const s = error.status
     return s >= 500 || s === 408 || s === 429 || s === 401
   }
-  // Unknown error shape (e.g. a programming TypeError): retry rather than get
-  // permanently stuck. Deliberate MVP trade-off — a real code bug would loop under
-  // backoff (logged each attempt via the push-failed warn) instead of surfacing.
-  // A retry cap / terminal-on-non-ApiError is a documented follow-up (#135).
-  return true
+  // Unknown error shape (e.g. a programming TypeError): treat as terminal (#135).
+  // The previous MVP behaviour retried it forever under backoff, which hid a real
+  // code bug behind an endless loop (logged every attempt). The queue is kept on a
+  // terminal `failed` too, so nothing is lost — a later trigger (edit / boot) still
+  // re-pushes once the underlying bug is fixed, without the silent busy-loop.
+  return false
 }
 
 /** The server-requested delay (ms) for a 429, if present. */
@@ -200,13 +201,16 @@ async function applyServerBaseline(
     return 'rejected'
   }
   // M-1: don't adopt over a concurrent local edit — checked before any write, so
-  // neither storage nor editor is touched while the user is mid-edit.
-  if (notebookId === LOCAL_NOTEBOOK_ID && hasLocalChangesAtom()) return 'deferred'
+  // neither storage nor editor is touched while the user is mid-edit. The guard
+  // applies only when the pushed notebook is the one open in the editor slot
+  // (#135): `hasLocalChangesAtom`/`reloadFromStorage` below act on the in-memory
+  // editor, so they are meaningless for a background push of a non-active id.
+  if (notebookId === activeNotebookIdAtom() && hasLocalChangesAtom()) return 'deferred'
   // Storage CAS: refuse to clobber a version newer than the one this push was
   // based on (e.g. another tab saved during the PATCH) instead of an unconditional put.
   const result = await wrap(notebookStorage.putIfNewer(json, base))
   if (!result.ok) return 'deferred'
-  if (notebookId === LOCAL_NOTEBOOK_ID) {
+  if (notebookId === activeNotebookIdAtom()) {
     // Re-check after the write: a keystroke during the put must not be clobbered
     // by the wholesale reload (it survives in the editor; autosave reconciles).
     if (hasLocalChangesAtom()) {

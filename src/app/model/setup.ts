@@ -7,13 +7,10 @@ import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
-  aiContextModeAtom,
   loadNotebook,
-  LOCAL_NOTEBOOK_ID,
   markBootRestored,
-  startAiContextSync,
-  startAutosave,
-  startRemoteSync,
+  startNotebookListSync,
+  startSlot,
 } from '@/features/notebook'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
@@ -102,6 +99,10 @@ rootFrame.run(() => loadCurrentUserAction())
 rootFrame.run(() => {
   startThemeSync()
   startCodeGeneratorBridge()
+  // Refetch the sidebar notebook list when the signed-in account changes within
+  // one session, and clear it on sign-out (#135) — the list resource does not
+  // track the user itself, so a stale/foreign list would otherwise linger.
+  startNotebookListSync()
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order
@@ -125,18 +126,11 @@ rootFrame.run(async () => {
     const restored = await wrap(loadNotebook())
     if (restored) markBootRestored()
   } finally {
-    startAutosave()
-    // Background remote sync (#134): push local changes to the backend for the
-    // authorized user. Starts unconditionally — it self-guards on auth, staying
-    // idle while signed out and flushing the persisted queue once a token exists.
-    startRemoteSync(LOCAL_NOTEBOOK_ID)
-    // Mode B (persisted AI context, Epic 07 / #116): load the saved context and
-    // keep it in sync with edits/deletes. Opt-in via VITE_AI_CONTEXT_MODE; the
-    // default 'at-send' mode builds context lazily at generate time and needs no
-    // backend round-trip here.
-    if (aiContextModeAtom() === 'persisted') {
-      startAiContextSync(LOCAL_NOTEBOOK_ID)
-    }
+    // Start the editor slot for the boot notebook: autosave + background
+    // remote-sync (#134, self-guards on auth) + optional persisted AI context
+    // (Mode B), all bound to the active slot id (#135). The slot controller owns
+    // these bindings so open-into-slot can safely switch them to another id.
+    startSlot()
   }
 })
 

@@ -1,9 +1,36 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import * as idLib from '@/shared/lib/id'
+import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
-import { createNotebookAction, notebookListResource } from './notebookList'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import {
+  createNotebookAction,
+  deleteNotebookAction,
+  notebookListResource,
+  startNotebookListSync,
+} from './notebookList'
+
+// Delete drives the slot controller's two-phase active-delete API (quiesce before
+// the server DELETE; settle/restore after). Mock those so this suite asserts the
+// delete action's own orchestration and ordering without booting the real
+// autosave/remote-sync/AI bindings the controller starts.
+const slotMock = vi.hoisted(() => ({
+  bumpSlotGeneration: vi.fn(),
+  quiesceActiveSlot: vi.fn(),
+  resetSlotToFloorForAccountChange: vi.fn(),
+  restoreActiveSlotBindings: vi.fn(),
+  settleDeletedSlotToFloor: vi.fn(),
+}))
+vi.mock('./slot', () => ({
+  bumpSlotGeneration: slotMock.bumpSlotGeneration,
+  quiesceActiveSlot: slotMock.quiesceActiveSlot,
+  resetSlotToFloorForAccountChange: slotMock.resetSlotToFloorForAccountChange,
+  restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,
+  settleDeletedSlotToFloor: slotMock.settleDeletedSlotToFloor,
+}))
 
 // A fixed client UUID so the create payload (FU1) is deterministic to assert.
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
@@ -28,6 +55,14 @@ const fullNotebook = (id: string, title: string): notebookApi.Notebook => ({
   updatedAt: 0,
   cells: [],
 })
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
 
 beforeEach(() => {
   vi.spyOn(idLib, 'newId').mockReturnValue(CLIENT_ID)
@@ -99,5 +134,226 @@ describe('createNotebookAction', () => {
 
     await expect(createNotebookAction('new')).rejects.toThrow()
     expect(peek(notebookListResource.data)).toEqual([existing])
+  })
+
+  test('dedupes overlapping creates at the model level — one API call (CL-12)', async () => {
+    const created = fullNotebook(CLIENT_ID, 'new')
+    const gate = deferred<notebookApi.Notebook>()
+    const createSpy = vi.spyOn(notebookApi, 'create').mockReturnValue(gate.promise)
+
+    // Two overlapping calls (e.g. a shortcut firing while the button is mid-create):
+    // the second is a no-op until the first settles, so only ONE POST goes out.
+    const first = createNotebookAction('new')
+    const second = await createNotebookAction('new')
+    expect(second).toBeNull()
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    gate.resolve(created)
+    expect(await first).toEqual(created)
+  })
+})
+
+describe('deleteNotebookAction', () => {
+  const NB_ID = '55555555-5555-4555-8555-555555555555'
+
+  beforeEach(() => {
+    slotMock.quiesceActiveSlot.mockReset().mockResolvedValue(undefined)
+    slotMock.restoreActiveSlotBindings.mockReset()
+    slotMock.settleDeletedSlotToFloor.mockReset().mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
+    vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  afterEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('removes the row, deletes server-side, and cleans up local storage', async () => {
+    const other = listItem('keep', 'Keep me')
+    notebookListResource.data.set([other, listItem(NB_ID, 'Doomed')])
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+
+    await deleteNotebookAction(NB_ID)
+
+    expect(removeSpy).toHaveBeenCalledWith(NB_ID)
+    expect(peek(notebookListResource.data)).toEqual([other])
+    expect(notebookStorage.delete).toHaveBeenCalledWith(NB_ID)
+    expect(notebookStorage.deleteSyncState).toHaveBeenCalledWith(NB_ID)
+    // Not the active notebook → the slot is left alone (no quiesce / settle).
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
+  })
+
+  test('rolls the row back when the server DELETE fails', async () => {
+    const other = listItem('keep', 'Keep me')
+    notebookListResource.data.set([other, listItem(NB_ID, 'Doomed')])
+    vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
+
+    await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
+    // The optimistic removal is rolled back: the row is still present.
+    expect(peek(notebookListResource.data)).toEqual([other, listItem(NB_ID, 'Doomed')])
+  })
+
+  test('quiesces the slot BEFORE the server DELETE, then settles to the floor AFTER (H1)', async () => {
+    activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
+    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+
+    await deleteNotebookAction(NB_ID)
+
+    // H1: id-bound work is stopped BEFORE the destructive request (so an in-flight
+    // push can't recreate the id), and the slot only degrades AFTER the commit.
+    expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.settleDeletedSlotToFloor).toHaveBeenCalledTimes(1)
+    const quiesceOrder = slotMock.quiesceActiveSlot.mock.invocationCallOrder[0]
+    const removeOrder = removeSpy.mock.invocationCallOrder[0]
+    const settleOrder = slotMock.settleDeletedSlotToFloor.mock.invocationCallOrder[0]
+    expect(quiesceOrder).toBeLessThan(removeOrder)
+    expect(removeOrder).toBeLessThan(settleOrder)
+  })
+
+  test('re-arms the slot and rolls the row back when the active-notebook DELETE fails (H1)', async () => {
+    activeNotebookIdAtom.set(NB_ID) // open in the slot
+    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
+
+    await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
+
+    // Quiesced before the (failed) DELETE, then re-armed on the same id so the user
+    // keeps the open notebook; the slot is NOT degraded; the row rolls back.
+    expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.restoreActiveSlotBindings).toHaveBeenCalledTimes(1)
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Doomed')])
+  })
+
+  test('does not roll back a committed DELETE even if settling the slot fails (H2)', async () => {
+    activeNotebookIdAtom.set(NB_ID)
+    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    // settle is best-effort: even if it rejected, the action must NOT reject (which
+    // would roll back the committed server delete). The real settle never throws;
+    // here we assert the action swallows a hypothetical settle failure.
+    slotMock.settleDeletedSlotToFloor.mockRejectedValue(new Error('degrade boom'))
+
+    await expect(deleteNotebookAction(NB_ID)).resolves.toBeUndefined()
+    // Row stays removed (delete committed), not resurrected by a rollback.
+    expect(peek(notebookListResource.data)).toEqual([])
+  })
+
+  test('refuses to delete the local welcome floor (M5)', async () => {
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
+
+    await deleteNotebookAction(LOCAL_NOTEBOOK_ID)
+
+    // Guarded no-op: no server call, no row mutation, no slot teardown.
+    expect(removeSpy).not.toHaveBeenCalled()
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
+  })
+})
+
+const ALICE = { id: '11111111-1111-4111-8111-111111111111', roles: [] }
+const BOB = { id: '22222222-2222-4222-8222-222222222222', roles: [] }
+
+// Assert the contract of startNotebookListSync (reset + conditional retry on an
+// account change) via spies on the resource, not the resource's reactive `data`:
+// the computed only pushes a fetched result while it has a live subscriber, which
+// a unit test doesn't set up. Whether the rows actually re-render is the
+// resource's own concern, covered by the createNotebookAction tests above.
+describe('startNotebookListSync (refresh on account change)', () => {
+  let stop: (() => void) | undefined
+  let resetSpy: ReturnType<typeof vi.spyOn>
+  let retrySpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    slotMock.resetSlotToFloorForAccountChange.mockReset().mockResolvedValue(undefined)
+    resetSpy = vi.spyOn(notebookListResource, 'reset').mockImplementation(() => undefined as never)
+    retrySpy = vi
+      .spyOn(notebookListResource, 'retry')
+      .mockImplementation(() => Promise.resolve() as never)
+  })
+
+  afterEach(() => {
+    stop?.()
+    stop = undefined
+    userAtom.set(null)
+  })
+
+  test('resets and refetches the list when the account changes within a session', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(BOB) // switch account
+    await new Promise((resolve) => setTimeout(resolve))
+
+    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched.
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).toHaveBeenCalledTimes(1)
+    // Ordering (H3): rows cleared synchronously and the slot reset BEFORE the new
+    // account's list is fetched, so a foreign list never renders over the old slot.
+    expect(resetSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      slotMock.resetSlotToFloorForAccountChange.mock.invocationCallOrder[0],
+    )
+    expect(slotMock.resetSlotToFloorForAccountChange.mock.invocationCallOrder[0]).toBeLessThan(
+      retrySpy.mock.invocationCallOrder[0],
+    )
+  })
+
+  test('resets but does not refetch on sign-out', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(null) // sign out
+    await new Promise((resolve) => setTimeout(resolve))
+
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('does not reset or refetch on the initial subscribe (boot loads lazily)', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    await new Promise((resolve) => setTimeout(resolve))
+
+    // The first synchronous emit is skipped — starting the sync touches nothing.
+    expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('ignores a redundant emit when the same account stays signed in', async () => {
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set({ ...ALICE }) // same id, new object reference
+    await new Promise((resolve) => setTimeout(resolve))
+
+    expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
+  test('loads only the lightweight list — never prefetches per-document GETs (AC2 / M6)', async () => {
+    // AC2: sign-in bootstrap pulls the lightweight `GET /notebooks` list only;
+    // full documents are fetched lazily on open. Pin the ABSENCE of a mass
+    // prefetch so a future "warm documents on sign-in" refactor trips this test.
+    const getSpy = vi.spyOn(notebookApi, 'get')
+    userAtom.set(ALICE)
+    stop = startNotebookListSync()
+    userAtom.set(BOB) // account change triggers a list refetch (retry), not gets
+    await new Promise((resolve) => setTimeout(resolve))
+
+    expect(getSpy).not.toHaveBeenCalled()
   })
 })

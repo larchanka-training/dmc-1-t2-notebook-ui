@@ -88,8 +88,17 @@ export function whenContextReady(): Promise<void> {
   return queueTail
 }
 
+// Load generation (review v4 H4). `startAiContextSync` re-arms on every slot
+// switch; `loadPersistedContext` is fire-and-forget, so a slow load for notebook
+// A resolving after a switch to B would overwrite B's context (a cross-notebook /
+// cross-account leak in persisted Mode B). Each (re)bind + teardown bumps this;
+// a load applies its result only if the generation is unchanged when it resolves.
+let syncGeneration = 0
+
 /** Reset the queue + caches + debounce state (test isolation / notebook switch). */
 export function resetAiContextSync(): void {
+  // Invalidate any in-flight load so it cannot apply A's context onto B (H4).
+  syncGeneration += 1
   if (debounceTimer !== null) {
     clearTimeout(debounceTimer)
     debounceTimer = null
@@ -214,12 +223,22 @@ function persistAssembled(notebookId: string, clearFirst = false): Promise<unkno
  * does not block it. Never rejects.
  */
 export const loadPersistedContext = action(async (notebookId: string) => {
+  // Capture the generation before the await: if a slot switch / teardown bumps it
+  // while this load is in flight, the result is stale and must NOT touch the
+  // shared atoms — the active binding owns them now (H4). A direct call (tests)
+  // never bumps, so it still applies.
+  const myGeneration = syncGeneration
   try {
     const stored = await wrap(aiContext.get(notebookId))
+    if (myGeneration !== syncGeneration) return stored
     persistedContextAtom.set(stored)
     contextLoadFailedAtom.set(false)
     return stored
   } catch (error) {
+    if (myGeneration !== syncGeneration) {
+      console.error('aiContext: failed to load persisted context (stale, dropped)', error)
+      return null
+    }
     contextLoadFailedAtom.set(true)
     persistedContextAtom.set(null)
     console.error('aiContext: failed to load persisted context', error)
@@ -312,11 +331,12 @@ export function startAiContextSync(notebookId: string): () => void {
   })
 
   return () => {
-    if (debounceTimer !== null) {
-      clearTimeout(debounceTimer)
-      debounceTimer = null
-    }
-    flushDebouncedPersist = null
     unsubscribe()
+    // Clear the module-level queue / caches / atoms (and bump the load generation)
+    // so the NEXT binding — a slot switch to another notebook, or an account
+    // change — cannot inherit this notebook's persisted context (H4). Replaces the
+    // previous partial teardown (timer + flush only), which left
+    // `persistedContextAtom` / `contributionsAtom` / `queueTail` carrying A into B.
+    resetAiContextSync()
   }
 }

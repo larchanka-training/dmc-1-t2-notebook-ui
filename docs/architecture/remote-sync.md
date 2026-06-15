@@ -11,9 +11,12 @@ storage-adapter sync partition (#133, see
 [`../tasks/02-notebook-data-model.md`](../tasks/02-notebook-data-model.md)) and
 the notebook facade (#132, `@/shared/api`).
 
-Out of scope (other PRs of #130): bootstrap load after sign-in and sync-status
-UI (#135), trusted/untrusted device mode (#136), background pull of other
-devices' changes (#137).
+Built on by #135 (now landed): the bootstrap load after sign-in, the switchable
+slot id (`activeNotebookIdAtom`, retiring the fixed `LOCAL_NOTEBOOK_ID`) and the
+sync-status UI — see ["Notebook id scoping"](#notebook-id-scoping-switchable-slot)
+below and [`05-sync-ui.md`](../tasks/05-sync-ui.md). Still out of scope (other PRs
+of #130): trusted/untrusted device mode (#136), background pull of other devices'
+changes into an already-open notebook (#137).
 
 ## Trigger — local-first
 
@@ -116,6 +119,10 @@ the newer local version re-pushed — local edits are never clobbered.
     this body every time, so the engine stops the retry loop and surfaces a
     terminal `failed` status (queue still kept) instead of looping forever and
     hiding the problem behind a false `synced`.
+  - **Terminal (unknown shape)** — a non-`ApiError`/non-`NetworkError` (e.g. a
+    programming `TypeError`) is also terminal (#135). It previously retried
+    forever under backoff, hiding the bug behind an endless loop; the queue is
+    still kept, so a later trigger re-pushes once the bug is fixed.
 
 ## Auth and session end
 
@@ -149,16 +156,29 @@ it again while signed in. The explicit import/keep/discard flow for unattributed
 local data, full per-account **content** isolation (B still _sees_ A's local
 notebook in the editor), and a real per-account server id are #135/#136's job.
 
-## Notebook id scoping (single-notebook MVP) — known limitation
+## Notebook id scoping (switchable slot)
 
-The synced notebook currently carries the compile-time constant `LOCAL_NOTEBOOK_ID`
-for every user (the single-notebook MVP; FU1's client UUID applies only to _list_
-notebooks). The backend keys notebooks by `id` and 403s a cross-owner re-POST, so
-correctness depends on the backend being owner-scoped, and **only the first user
-to POST that id can create it** — every other user's first push gets a permanent 403. That 403 is handled fail-safe (terminal status, queue kept, no infinite loop,
-no false `synced`), but real multi-user sync needs a **per-user server id** (e.g.
-derived from the account id), designed together with the #135 bootstrap (the GET
-must use the same id). Tracked as a #135 design item.
+The synced notebook id is the **active slot id** (`activeNotebookIdAtom`, #135),
+not a fixed compile-time constant. `startRemoteSync(notebookId)` is bound to that
+id, and the engine compares the pushed id against `activeNotebookIdAtom()` when it
+decides whether the response is for the notebook open in the editor (the
+adopt-baseline dirty-guard and editor reload — see
+["Applying the server response"](#applying-the-server-response-lww-baseline)).
+
+`LOCAL_NOTEBOOK_ID` is now only the **initial** value of that atom — the local
+welcome-seed floor created on boot when storage is empty. Opening a backend
+notebook from the sidebar (#135 open-into-slot) switches the slot to its id, and
+the slot controller (`model/slot.ts`) re-arms autosave / remote-sync / AI-context
+on the new id after draining the outgoing notebook's in-flight save.
+
+**Shared-floor caveat (still open).** Until #67 derives a per-user demo id
+(`uuidv5(DEMO_NAMESPACE, user.id)`), the boot floor is the same `LOCAL_NOTEBOOK_ID`
+for every user, so the first-user-to-POST / cross-owner-403 limitation still
+applies to that floor notebook specifically. The 403 stays handled fail-safe
+(terminal status, queue kept, no infinite loop, no false `synced`). The owner-gate
+also refuses to push a queue whose `ownerId` differs from the current user. A real
+per-user id for the floor is #67's job, built on the switchable slot delivered
+here.
 
 ## Scaling note
 
@@ -194,7 +214,7 @@ recorded either, so boot-pushing it would risk uploading content under the wrong
 account (the cross-account leak the owner-gate exists to prevent). That case is a
 liveness gap only — no data loss, and it syncs on the next edit (which re-records
 `ownerId` + `dirty`). A fully durable fix is an atomic content + dirty-marker
-write, deferred to #135.
+write, deferred to a dedicated follow-up (see "Known follow-ups").
 
 ## Robustness guards
 
@@ -239,9 +259,11 @@ same pattern autosave uses.
 
 ## Known follow-ups
 
-- **Per-user server id (#135).** The shared `LOCAL_NOTEBOOK_ID` only works for the
-  first user; a real per-account id must be designed with the #135 bootstrap (see
-  "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
+- **Per-user server id (#67).** #135 made the slot id switchable
+  (`activeNotebookIdAtom`); the boot floor is still the shared `LOCAL_NOTEBOOK_ID`,
+  which only the first user can POST. A real per-account id for the floor
+  (`uuidv5(DEMO_NAMESPACE, user.id)`) is #67's job, built on the switchable slot
+  (see "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
 - **#136 (untrusted device).** Once `clearLocalNotebookData` is wired to sign-out,
   the sync-metadata persist already skips a write for a torn-down/paused engine and
   `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /
@@ -256,6 +278,9 @@ same pattern autosave uses.
   drop only acked tombstones still present). Deferred to #136, which owns the
   coherent cross-tab story (BroadcastChannel, memory backend, device mode). Flagged
   by review gpt-v-13.
-- **First-create crash durability (#135).** A never-created notebook whose dirty
-  marker is lost to a crash syncs only on the next edit (see "Crash recovery"). An
-  atomic content + dirty-marker write would close the window.
+- **First-create crash durability (follow-up).** A never-created notebook whose
+  dirty marker is lost to a crash syncs only on the next edit (see "Crash
+  recovery"). An atomic content + dirty-marker write would close the window.
+  Deferred from #135 to a dedicated follow-up
+  because it needs a new two-store atomic storage method and touches the
+  owner-attribution path — see that issue's "Key risk: two writers of `ownerId`".

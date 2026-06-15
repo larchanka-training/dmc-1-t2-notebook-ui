@@ -8,7 +8,7 @@ import {
   RateLimitedError,
   UnauthorizedError,
 } from './errors'
-import { setAuthTokenGetter } from './client'
+import { notebookClient, setAuthTokenGetter } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -380,5 +380,59 @@ describe('remove', () => {
   test('a rejected fetch maps to NetworkError', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
     await expect(notebook.remove('nb-1')).rejects.toBeInstanceOf(NetworkError)
+  })
+})
+
+describe('AbortSignal forwarding (M3)', () => {
+  const resp = {
+    id: 'nb-1',
+    ownerId: 'o',
+    title: 't',
+    formatVersion: 1,
+    createdAt: 0,
+    updatedAt: 0,
+    cells: [],
+  }
+
+  test('get forwards the exact AbortSignal into notebookClient.GET options', async () => {
+    const spy = vi
+      .spyOn(notebookClient, 'GET')
+      .mockResolvedValue({ data: resp, response: new Response() } as never)
+    const controller = new AbortController()
+    try {
+      await notebook.get('nb-1', controller.signal)
+      const options = spy.mock.calls[0]![1] as { signal?: AbortSignal }
+      expect(options.signal).toBe(controller.signal)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test('create forwards the AbortSignal into notebookClient.POST options', async () => {
+    const spy = vi
+      .spyOn(notebookClient, 'POST')
+      .mockResolvedValue({ data: resp, response: new Response() } as never)
+    const controller = new AbortController()
+    try {
+      await notebook.create({ title: 'n', formatVersion: 1 }, controller.signal)
+      const options = spy.mock.calls[0]![1] as { signal?: AbortSignal }
+      expect(options.signal).toBe(controller.signal)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test('patch forwards the AbortSignal into notebookClient.PATCH options', async () => {
+    const spy = vi
+      .spyOn(notebookClient, 'PATCH')
+      .mockResolvedValue({ data: resp, response: new Response() } as never)
+    const controller = new AbortController()
+    try {
+      await notebook.patch('nb-1', { title: 'n', formatVersion: 1, cells: [] }, controller.signal)
+      const options = spy.mock.calls[0]![1] as { signal?: AbortSignal }
+      expect(options.signal).toBe(controller.signal)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

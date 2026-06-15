@@ -139,10 +139,21 @@ export function NotebookCell({
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
 
+  // The markdown textarea is UNCONTROLLED (defaultValue + ref), mirroring
+  // CodeEditor: edits flow out via onCodeChange, and an EXTERNAL `code` change
+  // (undo/redo, AI generate, switching the cell back from preview) is pushed
+  // into the DOM only when it differs from what the user already sees. A
+  // controlled `value={code}` jumped the caret to the END on every keystroke in
+  // the middle of the text, because the value round-trips through the Reatom
+  // store and returns in a re-render OUTSIDE React's input-event batch, which
+  // re-sets the textarea value and collapses the selection. Syncing by hand
+  // (only on a real mismatch) leaves the caret untouched while typing.
   useEffect(() => {
     if (showPreview) return
     const el = textareaRef.current
-    if (el) autoResize(el)
+    if (!el) return
+    if (el.value !== code) el.value = code
+    autoResize(el)
   }, [code, showPreview])
 
   // Markdown cells mirror CodeEditor's modal focus: when the cell becomes
@@ -413,7 +424,7 @@ export function NotebookCell({
             {cellId ? <MarkdownSearchHighlight cellId={cellId} source={code} /> : null}
             <textarea
               ref={textareaRef}
-              value={code}
+              defaultValue={code}
               readOnly={readOnly}
               spellCheck
               rows={1}

@@ -4,6 +4,7 @@ import { Hash, PanelLeft, Search } from 'lucide-react'
 import {
   NotebookToolbar,
   SaveIndicator,
+  SyncIndicator,
   outlineVisibleAtom,
   outlineDrawerOpenAtom,
   runAll,
@@ -47,6 +48,9 @@ const NotebookTopbarControls = reatomComponent(() => {
   return (
     <>
       <SaveIndicator />
+      {/* Remote-sync status (#135): on-device save state (SaveIndicator) and
+          server-sync state (SyncIndicator) are distinct signals, shown together. */}
+      <SyncIndicator />
 
       <div className="flex-1" />
 

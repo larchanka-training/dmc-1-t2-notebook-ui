@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { SidebarProvider, SidebarInset } from '@/shared/ui/sidebar'
-import { ShortcutsHelp, RenameNotebookDialog } from '@/features/notebook'
+import { ShortcutsHelp, RenameNotebookDialog, DeleteNotebookDialog } from '@/features/notebook'
 import { AppSidebar } from './AppSidebar'
 import { AppTopbar } from './AppTopbar'
 
@@ -23,6 +23,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           triggers live in the sidebar, outside the notebook view). */}
       <ShortcutsHelp />
       <RenameNotebookDialog />
+      <DeleteNotebookDialog />
     </SidebarProvider>
   )
 }
