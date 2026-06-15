@@ -27,7 +27,11 @@ import {
   createNotebookAction,
   notebookListResource,
   notebookTitleAtom,
+  openNotebookInSlot,
+  slotOpenErrorAtom,
   renameTargetAtom,
+  deleteTargetAtom,
+  activeNotebookIdAtom,
   LOCAL_NOTEBOOK_ID,
   shortcutsOpenAtom,
 } from '@/features/notebook'
@@ -212,11 +216,13 @@ const InfoGroup = reatomComponent(() => {
   )
 }, 'InfoGroup')
 
-// Per-row "…" menu (new-design-v2): Rename / Duplicate / Delete. Only Rename is
-// wired, and only for the current notebook (focuses the editor's title field);
-// Duplicate/Delete and any action on backend rows are presentational until the
-// notebook-management epic (04). Revealed on row hover / when the menu is open.
-function NotebookRowMenu({ onRename }: { onRename?: () => void }) {
+// Per-row "…" menu (new-design-v2): Rename / Duplicate / Delete (#135). Rename
+// (title edit) and Delete (confirm modal → server DELETE) are wired; `onDelete` is
+// omitted for the local-only welcome-seed floor (no backend identity, regenerated
+// on boot), so that row shows no Delete item. Duplicate is not implemented yet —
+// it is rendered disabled with explicit coming-soon semantics rather than as a
+// dead clickable item (review L7). Revealed on row hover / when the menu is open.
+function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDelete?: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -236,23 +242,27 @@ function NotebookRowMenu({ onRename }: { onRename?: () => void }) {
           <Pencil className="size-4" />
           Rename
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem disabled aria-disabled="true" title="Duplicate — coming soon">
           <Copy className="size-4" />
           Duplicate
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive">
-          <Trash2 className="size-4" />
-          Delete
-        </DropdownMenuItem>
+        {onDelete ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 className="size-4" />
+              Delete
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
 
-// Default title for the quick "+" create (new-design-v2 uses "Untitled
-// notebook"). Opening/renaming/switching notebooks is epic 04 — out of scope
-// here; the list stays presentational.
+// Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
+// Open-into-slot, rename and delete are wired here (#135); multi-notebook routing
+// / duplicate stay in epic 04.
 const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
 
 const NotebooksGroup = reatomComponent(() => {
@@ -260,14 +270,21 @@ const NotebooksGroup = reatomComponent(() => {
   const { pathname } = urlAtom()
   const items = notebookListResource.data()
   const createError = createNotebookAction.error()?.message
+  const openError = slotOpenErrorAtom()
   // The local notebook opens at the notebook route — the same empty-path href
   // as the "Notebook" item in Workspace (BASE_URL + '').
   const notebookHref = import.meta.env.BASE_URL
-  // The currently open notebook lives in local storage (LOCAL_NOTEBOOK_ID),
-  // separate from the backend list. Surface it as a synthetic top entry with a
-  // live title so it shows up and stays highlighted while editing. Full
-  // open/switch across the backend list is epic 04.
+  // The notebook open in the editor slot is identified by `activeNotebookIdAtom`
+  // (#135). Its row stays in place in the backend list and is highlighted; only
+  // when the active id is NOT in the list (the local welcome floor) is a single
+  // synthetic row surfaced for it (see `showFloorRow`). `currentTitle` is the live
+  // editor title, shown on the active row so it reflects in-progress edits.
   const currentTitle = notebookTitleAtom()
+  const activeId = activeNotebookIdAtom()
+  // FU3: disable the "+" while a create is in flight, so a double-click cannot
+  // fire two concurrent createNotebookAction calls (each pushing an optimistic
+  // row + a list retry, which can transiently drop or mis-roll-back a row).
+  const creating = !createNotebookAction.ready()
   const [filter, setFilter] = useState('')
 
   if (!user) return null
@@ -277,12 +294,17 @@ const NotebooksGroup = reatomComponent(() => {
   })
 
   const filterText = filter.trim().toLowerCase()
-  // Never list the local notebook twice if it ever appears in the backend feed.
-  const backendItems = items.filter((nb) => nb.id !== LOCAL_NOTEBOOK_ID)
   const filtered = filterText
-    ? backendItems.filter((nb) => nb.title.toLowerCase().includes(filterText))
-    : backendItems
-  const currentMatchesFilter = !filterText || currentTitle.toLowerCase().includes(filterText)
+    ? items.filter((nb) => nb.title.toLowerCase().includes(filterText))
+    : items
+  // The active notebook keeps its place in the list and is just highlighted (no
+  // "jump to top"). Only when it is NOT in the backend list (the local welcome
+  // floor before its first sync, or a not-yet-loaded list) do we surface a single
+  // synthetic row for it so the open notebook is always visible.
+  const activeInList = items.some((nb) => nb.id === activeId)
+  const showFloorRow =
+    !activeInList &&
+    (!filterText || (currentTitle || NEW_NOTEBOOK_TITLE).toLowerCase().includes(filterText))
 
   return (
     <SidebarGroup className="min-h-0 flex-1">
@@ -294,6 +316,7 @@ const NotebooksGroup = reatomComponent(() => {
           className="size-6 shrink-0 text-muted-foreground hover:text-primary"
           aria-label="New notebook"
           onClick={onCreate}
+          disabled={creating}
         >
           <Plus className="size-4" />
         </Button>
@@ -311,7 +334,10 @@ const NotebooksGroup = reatomComponent(() => {
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <SidebarMenu>
-            {currentMatchesFilter ? (
+            {/* The local welcome floor (or a not-yet-listed active notebook) shown
+                as a single synthetic row, ONLY when it isn't in the backend list.
+                A listed active notebook stays in place below and is highlighted. */}
+            {showFloorRow ? (
               <SidebarMenuItem className="group/nb">
                 <SidebarMenuButton
                   isActive={pathname === notebookHref}
@@ -323,24 +349,69 @@ const NotebooksGroup = reatomComponent(() => {
                 <NotebookRowMenu
                   onRename={wrap(() =>
                     renameTargetAtom.set({
-                      id: LOCAL_NOTEBOOK_ID,
+                      id: activeId,
                       title: currentTitle || NEW_NOTEBOOK_TITLE,
                     }),
                   )}
+                  // The local-only welcome-seed floor cannot be deleted; only an
+                  // open backend notebook gets a Delete item (#135).
+                  onDelete={
+                    activeId === LOCAL_NOTEBOOK_ID
+                      ? undefined
+                      : wrap(() =>
+                          deleteTargetAtom.set({
+                            id: activeId,
+                            title: currentTitle || NEW_NOTEBOOK_TITLE,
+                          }),
+                        )
+                  }
                 />
               </SidebarMenuItem>
             ) : null}
-            {filtered.map((nb) => (
-              <SidebarMenuItem key={nb.id} className="group/nb">
-                <SidebarMenuButton className="pr-8">
-                  <span className="truncate">{nb.title}</span>
-                </SidebarMenuButton>
-                <NotebookRowMenu
-                  onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title: nb.title }))}
-                />
-              </SidebarMenuItem>
-            ))}
-            {filterText && !currentMatchesFilter && filtered.length === 0 ? (
+            {filtered.map((nb) => {
+              const isActive = nb.id === activeId
+              // For the active row show the live editor title (it may differ from
+              // the last-loaded list row while the user types before a list refetch).
+              const title = isActive ? currentTitle || nb.title : nb.title
+              return (
+                <SidebarMenuItem key={nb.id} className="group/nb">
+                  {/* Open-into-slot (#135): clicking a row loads it into the single
+                      editor slot (GET /notebooks/{id}) and navigates to the notebook
+                      route. The active row stays in place and is highlighted — no
+                      reordering. */}
+                  <SidebarMenuButton
+                    isActive={isActive && pathname === notebookHref}
+                    className={cn(isActive && NAV_ACTIVE, 'pr-8')}
+                    onClick={wrap(async () => {
+                      // Gate navigation on a successful open (CL-5): a failed/dropped
+                      // open keeps the previous slot, so moving the URL would leave the
+                      // editor showing a different notebook than the route implies. The
+                      // controller surfaces the failure via `slotOpenErrorAtom`.
+                      // `await wrap(...)` re-binds the Reatom frame so the `urlAtom.set`
+                      // continuation runs in-frame under production clearStack()
+                      // (otherwise it throws `missing async stack`).
+                      const outcome = await wrap(openNotebookInSlot(nb.id))
+                      if (outcome === 'opened' || outcome === 'already') {
+                        urlAtom.set((url) => new URL(notebookHref, url.origin), true)
+                      }
+                    })}
+                  >
+                    <span className="truncate">{title}</span>
+                  </SidebarMenuButton>
+                  <NotebookRowMenu
+                    onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title }))}
+                    // Defence-in-depth (M5): never offer Delete for the local
+                    // welcome floor, even if it ever appears as a list row.
+                    onDelete={
+                      nb.id === LOCAL_NOTEBOOK_ID
+                        ? undefined
+                        : wrap(() => deleteTargetAtom.set({ id: nb.id, title }))
+                    }
+                  />
+                </SidebarMenuItem>
+              )
+            })}
+            {filterText && !showFloorRow && filtered.length === 0 ? (
               <li className="px-2 text-xs text-muted-foreground">No matches.</li>
             ) : null}
           </SidebarMenu>
@@ -349,6 +420,11 @@ const NotebooksGroup = reatomComponent(() => {
         {createError ? (
           <p role="alert" className="px-2 text-xs text-destructive">
             {createError}
+          </p>
+        ) : null}
+        {openError ? (
+          <p role="alert" className="px-2 text-xs text-destructive">
+            {openError}
           </p>
         ) : null}
       </SidebarGroupContent>

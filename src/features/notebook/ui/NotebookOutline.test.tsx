@@ -106,7 +106,7 @@ afterEach(() => {
 })
 
 describe('NotebookOutline — responsive (T3)', () => {
-  test('wide: renders the floating outline when visible with ≥2 headings', async () => {
+  test('wide: renders the floating outline when visible with ≥1 heading', async () => {
     setViewportWidth(1440)
     await seedMarkdownHeadings(['# Alpha', '# Beta'])
     renderOutline()
@@ -114,6 +114,15 @@ describe('NotebookOutline — responsive (T3)', () => {
     expect(screen.getByText('On this page')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Alpha' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Beta' })).toBeInTheDocument()
+  })
+
+  test('wide: renders the outline with a single heading', async () => {
+    setViewportWidth(1440)
+    await seedMarkdownHeadings(['# Solo'])
+    renderOutline()
+
+    expect(screen.getByText('On this page')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Solo' })).toBeInTheDocument()
   })
 
   test('wide: renders nothing when outlineVisibleAtom is false', async () => {
@@ -126,9 +135,9 @@ describe('NotebookOutline — responsive (T3)', () => {
     expect(screen.queryByRole('button', { name: 'Alpha' })).toBeNull()
   })
 
-  test('renders nothing with fewer than 2 headings', async () => {
+  test('renders nothing with no headings at all', async () => {
     setViewportWidth(1440)
-    await seedMarkdownHeadings(['# Solo'])
+    await seedMarkdownHeadings(['plain text, no heading'])
     renderOutline()
 
     expect(screen.queryByText('On this page')).toBeNull()

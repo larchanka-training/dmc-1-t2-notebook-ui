@@ -4,6 +4,7 @@ import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
 import { cellsAtom, SEED_CODE, updateCellCode } from '../model/notebook'
+import { slotOpeningPhaseAtom } from '../model/slot'
 
 function renderView() {
   return render(
@@ -30,6 +31,19 @@ async function addCodeCell(user: UserEvent) {
 }
 
 describe('NotebookView (RTL integration)', () => {
+  test('shows notebook loader while opening a server-only notebook', () => {
+    act(() => {
+      slotOpeningPhaseAtom.set('remote-only')
+    })
+    const { unmount } = renderView()
+    expect(screen.getByRole('status', { name: /loading notebook/i })).toBeInTheDocument()
+    expect(screen.getByText(/synchronization/i)).toBeInTheDocument()
+    unmount()
+    act(() => {
+      slotOpeningPhaseAtom.set('idle')
+    })
+  })
+
   test('renders a single seed cell on mount', async () => {
     renderView()
     const editors = getCodeEditors()
@@ -40,9 +54,11 @@ describe('NotebookView (RTL integration)', () => {
   test('adding a cell renders one more editor', async () => {
     const user = userEvent.setup()
     renderView()
-    expect(getCodeEditors()).toHaveLength(1)
+    // CodeMirror editors mount asynchronously; wait for the seed editor instead of
+    // a synchronous assert (which flaked under a busy parallel pool).
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
-    expect(getCodeEditors()).toHaveLength(2)
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(2))
   })
 
   test('running a cell populates its output area', async () => {
@@ -63,6 +79,7 @@ describe('NotebookView (RTL integration)', () => {
   test('editing one cell leaves other cells untouched (atomization)', async () => {
     const user = userEvent.setup()
     renderView()
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
     const [first, second] = cellsAtom()
     expect(first.code()).toBe(SEED_CODE)

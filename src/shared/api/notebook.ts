@@ -122,9 +122,12 @@ function normalizeNotebook(data: Schemas['NotebookResponse']): Notebook {
   return { ...data, cells: data.cells }
 }
 
-export async function get(id: string): Promise<Notebook> {
+export async function get(id: string, signal?: AbortSignal): Promise<Notebook> {
   const data = await request<Schemas['NotebookResponse']>(
-    notebookClient.GET('/notebooks/{notebook_id}', { params: { path: { notebook_id: id } } }),
+    notebookClient.GET('/notebooks/{notebook_id}', {
+      params: { path: { notebook_id: id } },
+      signal,
+    }),
   )
   return normalizeNotebook(data)
 }

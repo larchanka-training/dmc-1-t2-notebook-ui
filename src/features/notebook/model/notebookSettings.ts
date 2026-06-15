@@ -33,7 +33,7 @@ export const lineNumbersAtom = atom<boolean>(false, 'notebook.settings.lineNumbe
  * Whether the notebook outline pane is visible on wide (>1280px) layouts,
  * where it is an inline sticky column. Toggled from the global topbar's
  * outline button (`aria-pressed` mirrors this). On by default; the outline
- * still self-hides when there are < 2 headings to navigate.
+ * still self-hides when there are no headings to navigate.
  */
 export const outlineVisibleAtom = atom<boolean>(true, 'notebook.settings.outlineVisible').extend(
   withLocalStorage('notebook.settings.outlineVisible'),
@@ -60,3 +60,15 @@ export interface RenameTarget {
   title: string
 }
 export const renameTargetAtom = atom<RenameTarget | null>(null, 'notebook.settings.renameTarget')
+
+/**
+ * The notebook targeted by the sidebar "Delete" action, or null when the confirm
+ * dialog is closed (#135). Only backend-identity notebooks (rows in the list /
+ * synced) are deletable; the local-only welcome-seed floor is regenerated on boot
+ * and has no Delete affordance, so this never carries `LOCAL_NOTEBOOK_ID`.
+ */
+export interface DeleteTarget {
+  id: string
+  title: string
+}
+export const deleteTargetAtom = atom<DeleteTarget | null>(null, 'notebook.settings.deleteTarget')

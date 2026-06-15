@@ -8,11 +8,22 @@ import { clearHistory, recordOperation } from './history'
 import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 
 export const SEED_CODE = 'console.log("Hello from JS Notebook!")'
+export const SEED_TITLE = 'Untitled notebook'
 
-// Single-notebook MVP: the editor owns exactly one notebook with a stable id.
-// Multi-notebook (a list, routing by id) is a later epic; until then this
-// constant is the persistence key for the one local notebook.
+// Single-notebook MVP seed id: the local "Welcome" notebook (the slot floor that
+// is re-created on boot when storage is empty). It is no longer the *only* id the
+// editor can hold — see `activeNotebookIdAtom` below — but it stays the initial
+// value and the persistence key for the local-only floor.
 export const LOCAL_NOTEBOOK_ID = '00000000-0000-4000-8000-000000000001'
+
+// The id of the notebook currently loaded in the editor slot (#135). The id is
+// not part of the cell/metadata domain state, so before this atom it was always
+// *implied* by `LOCAL_NOTEBOOK_ID` and hard-wired into the serializer, the loader
+// and the cross-tab filter. Routing every id-dependent binding through this atom
+// is what lets the slot switch to a backend notebook (open-into-slot) instead of
+// being pinned to one constant. Initial value = `LOCAL_NOTEBOOK_ID`, so until the
+// slot actually switches, behaviour is identical to the pre-#135 constant.
+export const activeNotebookIdAtom = atom(LOCAL_NOTEBOOK_ID, 'notebook.activeId')
 
 export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.cells')
 
@@ -20,7 +31,7 @@ export const cellsAtom = atom<Cell[]>(() => [reatomCell(SEED_CODE)], 'notebook.c
 // yet, but the persistent format carries these fields (aligned with the
 // backend contract), so they live here as the single source the serializer
 // and the loader read/write.
-export const notebookTitleAtom = atom('Untitled notebook', 'notebook.title')
+export const notebookTitleAtom = atom(SEED_TITLE, 'notebook.title')
 export const notebookCreatedAtAtom = atom<number>(Date.now(), 'notebook.createdAt')
 
 // The `updatedAt` of the stored notebook version this tab is based on. Autosave
@@ -50,7 +61,7 @@ export const storageCompatibilityAtom = atom<StorageCompatibility>(
 /** Serialize the current in-memory notebook (cells + metadata) to JSON. */
 export function notebookSnapshot(): NotebookJSON {
   return toJSON(cellsAtom(), {
-    id: LOCAL_NOTEBOOK_ID,
+    id: activeNotebookIdAtom(),
     title: notebookTitleAtom(),
     createdAt: notebookCreatedAtAtom(),
     updatedAt: Date.now(),
@@ -68,8 +79,26 @@ export const setNotebookTitle = action((title: string) => {
   bumpNotebookRevision()
 }, 'notebook.setTitle')
 
+/**
+ * Reset the in-memory notebook to a fresh single-cell welcome seed (cells +
+ * title + createdAt). Used by `loadNotebook` when no stored notebook exists for
+ * the active id, so the seed reflects a clean welcome notebook rather than
+ * whatever was previously in the editor (e.g. after a slot switch / degrade).
+ */
+function resetToFreshSeed(): void {
+  cellsAtom.set([reatomCell(SEED_CODE)])
+  notebookTitleAtom.set(SEED_TITLE)
+  notebookCreatedAtAtom.set(Date.now())
+  bumpNotebookRevision()
+  bumpNotebookRestored()
+}
+
 /** Replace the in-memory notebook with a persisted document. */
 export const restoreNotebook = action((stored: NotebookJSON) => {
+  // Adopt the document's own id as the active slot id. Pre-#135 this was dropped
+  // (the id was always the constant); now it is the source the serializer and
+  // autosave write under, so loading a backend notebook must point the slot at it.
+  activeNotebookIdAtom.set(stored.id)
   notebookTitleAtom.set(stored.title)
   notebookCreatedAtAtom.set(stored.createdAt)
   notebookBaseUpdatedAtAtom.set(stored.updatedAt)
@@ -105,11 +134,19 @@ export const loadNotebook = action(async () => {
   storageCompatibilityAtom.set('ok')
   let restored = false
   try {
-    const stored = await wrap(notebookStorage.get(LOCAL_NOTEBOOK_ID))
+    const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (stored) {
       restoreNotebook(stored)
       restored = true
     } else {
+      // No stored notebook for the active id. Establish a FRESH welcome seed in
+      // memory before snapshotting it: `notebookSnapshot()` serializes the current
+      // in-memory cells, which at boot are the seed but after a slot switch /
+      // degrade-to-floor are the previously open notebook's cells. Without this
+      // reset, degrading the slot to the floor would persist (and keep showing) the
+      // deleted notebook's content under LOCAL_NOTEBOOK_ID instead of a clean
+      // welcome notebook (caught by the slot CL-9 integration test).
+      resetToFreshSeed()
       const seed = notebookSnapshot()
       await wrap(notebookStorage.put(seed))
       notebookBaseUpdatedAtAtom.set(seed.updatedAt)
