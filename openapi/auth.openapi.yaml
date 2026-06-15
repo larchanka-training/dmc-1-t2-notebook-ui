@@ -37,6 +37,8 @@ paths:
           description: No Content — OTP sent by email (production).
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -63,6 +65,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -256,6 +260,12 @@ components:
             $ref: '#/components/schemas/ApiErrorResponse'
     BadRequest:
       description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    TooManyRequests:
+      description: Rate limit exceeded
       content:
         application/json:
           schema:

@@ -113,6 +113,11 @@ Production OTP email delivery — реализовано через
 - На `401 invalid_otp` — inline-ошибка `Invalid code`, поле фокусится.
   Текущий backend первым MVP-срезом использует этот же `error.code` для
   отсутствующего, истёкшего или уже использованного OTP.
+- На `429 too_many_otp_requests` — пользователь слишком часто запрашивает OTP
+  для этого email; UI остаётся на step 1/2 и предлагает попробовать позже.
+- На `429 too_many_otp_attempts` — текущий OTP инвалидирован после слишком
+  большого числа неверных попыток; UI возвращает пользователя к запросу нового
+  кода.
 - На future `401 otp_expired` — сообщение `Code expired, request a new one`,
   возврат на step 1. Если backend начнёт отдавать отдельный код, UI contract
   и generated types обновляются в том же PR.
