@@ -113,6 +113,7 @@ export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'
 export { runInWorker, restartWorker } from './runtime/workerHost'
 export type { OutputItem, RuntimeStatus, SerializedValue } from './runtime/types'
 export { codeGeneratorAtom, loadedModelAtom } from './model/codeGenerator'
+export { cloudGenerateAndInsertCodeAction } from './model/cloudCodeGenerator'
 export { aiContextModeAtom } from './model/context-ai/aiContextMode'
 export type { AiContextMode } from './model/context-ai/aiContextMode'
 export {
