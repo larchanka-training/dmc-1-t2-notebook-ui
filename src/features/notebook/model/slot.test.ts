@@ -199,4 +199,31 @@ describe('openNotebookInSlot', () => {
     expect(outcome).toBe('error')
     expect(slotOpenErrorAtom()).not.toBeNull()
   })
+
+  test('rearmOrDegrade last-resort: re-arms on the active id when degrade also fails (L6)', async () => {
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // startBindings() calls startAutosave() first. Throw on the primary re-arm AND
+    // on the degrade-to-floor re-arm, then succeed on the last-resort re-arm —
+    // exercising rearmOrDegrade's inner catch (slot.ts last-resort path).
+    h.startAutosave
+      .mockImplementationOnce(() => {
+        throw new Error('re-arm boom')
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('degrade re-arm boom')
+      })
+      .mockReturnValue(h.autosaveTeardown)
+
+    const outcome = await openNotebookInSlot(SERVER_ID)
+
+    // Contained as 'error' (M2), the last-resort logged, and bindings were
+    // re-attempted a third time so persistence/sync are not left dead.
+    expect(outcome).toBe('error')
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('degrade-to-floor also failed'),
+      expect.anything(),
+    )
+    expect(h.startAutosave).toHaveBeenCalledTimes(3)
+  })
 })
