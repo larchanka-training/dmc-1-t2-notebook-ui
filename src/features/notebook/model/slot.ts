@@ -16,6 +16,7 @@ import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
+import { userAtom } from '@/entities/session'
 import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
@@ -185,18 +186,23 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
   // tail then bails (`superseded`) instead of re-adopting the previous owner's
   // notebook after we reset to the floor — the cross-account leak guard.
   bumpSlotGeneration()
+  // Flush the outgoing (previous owner's) pending edit to its own local id before
+  // tearing bindings down (H3): autosave teardown cancels the pending debounce,
+  // so skipping the drain drops the last in-memory edit. Best-effort + bounded.
   try {
-    // Flush the outgoing (previous owner's) pending edit to its own local id
-    // before tearing bindings down (H3): autosave teardown cancels the pending
-    // debounce, so skipping the drain drops the last in-memory edit. Best-effort
-    // + bounded: a wedged/failed drain must never block an account-boundary reset
-    // (it leaves local data intact — not a device wipe, that is #136).
-    try {
-      await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (account reset)'))
-    } catch (drainError) {
-      console.warn('slot: draining before the account-change reset failed; continuing', drainError)
-    }
-    stopBindings()
+    await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (account reset)'))
+  } catch (drainError) {
+    console.warn('slot: draining before the account-change reset failed; continuing', drainError)
+  }
+  stopBindings()
+  // No signed-in owner (sign-out, or identity not hydrated yet): the per-user
+  // demo id cannot be derived, so leave the slot UNBOUND rather than binding to
+  // the legacy floor id (which autosave/remote-sync must never use). The next
+  // sign-in re-fires this and binds for the new owner.
+  if (!userAtom()?.id) {
+    return
+  }
+  try {
     // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution, so
     // the floor becomes THIS owner's deterministic demo notebook.
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
@@ -204,12 +210,10 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     startBindings()
     slotOpenErrorAtom.set(null)
   } catch (error) {
-    console.error('slot: failed to reset to the local floor after account change', error)
-    try {
-      startBindings()
-    } catch (rearmError) {
-      console.error('slot: failed to re-arm after account-change reset failure', rearmError)
-    }
+    // Do NOT re-arm here: the active id may still be the legacy floor, and
+    // binding autosave/remote-sync to it is exactly what we must avoid. Leave the
+    // slot unbound; the next sign-in / account-change re-fires this.
+    console.error('slot: failed to reset to the per-user demo floor after account change', error)
   }
 }, 'notebook.resetSlotToFloorForAccountChange')
 
