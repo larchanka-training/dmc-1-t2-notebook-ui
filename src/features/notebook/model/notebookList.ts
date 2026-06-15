@@ -36,10 +36,16 @@ notebookListResource.data.extend(withRollback())
  * cached rows of the previous account would linger — both a staleness bug and a
  * cross-account leak (§11).
  *
- * On every owner change: reset the cached rows (so a foreign list cannot flash),
- * then, when signed in, refetch for the new account. The initial synchronous emit
- * is skipped — boot loads the list lazily through the sidebar's own subscription,
- * so there is no redundant fetch on startup. Returns an unsubscribe handle.
+ * On every owner change: drop the cached rows synchronously, reset the editor
+ * slot away from the previous owner, and only THEN refetch for the new account.
+ * Ordering matters (review H3): `resetSlotToFloorForAccountChange` awaits the
+ * autosave drain before it moves the visible slot, so kicking off the new list
+ * fetch first would let the new account's rows render while the previous owner's
+ * notebook is still on screen. The retry is gated on the owner being unchanged
+ * across the await, so a rapid second account switch cannot fetch for a stale
+ * owner. The initial synchronous emit is skipped — boot loads the list lazily
+ * through the sidebar's own subscription, so there is no redundant fetch on
+ * startup. Returns an unsubscribe handle.
  */
 export function startNotebookListSync(): () => void {
   let primed = false
@@ -53,11 +59,15 @@ export function startNotebookListSync(): () => void {
     }
     if (ownerId === lastOwnerId) return
     lastOwnerId = ownerId
-    // Drop the previous account's editor slot and rows before foreign state can render.
-    void resetSlotToFloorForAccountChange()
+    // Drop the previous account's cached rows synchronously, before any await, so
+    // a foreign list cannot flash while the slot reset is still draining.
     notebookListResource.reset()
-    // Signed in → load the new account's list; signed out → leave it empty.
-    if (ownerId !== null) void notebookListResource.retry()
+    // Reset the editor slot away from the previous owner, THEN (signed in) refetch
+    // the new account's list behind an owner fence so a stale owner never wins.
+    void (async () => {
+      await wrap(resetSlotToFloorForAccountChange())
+      if (ownerId !== null && ownerId === lastOwnerId) await wrap(notebookListResource.retry())
+    })()
   })
 }
 

@@ -16,7 +16,7 @@ import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
-import { drainAutosave, startAutosave } from './autosave'
+import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
@@ -351,10 +351,26 @@ async function fetchServerNotebook(id: string): Promise<notebookApi.Notebook | u
   }
 }
 
-async function openResolvedNotebook(stored: NotebookJSON): Promise<void> {
+/**
+ * Re-point the slot to `stored` (drain the outgoing edits, tear bindings down,
+ * flip + re-arm). Fenced by `expectedGeneration` (H1/H2): the binding flip happens
+ * AFTER `await drainAutosave()`, during which a lock-free reset/delete can land and
+ * already own the slot. Re-checking the captured generation immediately after the
+ * drain — before `stopBindings()` — makes a superseded open bail WITHOUT clobbering
+ * that mutator's slot. Returns `false` if it bailed (caller maps to `superseded`).
+ */
+async function openResolvedNotebook(
+  stored: NotebookJSON,
+  expectedGeneration: number,
+): Promise<boolean> {
   await wrap(raceWithTimeout(wrap(drainAutosave()), 'drainAutosave (open)'))
+  // The drain is the widest await inside the flip; a lock-free mutator that ran
+  // during it bumped the generation and now owns the slot. Bail before touching
+  // bindings so we don't re-adopt the previous owner's / a just-deleted notebook.
+  if (expectedGeneration !== slotGeneration) return false
   stopBindings()
   await wrap(rearmOrDegrade(() => restoreNotebook(stored)))
+  return true
 }
 
 /**
@@ -394,7 +410,10 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
       slotOpeningPhaseAtom.set(local ? 'local-first' : 'remote-only')
 
       if (local) {
-        await wrap(openResolvedNotebook(local))
+        if (!(await wrap(openResolvedNotebook(local, myGeneration)))) {
+          outcome = 'superseded'
+          return
+        }
         outcome = 'opened'
         slotOpenErrorAtom.set(null)
       }
@@ -427,8 +446,17 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
         outcome = 'superseded'
         return
       }
-      if (!local || target.updatedAt !== local.updatedAt) {
-        await wrap(openResolvedNotebook(target))
+      // Re-open only if the pull actually changed the stored document. Skip the
+      // wholesale re-adopt when the editor has unsaved in-memory edits for this id
+      // (M1/A3): the local-first open already showed them, and `restoreNotebook`
+      // would clobber a keystroke typed inside the pull window. Autosave/remote-
+      // sync reconcile it next, mirroring remoteSync.applyServerBaseline's guard.
+      const dirtyInEditor = id === activeNotebookIdAtom() && hasLocalChangesAtom()
+      if ((!local || target.updatedAt !== local.updatedAt) && !dirtyInEditor) {
+        if (!(await wrap(openResolvedNotebook(target, myGeneration)))) {
+          outcome = 'superseded'
+          return
+        }
       }
       slotOpenErrorAtom.set(null)
       outcome = 'opened'

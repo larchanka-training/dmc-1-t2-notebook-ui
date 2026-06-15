@@ -75,6 +75,33 @@ describe('pullServerNotebook', () => {
     expect(result).toBe('kept-local-dirty')
   })
 
+  test('captures the CAS baseline BEFORE the dirty check, so an intervening write is not clobbered (M1)', async () => {
+    // Regression: the local baseline must be read before the dirty decision, not
+    // between it and the write. A local copy exists at decision time (updatedAt
+    // 100) with clean sync-state; an intervening local write then bumps it, so the
+    // in-transaction CAS rejects the server overwrite (updatedAt 200).
+    getSyncStateSpy.mockResolvedValue(cleanSyncState(SERVER_ID))
+    const getSpy = vi.spyOn(notebookStorage, 'get').mockResolvedValue({
+      formatVersion: 1,
+      id: SERVER_ID,
+      title: 'local',
+      createdAt: 1,
+      updatedAt: 100,
+      cells: [{ id: CELL, kind: 'code', content: 'local()', updatedAt: 100 }],
+    })
+    putIfNewerSpy.mockResolvedValue({ ok: false, current: serverNotebook({ updatedAt: 150 }) })
+
+    const result = await pullServerNotebook(serverNotebook({ updatedAt: 200 }))
+
+    expect(result).toBe('kept-local-dirty')
+    // The baseline read happens before the dirty-state read (ordering is the fix).
+    expect(getSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      getSyncStateSpy.mock.invocationCallOrder[0],
+    )
+    // The CAS base is the pre-decision baseline (100), not a re-read after it.
+    expect(putIfNewerSpy.mock.calls[0][1]).toBe(100)
+  })
+
   test('keeps the local copy when its sync state is dirty', async () => {
     getSyncStateSpy.mockResolvedValue({ ...cleanSyncState(SERVER_ID), dirty: true })
     const result = await pullServerNotebook(serverNotebook())

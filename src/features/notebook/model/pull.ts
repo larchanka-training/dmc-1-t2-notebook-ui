@@ -55,16 +55,21 @@ export async function pullServerNotebook(server: notebookApi.Notebook): Promise<
   // Boundary validation (§11): a malformed 2xx must never reach storage, where it
   // could pose as authoritative content.
   if (!isNotebookJSON(json)) return 'rejected'
-  // `wrap` re-binds the Reatom frame across this await so the wrapped reads below
-  // (and `pullServerNotebook`'s caller continuation) run IN-FRAME under production
-  // `clearStack()` (invariant: every awaited promise is `await wrap(...)`).
+  // Capture the local baseline BEFORE the dirty check, not between it and the
+  // write (review M1). The CAS base must be the version we decided against; if we
+  // re-read it after the dirty check, a local write landing in that window would
+  // become the base and the server copy would silently overwrite that unsynced
+  // edit. Reading it first means any write that lands during the whole pull
+  // decision bumps `updatedAt` past this baseline, so `putIfNewer`'s in-transaction
+  // CAS rejects the overwrite. `wrap` re-binds the Reatom frame across the await so
+  // the reads below run IN-FRAME under production `clearStack()`.
+  const baseline = await wrap(notebookStorage.get(json.id))
   if (await wrap(hasUnsyncedLocalChanges(json.id))) return 'kept-local-dirty'
   // Server wins for a clean/absent copy — but write under a compare-and-swap, not
-  // an unconditional put (CL-17): a local-first write (another tab, a slow IDB)
-  // can land between the dirty-check above and this write. `putIfNewer` re-reads
-  // and writes in one transaction, so a newer local version is never clobbered;
-  // if it lost the race we treat it as a dirty-keep, not an overwrite.
-  const current = await wrap(notebookStorage.get(json.id))
-  const result = await wrap(notebookStorage.putIfNewer(json, current?.updatedAt ?? null))
+  // an unconditional put (CL-17): `putIfNewer` re-reads and writes in one
+  // transaction against the pre-decision baseline, so a newer local version that
+  // raced the pull is never clobbered; if it lost the race we treat it as a
+  // dirty-keep, not an overwrite.
+  const result = await wrap(notebookStorage.putIfNewer(json, baseline?.updatedAt ?? null))
   return result.ok ? 'accepted' : 'kept-local-dirty'
 }

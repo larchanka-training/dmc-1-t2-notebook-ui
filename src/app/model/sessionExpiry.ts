@@ -3,7 +3,7 @@
 
 import { rootFrame } from '@/setup'
 import { clearSession } from '@/entities/session'
-import { pauseRemoteSync, resetSlotToFloorForAccountChange } from '@/features/notebook'
+import { pauseRemoteSync } from '@/features/notebook'
 import { LOGIN_PATH } from '@/shared/lib/paths'
 
 /**
@@ -11,12 +11,17 @@ import { LOGIN_PATH } from '@/shared/lib/paths'
  * Pause background sync and clear the session WITHOUT wiping local notebook data
  * (INV-4 — an untrusted-device wipe is #136), then redirect to login. This is the
  * single integration point where auth meets sync (AC5/AC6).
+ *
+ * The editor slot reset is NOT triggered here: `clearSession()` nulls `userAtom`,
+ * and `startNotebookListSync`'s owner-change subscription is the single owner of
+ * `resetSlotToFloorForAccountChange()` (review H3). Calling it here too would run
+ * two concurrent lock-free resets and re-arm a remote-sync engine right after the
+ * `pauseRemoteSync()` above.
  */
 export function handleSessionExpired(): void {
   rootFrame.run(() => {
     pauseRemoteSync()
     clearSession()
-    void resetSlotToFloorForAccountChange()
   })
   if (window.location.pathname !== LOGIN_PATH) {
     window.location.replace(`${LOGIN_PATH}?reason=session_expired`)

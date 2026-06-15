@@ -289,12 +289,20 @@ describe('startNotebookListSync (refresh on account change)', () => {
     retrySpy.mockClear()
 
     userAtom.set(BOB) // switch account
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve))
 
     // Alice's editor slot and cached rows are dropped, then Bob's list is fetched.
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).toHaveBeenCalledTimes(1)
+    // Ordering (H3): rows cleared synchronously and the slot reset BEFORE the new
+    // account's list is fetched, so a foreign list never renders over the old slot.
+    expect(resetSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      slotMock.resetSlotToFloorForAccountChange.mock.invocationCallOrder[0],
+    )
+    expect(slotMock.resetSlotToFloorForAccountChange.mock.invocationCallOrder[0]).toBeLessThan(
+      retrySpy.mock.invocationCallOrder[0],
+    )
   })
 
   test('resets but does not refetch on sign-out', async () => {
@@ -304,7 +312,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     retrySpy.mockClear()
 
     userAtom.set(null) // sign out
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve))
 
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
@@ -314,7 +322,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
   test('does not reset or refetch on the initial subscribe (boot loads lazily)', async () => {
     userAtom.set(ALICE)
     stop = startNotebookListSync()
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve))
 
     // The first synchronous emit is skipped — starting the sync touches nothing.
     expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
@@ -329,7 +337,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     retrySpy.mockClear()
 
     userAtom.set({ ...ALICE }) // same id, new object reference
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve))
 
     expect(slotMock.resetSlotToFloorForAccountChange).not.toHaveBeenCalled()
     expect(resetSpy).not.toHaveBeenCalled()
@@ -344,7 +352,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set(ALICE)
     stop = startNotebookListSync()
     userAtom.set(BOB) // account change triggers a list refetch (retry), not gets
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve))
 
     expect(getSpy).not.toHaveBeenCalled()
   })

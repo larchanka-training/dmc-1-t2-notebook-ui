@@ -21,6 +21,7 @@ import {
 const h = vi.hoisted(() => ({
   startAutosave: vi.fn(),
   drainAutosave: vi.fn(),
+  hasLocalChangesAtom: vi.fn(() => false),
   startRemoteSync: vi.fn(),
   startAiContextSync: vi.fn(),
   pullServerNotebook: vi.fn(),
@@ -31,6 +32,9 @@ const h = vi.hoisted(() => ({
 vi.mock('./autosave', () => ({
   startAutosave: h.startAutosave,
   drainAutosave: h.drainAutosave,
+  // slot.ts reads this to skip the SWR re-open when the editor has unsaved edits
+  // for the open id (M1/A3). A plain callable stub — the real atom is a computed.
+  hasLocalChangesAtom: h.hasLocalChangesAtom,
 }))
 vi.mock('./remoteSync', () => ({ startRemoteSync: h.startRemoteSync }))
 vi.mock('./context-ai/aiContext', () => ({ startAiContextSync: h.startAiContextSync }))
@@ -342,5 +346,49 @@ describe('account-change reset drains before teardown (H3)', () => {
     const drainOrder = h.drainAutosave.mock.invocationCallOrder[0]
     const teardownOrder = h.remoteTeardown.mock.invocationCallOrder[0]
     expect(drainOrder).toBeLessThan(teardownOrder)
+  })
+})
+
+describe('open is fenced against a lock-free reset/delete during the drain (H3/B1)', () => {
+  test('a generation bump during the local-first drain makes the open bail superseded', async () => {
+    // Local-first open of SERVER_ID; the drain is held open so a lock-free mutator
+    // (account reset / delete) can land mid-flight and bump the generation. The
+    // open must bail WITHOUT flipping the slot to SERVER_ID — otherwise it would
+    // re-adopt the previous owner's notebook over the mutator's slot.
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+    const drainGate = deferred<void>()
+    h.drainAutosave.mockReturnValue(drainGate.promise)
+
+    const pending = openNotebookInSlot(SERVER_ID)
+    await vi.waitFor(() => expect(h.drainAutosave).toHaveBeenCalled())
+
+    // A concurrent lock-free mutator invalidates the in-flight open.
+    bumpSlotGeneration()
+    drainGate.resolve()
+
+    await expect(pending).resolves.toBe('superseded')
+    // The slot was NOT flipped to the opened id, and no bindings were re-armed.
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+    expect(h.startRemoteSync).not.toHaveBeenCalledWith(SERVER_ID)
+  })
+})
+
+describe('SWR re-open preserves an unsaved in-editor edit (M1/A3)', () => {
+  test('does not re-adopt the pulled server copy when the open id is dirty in the editor', async () => {
+    // Local-first open succeeds; the pull then accepts a server copy with a newer
+    // updatedAt. But the editor has unsaved in-memory edits for this id, so the
+    // re-open is skipped (restoreNotebook would clobber the keystroke).
+    getSpy
+      .mockResolvedValueOnce(doc(SERVER_ID, 'local')) // initial local-first read (updatedAt 2)
+      .mockResolvedValue({ ...doc(SERVER_ID, 'server'), updatedAt: 999 }) // post-pull read-back
+    h.hasLocalChangesAtom.mockReturnValue(true)
+
+    const outcome = await openNotebookInSlot(SERVER_ID)
+
+    expect(outcome).toBe('opened')
+    // The local-first open armed bindings once (SERVER_ID); the dirty guard skipped
+    // the second openResolvedNotebook, so no extra teardown/re-arm cycle ran.
+    expect(h.startRemoteSync).toHaveBeenCalledTimes(1)
+    expect(h.startRemoteSync).toHaveBeenCalledWith(SERVER_ID)
   })
 })
