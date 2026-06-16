@@ -67,8 +67,13 @@ fields } }`.
 
 Ещё не завершено:
 
-- UI screen/state миграция на двухшаговый OTP flow;
-- backend rate limiting / OTP attempt counter / cleanup jobs.
+- UI screen/state миграция на двухшаговый OTP flow.
+
+Backend hardening для OTP abuse protection и auth cleanup реализован на стороне
+API: `429 too_many_otp_requests` / `429 too_many_otp_attempts` обрабатываются
+через общий error envelope, а expired OTPs, stale sessions и refresh-token
+history удаляются backend CLI cleanup job. Frontend не хранит и не чистит эти
+server-side records напрямую.
 
 Production OTP email delivery — реализовано через
 [Resend](https://resend.com) (`RESEND_API_KEY`, `EMAIL_FROM`), см.
