@@ -36,9 +36,10 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
     .map((c) => ({ kind: c.kind === 'code' ? 'code' : 'text', source: c.code() }))
 
   // Pre-capture both callbacks before the async boundary — clearStack() drops context after await.
-  const onSuccess = wrap((code: string) => {
-    const newCell = addCell(cellId)
-    updateCellCode(newCell.id, code)
+  const onSuccess = wrap((response: llm.GenerateCodeResponse) => {
+    const kind = response.resultKind === 'text' ? 'markdown' : 'code'
+    const newCell = addCell(cellId, kind)
+    updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)
     cloudGeneratingCellIdAtom.set(null)
@@ -61,7 +62,7 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
         language: 'javascript',
       }),
     )
-    onSuccess(response.content)
+    onSuccess(response)
   } catch (err) {
     onError(err as Error)
     throw err

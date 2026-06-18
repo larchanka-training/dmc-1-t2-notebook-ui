@@ -26,9 +26,10 @@ export const agentSendAction = action(async (prompt: string) => {
   const afterId = agentInsertAfterIdAtom()
 
   // Pre-capture before the async boundary.
-  const insertAndClose = wrap((code: string) => {
-    const newCell = addCell(afterId, 'code')
-    updateCellCode(newCell.id, code)
+  const insertAndClose = wrap((response: llm.GenerateCodeResponse) => {
+    const kind = response.resultKind === 'text' ? 'markdown' : 'code'
+    const newCell = addCell(afterId, kind)
+    updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)
     agentChatOpenAtom.set(false)
@@ -38,5 +39,5 @@ export const agentSendAction = action(async (prompt: string) => {
     llm.generateCode({ prompt, language: 'javascript', mode: 'generate' }),
   )
 
-  insertAndClose(response.content)
+  insertAndClose(response)
 }, 'notebook.agentChat.send').extend(withAsync())

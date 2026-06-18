@@ -52,7 +52,7 @@ export interface components {
              * @default code
              * @enum {string}
              */
-            resultKind: "code";
+            resultKind: "code" | "text";
             content: string;
             model: string;
             /**

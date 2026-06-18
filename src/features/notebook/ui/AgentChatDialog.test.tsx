@@ -8,8 +8,11 @@ import { agentChatOpenAtom, agentSendAction, openAgentChatAction } from '../mode
 import { AgentChatDialog } from './AgentChatDialog'
 
 // Minimal GenerateResponse so mocks satisfy the return type.
-const fakeResponse = (content: string): llm.GenerateCodeResponse => ({
-  resultKind: 'code',
+const fakeResponse = (
+  content: string,
+  resultKind: llm.GenerateCodeResponse['resultKind'] = 'code',
+): llm.GenerateCodeResponse => ({
+  resultKind,
   content,
   model: 'test-model',
   tier: 'backend',
@@ -95,6 +98,29 @@ describe('AgentChatDialog — code generation', () => {
     expect(cellsAtom().length).toBe(cellsBefore + 1)
     expect(cellsAtom().at(-1)?.code()).toBe('const x = 42')
     // Dialog closes after successful insert
+    expect(agentChatOpenAtom()).toBe(false)
+  })
+
+  test('inserts a markdown cell when backend returns text', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(llm, 'generateCode').mockResolvedValue(
+      fakeResponse('Closures keep access to outer scope.', 'text'),
+    )
+    const cellsBefore = cellsAtom().length
+
+    render(<AgentChatDialog />)
+    await act(async () => {
+      agentChatOpenAtom.set(true)
+    })
+
+    await user.type(screen.getByRole('textbox'), 'explain closures')
+    await user.click(screen.getByRole('button', { name: /generate code/i }))
+    await act(async () => {})
+
+    expect(cellsAtom().length).toBe(cellsBefore + 1)
+    const inserted = cellsAtom().at(-1)!
+    expect(inserted.kind).toBe('markdown')
+    expect(inserted.code()).toBe('Closures keep access to outer scope.')
     expect(agentChatOpenAtom()).toBe(false)
   })
 
