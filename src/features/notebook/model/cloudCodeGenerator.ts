@@ -3,6 +3,7 @@ import { withAsync } from '@reatom/core'
 import { llm } from '@/shared/api'
 import { cellsAtom, addCell, updateCellCode, notebookTitleAtom } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
+import { cellKindForLlmResult } from './llmResult'
 
 // Per-cell tracking so spinner/error appear only on the triggering cell.
 export const cloudGeneratingCellIdAtom = atom<string | null>(
@@ -37,8 +38,7 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
 
   // Pre-capture both callbacks before the async boundary — clearStack() drops context after await.
   const onSuccess = wrap((response: llm.GenerateCodeResponse) => {
-    const kind = response.resultKind === 'text' ? 'markdown' : 'code'
-    const newCell = addCell(cellId, kind)
+    const newCell = addCell(cellId, cellKindForLlmResult(response))
     updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)

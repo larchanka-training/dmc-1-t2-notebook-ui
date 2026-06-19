@@ -3,6 +3,7 @@ import { withAsync } from '@reatom/core'
 import { llm } from '@/shared/api'
 import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
+import { cellKindForLlmResult } from './llmResult'
 
 // The cell id after which to insert when the agent responds.
 // undefined means append at the end of the notebook.
@@ -27,8 +28,7 @@ export const agentSendAction = action(async (prompt: string) => {
 
   // Pre-capture before the async boundary.
   const insertAndClose = wrap((response: llm.GenerateCodeResponse) => {
-    const kind = response.resultKind === 'text' ? 'markdown' : 'code'
-    const newCell = addCell(afterId, kind)
+    const newCell = addCell(afterId, cellKindForLlmResult(response))
     updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)
