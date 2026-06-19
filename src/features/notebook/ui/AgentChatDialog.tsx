@@ -41,8 +41,8 @@ export const AgentChatDialog = reatomComponent(() => {
         </DialogHeader>
 
         <p className="text-sm text-muted-foreground">
-          Describe what you want to build. The agent will generate a JavaScript code cell and insert
-          it below.
+          Describe what you need. The agent will generate an answer and insert it below as a code or
+          text cell.
         </p>
 
         <div className="flex flex-col gap-3">

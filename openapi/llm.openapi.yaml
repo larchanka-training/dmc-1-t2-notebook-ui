@@ -107,7 +107,7 @@ components:
       properties:
         resultKind:
           type: string
-          enum: [code]
+          enum: [code, text]
           default: code
         content:
           type: string

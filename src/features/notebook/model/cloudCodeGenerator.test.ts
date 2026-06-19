@@ -5,8 +5,11 @@ import { ApiError, RateLimitedError } from '@/shared/api/errors'
 import { addCell, cellsAtom, updateCellCode } from './notebook'
 import { cloudGenerateAndInsertCodeAction } from './cloudCodeGenerator'
 
-const fakeResponse = (content: string): llm.GenerateCodeResponse => ({
-  resultKind: 'code',
+const fakeResponse = (
+  content: string,
+  resultKind: llm.GenerateCodeResponse['resultKind'] = 'code',
+): llm.GenerateCodeResponse => ({
+  resultKind,
   content,
   model: 'test-model',
   tier: 'backend',
@@ -42,6 +45,23 @@ describe('cloudGenerateAndInsertCodeAction', () => {
     const inserted = cellsAtom().at(-1)!
     expect(inserted.kind).toBe('code')
     expect(inserted.code()).toBe('const x = 1')
+  })
+
+  test('inserts a markdown cell when backend returns text', async () => {
+    vi.spyOn(llm, 'generateCode').mockResolvedValue(
+      fakeResponse('Use `reduce` to fold values into one result.', 'text'),
+    )
+    const cell = addMarkdownCell('explain reduce')
+    const countBefore = cellsAtom().length
+
+    await act(async () => {
+      await cloudGenerateAndInsertCodeAction(cell.id)
+    })
+
+    expect(cellsAtom().length).toBe(countBefore + 1)
+    const inserted = cellsAtom().at(-1)!
+    expect(inserted.kind).toBe('markdown')
+    expect(inserted.code()).toBe('Use `reduce` to fold values into one result.')
   })
 
   test('passes prompt, context, and language to generateCode', async () => {
