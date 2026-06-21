@@ -119,6 +119,38 @@ describe('NotebookCell — markdown modal editing', () => {
   })
 })
 
+describe('NotebookCell — in-browser agent gate (TARDIS-167 №4)', () => {
+  // The in-browser generate button is the markdown cell's Bot button. Its
+  // accessible name is the agent label; on a markdown cell that is
+  // "Generate code · in-browser agent".
+  function inBrowserButton(container: HTMLElement): HTMLButtonElement {
+    const btn = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Generate code · in-browser agent"]',
+    )
+    if (!btn) throw new Error('in-browser agent button not found')
+    return btn
+  }
+
+  test('is disabled when no model is loaded (generatorLoaded=false)', () => {
+    const onInBrowserGenerate = vi.fn()
+    const { container } = renderCell({
+      kind: 'markdown',
+      generatorLoaded: false,
+      onInBrowserGenerate,
+    })
+    expect(inBrowserButton(container)).toBeDisabled()
+  })
+
+  test('is enabled once a model is loaded (generatorLoaded=true)', () => {
+    const { container } = renderCell({
+      kind: 'markdown',
+      generatorLoaded: true,
+      onInBrowserGenerate: vi.fn(),
+    })
+    expect(inBrowserButton(container)).not.toBeDisabled()
+  })
+})
+
 describe('NotebookCell — Output footer header', () => {
   test('shows the "Output [N]" header even when an output item is an error', () => {
     // Regression: output is an array, so logs/results can sit alongside an
