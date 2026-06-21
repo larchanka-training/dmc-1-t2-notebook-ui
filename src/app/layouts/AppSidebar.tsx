@@ -271,11 +271,12 @@ function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDele
 // / duplicate stay in epic 04.
 const NEW_NOTEBOOK_EMOJIS = ['📓', '🧪', '🚀', '✨', '🧠'] as const
 const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
-let nextNotebookEmoji = 0
 
+// TARDIS-167 (#1): pick a RANDOM emoji each time. A module-level incrementing
+// counter reset to 0 on every page load, so after a reload the first create
+// always got the same emoji (📓). A random pick has no cross-reload state.
 function nextNotebookTitle(): string {
-  const emoji = NEW_NOTEBOOK_EMOJIS[nextNotebookEmoji % NEW_NOTEBOOK_EMOJIS.length]
-  nextNotebookEmoji += 1
+  const emoji = NEW_NOTEBOOK_EMOJIS[Math.floor(Math.random() * NEW_NOTEBOOK_EMOJIS.length)]
   return `${emoji} ${NEW_NOTEBOOK_TITLE}`
 }
 

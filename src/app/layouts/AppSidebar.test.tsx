@@ -138,8 +138,10 @@ describe('AppSidebar — create guard (FU3)', () => {
         cells: [],
       })
     })
+    // TARDIS-167 (#1): the emoji prefix is now random per create, so assert the
+    // title SHAPE (some emoji + the base label) rather than a fixed emoji.
     expect(notebookApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '📓 Untitled notebook' }),
+      expect.objectContaining({ title: expect.stringMatching(/ Untitled notebook$/) }),
     )
   })
 })
