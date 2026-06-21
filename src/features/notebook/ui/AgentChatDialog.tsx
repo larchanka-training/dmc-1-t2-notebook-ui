@@ -1,28 +1,47 @@
 import { useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Bot, Cloud, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
-import { agentChatOpenAtom, agentSendAction, closeAgentChatAction } from '../model/agentChat'
+import {
+  agentChatOpenAtom,
+  agentSendAction,
+  agentSendInBrowserAction,
+  closeAgentChatAction,
+} from '../model/agentChat'
+import { codeGeneratorAtom } from '../model/codeGenerator'
 
 export const AgentChatDialog = reatomComponent(() => {
   const open = agentChatOpenAtom()
-  const isSending = !agentSendAction.ready()
-  const sendError = agentSendAction.error()
+  const isCloudSending = !agentSendAction.ready()
+  const isInBrowserSending = !agentSendInBrowserAction.ready()
+  const isSending = isCloudSending || isInBrowserSending
+  // In-browser tier needs a loaded WebLLM model (№4/№13): the generator slot is
+  // null until the user loads one. Mirror the cell toolbar's gate.
+  const hasLocalModel = !!codeGeneratorAtom()
+  const sendError = agentSendAction.error() ?? agentSendInBrowserAction.error()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const doSend = wrap(() => {
+  const doSendCloud = wrap(() => {
     const val = textareaRef.current?.value.trim()
     if (!val || isSending) return
     agentSendAction(val)
   })
 
+  const doSendInBrowser = wrap(() => {
+    const val = textareaRef.current?.value.trim()
+    if (!val || isSending || !hasLocalModel) return
+    agentSendInBrowserAction(val)
+  })
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      doSend()
+      // Enter defaults to the cloud tier (always available), matching the prior
+      // single-button behaviour so the keyboard flow is unchanged.
+      doSendCloud()
     }
   }
 
@@ -64,6 +83,10 @@ export const AgentChatDialog = reatomComponent(() => {
             </p>
           )}
 
+          {/* TARDIS-167 (№13): two explicit tiers, like the cell toolbar —
+              in-browser (WebLLM) and cloud — so it is clear which agent runs.
+              Hints use the native `title` attribute (not a Tooltip wrapper):
+              the wrapper intercepted pointer events on the trigger button. */}
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
@@ -72,18 +95,36 @@ export const AgentChatDialog = reatomComponent(() => {
             >
               Cancel
             </Button>
-            <Button onClick={doSend} disabled={isSending} className="gap-2">
-              {isSending ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating…
-                </>
+            <Button
+              variant="outline"
+              onClick={doSendInBrowser}
+              disabled={isSending || !hasLocalModel}
+              className="gap-2"
+              title={
+                hasLocalModel
+                  ? 'Generate with the in-browser model (WebLLM)'
+                  : 'Load an in-browser model first'
+              }
+            >
+              {isInBrowserSending ? (
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <>
-                  <Sparkles className="size-4" />
-                  Generate code
-                </>
+                <Bot className="size-4" />
               )}
+              In-browser
+            </Button>
+            <Button
+              onClick={doSendCloud}
+              disabled={isSending}
+              className="gap-2"
+              title="Generate with the cloud agent"
+            >
+              {isCloudSending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Cloud className="size-4" />
+              )}
+              Cloud
             </Button>
           </div>
         </div>

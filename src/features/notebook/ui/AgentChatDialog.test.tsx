@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { llm } from '@/shared/api'
 import { ApiError, RateLimitedError } from '@/shared/api/errors'
 import { cellsAtom } from '../model/notebook'
 import { agentChatOpenAtom, agentSendAction, openAgentChatAction } from '../model/agentChat'
+import { codeGeneratorAtom } from '../model/codeGenerator'
 import { AgentChatDialog } from './AgentChatDialog'
 
 // Minimal GenerateResponse so mocks satisfy the return type.
@@ -89,7 +90,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'create a variable')
-    await user.click(screen.getByRole('button', { name: /generate code/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
     await act(async () => {})
 
     expect(llm.generateCode).toHaveBeenCalledWith(
@@ -114,7 +115,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'explain closures')
-    await user.click(screen.getByRole('button', { name: /generate code/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
     await act(async () => {})
 
     expect(cellsAtom().length).toBe(cellsBefore + 1)
@@ -152,7 +153,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'bad prompt')
-    await user.click(screen.getByRole('button', { name: /generate code/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
     await act(async () => {})
 
     expect(screen.getByText(/flagged by the safety filter/i)).toBeInTheDocument()
@@ -170,11 +171,51 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'anything')
-    await user.click(screen.getByRole('button', { name: /generate code/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
     await act(async () => {})
 
     expect(screen.getByText(/generation failed/i)).toBeInTheDocument()
     expect(agentChatOpenAtom()).toBe(true)
+  })
+})
+
+describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
+  afterEach(() => {
+    act(() => codeGeneratorAtom.set(null))
+  })
+
+  test('the in-browser button is disabled until a model is loaded', async () => {
+    render(<AgentChatDialog />)
+    await act(async () => {
+      codeGeneratorAtom.set(null)
+      agentChatOpenAtom.set(true)
+    })
+    expect(screen.getByRole('button', { name: /in-browser/i })).toBeDisabled()
+    // The cloud tier stays available regardless of a local model.
+    expect(screen.getByRole('button', { name: /^cloud$/i })).not.toBeDisabled()
+  })
+
+  test('in-browser button generates via the injected local generator (no cloud call)', async () => {
+    const user = userEvent.setup()
+    const cloudSpy = vi.spyOn(llm, 'generateCode')
+    const generator = vi.fn().mockResolvedValue('const local = 1')
+    const cellsBefore = cellsAtom().length
+
+    render(<AgentChatDialog />)
+    await act(async () => {
+      codeGeneratorAtom.set(() => generator)
+      agentChatOpenAtom.set(true)
+    })
+
+    await user.type(screen.getByRole('textbox'), 'make a local var')
+    fireEvent.click(screen.getByRole('button', { name: /in-browser/i }))
+    await act(async () => {})
+
+    expect(generator).toHaveBeenCalledWith('make a local var')
+    expect(cloudSpy).not.toHaveBeenCalled()
+    expect(cellsAtom().length).toBe(cellsBefore + 1)
+    expect(cellsAtom().at(-1)?.code()).toBe('const local = 1')
+    expect(agentChatOpenAtom()).toBe(false)
   })
 })
 
