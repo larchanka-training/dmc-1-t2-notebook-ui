@@ -35,7 +35,7 @@ export const NotebookLlmBar = reatomComponent(() => {
   }, [])
 
   return (
-    <div className="border-b bg-muted/30 px-6 py-2.5">
+    <div className="border-b border-border bg-muted/30 px-6 py-2.5">
       <div className="flex items-center gap-3">
         <Cpu className="size-4 shrink-0 text-muted-foreground" />
         <Select
