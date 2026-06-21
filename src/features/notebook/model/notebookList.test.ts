@@ -11,6 +11,7 @@ import {
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   notebookListResource,
+  renameListItem,
   startNotebookListSync,
 } from './notebookList'
 
@@ -175,6 +176,25 @@ describe('createNotebookAction', () => {
 
     gate.resolve(created)
     expect(await first).toEqual(created)
+  })
+})
+
+describe('renameListItem (TARDIS-167 #2)', () => {
+  test('patches a listed row title in place (no refetch — the title rides autosave → PATCH)', () => {
+    notebookListResource.data.set([listItem('a', 'Old A'), listItem('b', 'B')])
+
+    renameListItem('a', 'New A')
+
+    expect(peek(notebookListResource.data)).toEqual([listItem('a', 'New A'), listItem('b', 'B')])
+  })
+
+  test('is a no-op for an id that is not in the list', () => {
+    const rows = [listItem('a', 'A')]
+    notebookListResource.data.set(rows)
+
+    renameListItem('missing', 'X')
+
+    expect(peek(notebookListResource.data)).toEqual([listItem('a', 'A')])
   })
 })
 

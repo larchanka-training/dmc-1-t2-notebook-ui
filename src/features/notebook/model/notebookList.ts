@@ -83,6 +83,23 @@ function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
   }
 }
 
+/**
+ * TARDIS-167 (#2): keep the sidebar list row's title in step with a rename,
+ * locally and WITHOUT a list refetch. The title is persisted via the normal
+ * autosave → remote-sync PATCH path; the GET /notebooks list is NOT re-fetched on
+ * a rename (that round-trip is what made a freshly renamed notebook show its OLD
+ * title in the sidebar after switching to another notebook and back). Patching the
+ * cached row in place reconciles the list with the live editor title immediately.
+ * A no-op when the id is not a listed row (e.g. the local welcome floor).
+ */
+export function renameListItem(id: string, title: string): void {
+  notebookListResource.data.set((items) =>
+    items.some((it) => it.id === id && it.title !== title)
+      ? items.map((it) => (it.id === id ? { ...it, title } : it))
+      : items,
+  )
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a

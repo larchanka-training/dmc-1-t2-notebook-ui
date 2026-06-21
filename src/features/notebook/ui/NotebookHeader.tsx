@@ -2,7 +2,13 @@ import { useEffect, useRef } from 'react'
 import { reatomComponent } from '@reatom/react'
 import { wrap } from '@reatom/core'
 import { Bot } from 'lucide-react'
-import { cellsAtom, notebookTitleAtom, setNotebookTitle } from '../model/notebook'
+import {
+  activeNotebookIdAtom,
+  cellsAtom,
+  notebookTitleAtom,
+  setNotebookTitle,
+} from '../model/notebook'
+import { renameListItem } from '../model/notebookList'
 import { loadedModelAtom } from '../model/codeGenerator'
 
 const PLACEHOLDER = 'Untitled notebook'
@@ -30,26 +36,37 @@ export const NotebookHeader = reatomComponent(() => {
     if (el && el.textContent !== title) el.textContent = title
   }, [title])
 
-  // The title atom is written ONLY here, on commit (blur / Enter), never per
-  // keystroke. Typing just mutates the contenteditable DOM; we read it back on
-  // commit and route the change through setNotebookTitle, which bumps the
-  // revision so autosave picks up a title-only edit. (A previous live-sync wrote
-  // the atom on every keystroke, which made setNotebookTitle's equality guard
-  // see no change at commit time and skip the bump — so a title-only edit was
-  // never persisted. See NotebookHeader.test.tsx regression.)
-  const commit = wrap(() => {
-    const next = ref.current?.textContent?.trim() ?? ''
-    // Empty title falls back to the placeholder text, mirrored into the model.
-    setNotebookTitle(next || PLACEHOLDER)
-    if (ref.current && !next) ref.current.textContent = PLACEHOLDER
-    committedRef.current = notebookTitleAtom()
+  // TARDIS-167 (#2): live sync while typing. Every keystroke writes the raw title
+  // into the model (`setNotebookTitle` bumps the revision so autosave persists it
+  // to IndexedDB) AND patches the sidebar list row in place. The list is NOT
+  // re-fetched from the backend on a rename — the title rides the normal autosave
+  // → remote-sync PATCH; refetching is what made a renamed notebook show its OLD
+  // title in the sidebar after switching away and back. Trimming + the empty
+  // fallback are deferred to commit so they don't fight the caret mid-word.
+  const onInput = wrap(() => {
+    const raw = ref.current?.textContent ?? ''
+    setNotebookTitle(raw)
+    renameListItem(activeNotebookIdAtom(), raw)
   })
 
-  // Escape restores the title shown when editing began. The atom is untouched
-  // while typing, so there is nothing reactive to roll back — resetting the DOM
-  // text is enough; the follow-up blur re-commits it as a no-op.
+  // Commit on blur / Enter: normalise to a trimmed value (empty → placeholder) and
+  // mirror that back into the DOM + the sidebar row.
+  const commit = wrap(() => {
+    const next = ref.current?.textContent?.trim() ?? ''
+    const title = next || PLACEHOLDER
+    setNotebookTitle(title)
+    renameListItem(activeNotebookIdAtom(), title)
+    if (ref.current && ref.current.textContent !== title) ref.current.textContent = title
+    committedRef.current = title
+  })
+
+  // Escape restores the title shown when editing began. Live-sync wrote every
+  // keystroke into the model + list, so the rollback must reset all three: the
+  // DOM text, the model atom, and the sidebar row.
   const cancel = wrap(() => {
     if (ref.current) ref.current.textContent = committedRef.current
+    setNotebookTitle(committedRef.current)
+    renameListItem(activeNotebookIdAtom(), committedRef.current)
   })
 
   // Snapshot the pre-edit title on focus. This reads an atom from a React event
@@ -91,6 +108,7 @@ export const NotebookHeader = reatomComponent(() => {
         data-placeholder={PLACEHOLDER}
         spellCheck={false}
         onFocus={beginEdit}
+        onInput={onInput}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
