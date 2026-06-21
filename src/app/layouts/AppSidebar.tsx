@@ -24,6 +24,7 @@ import { userAtom } from '@/entities/session'
 import { themeModeAtom, type ThemeMode } from '@/entities/theme'
 import {
   createNotebookAction,
+  promoteSeedFloorIfUnsynced,
   notebookListResource,
   notebookTitleAtom,
   openNotebookInSlot,
@@ -303,6 +304,10 @@ const NotebooksGroup = reatomComponent(() => {
   if (!user) return null
 
   const onCreate = wrap(async () => {
+    // TARDIS-167 (#9): if an unsynced welcome-seed floor is open, give it a
+    // backend identity FIRST so it stays a listed row instead of vanishing once
+    // the new notebook becomes active. Best-effort — never blocks the create.
+    await wrap(promoteSeedFloorIfUnsynced())
     const created = await wrap(createNotebookAction(nextNotebookTitle()))
     if (!created) return
     const outcome = await wrap(openNotebookInSlot(created.id))

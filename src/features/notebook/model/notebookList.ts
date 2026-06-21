@@ -156,6 +156,70 @@ export const createNotebookAction = action(async (title: string) => {
 }, 'notebook.list.create').extend(withAsync(), withTransaction())
 
 /**
+ * TARDIS-167 (#9): promote the local welcome-seed floor to a real backend
+ * notebook BEFORE the user creates their first "real" notebook.
+ *
+ * The seed floor is shown in the sidebar only as a synthetic row while its id is
+ * NOT in the backend list (`showFloorRow = !activeInList`). Creating a new
+ * notebook makes that new id the active one, so the floor row vanished even
+ * though the seed still existed locally (the #9 report). Promoting the seed gives
+ * it a backend identity, so it becomes an ordinary listed row and stays visible.
+ *
+ * Scope is deliberately narrow — only a CLEAN, never-synced seed is promoted:
+ *   - the legacy floor id is never a syncable identity (#135 contract);
+ *   - a dirty / already-created seed belongs to the remote-sync engine, which
+ *     owns the live in-memory sync-state for the active id. Promoting it from the
+ *     outside would race the engine's own POST/PATCH. A clean seed (dirty=false,
+ *     not remoteCreated, no tombstones) is exactly the #9 case ("did not edit the
+ *     seed") and the engine never pushes it, so there is no race.
+ *
+ * Best-effort: a failed promote (offline / rejected) is logged and swallowed so
+ * it never blocks creating the new notebook — the seed stays a local floor row
+ * and syncs on its next edit.
+ */
+export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
+  const id = activeNotebookIdAtom()
+  if (id === LOCAL_NOTEBOOK_ID) return
+  const ownerId = userAtom()?.id
+  if (!ownerId) return
+  // Already a listed backend row → nothing to promote.
+  if (notebookListResource.data().some((it) => it.id === id)) return
+  try {
+    const sync = await wrap(notebookStorage.getSyncState(id))
+    // Only a clean, never-synced seed is promoted here (see doc comment).
+    if (sync && (sync.remoteCreated || sync.dirty || sync.deletedCells.length > 0)) return
+    const stored = await wrap(notebookStorage.get(id))
+    if (!stored) return
+    const created = await wrap(
+      notebookApi.create({
+        id: stored.id,
+        title: stored.title,
+        formatVersion: stored.formatVersion,
+        cells: stored.cells,
+      }),
+    )
+    await wrap(
+      notebookStorage.put({ ...created, cells: created.cells.map((cell) => ({ ...cell })) }),
+    )
+    await wrap(
+      notebookStorage.putSyncState({
+        notebookId: created.id,
+        remoteCreated: true,
+        dirty: false,
+        deletedCells: [],
+        ownerId,
+        lastSyncedUpdatedAt: created.updatedAt,
+      }),
+    )
+    notebookListResource.data.set((items) =>
+      items.some((it) => it.id === created.id) ? items : [...items, toListItem(created)],
+    )
+  } catch (error) {
+    console.warn('notebook: failed to promote the local seed before create', error)
+  }
+}, 'notebook.list.promoteSeedFloor')
+
+/**
  * Delete a notebook from the sidebar (#135). Optimistically drops the row (rolled
  * back by `withRollback`/`withTransaction` if the server `DELETE` fails, like
  * create), soft-deletes it server-side, then removes its local copy AND sync-state
