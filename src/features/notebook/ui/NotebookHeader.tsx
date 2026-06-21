@@ -46,14 +46,22 @@ export const NotebookHeader = reatomComponent(() => {
   // Never persist an EMPTY title (review PR #85 🟠): the backend requires
   // `min_length=1`, so a blank title (user cleared the field mid-edit, then
   // paused past the autosave + remote debounce) would PATCH `title: ""` → 422,
-  // which remote-sync treats as terminal `failed`. Fall back to the placeholder
-  // until the user types again — mirroring the commit-time behaviour, and never
-  // writing back to the DOM here, so the caret is left untouched. The sidebar row
-  // gets the trimmed value (review PR #85 🔵: no leading/trailing-space flicker).
+  // which remote-sync treats as terminal `failed`.
+  //
+  // When the field is empty we SKIP the model write entirely — we must NOT write
+  // the placeholder into the title atom here. The `[title]` effect above mirrors
+  // the atom back into the contenteditable, so writing "Untitled notebook" while
+  // the DOM is empty would dump that text into the field and jam the caret, making
+  // it impossible to type a new title. Skipping the write leaves the field empty
+  // and editable; nothing empty reaches autosave (no revision bump), so the 422 is
+  // still avoided. Trim/placeholder normalisation happens on commit (blur/Enter).
+  // The sidebar row shows the placeholder for the empty window (it is not the
+  // editing field, so patching it never touches the caret); a non-empty value is
+  // sent trimmed (review PR #85 🔵: no leading/trailing-space flicker).
   const onInput = wrap(() => {
     const raw = ref.current?.textContent ?? ''
     const trimmed = raw.trim()
-    setNotebookTitle(trimmed ? raw : PLACEHOLDER)
+    if (trimmed) setNotebookTitle(raw)
     renameListItem(activeNotebookIdAtom(), trimmed || PLACEHOLDER)
   })
 

@@ -162,14 +162,25 @@ describe('NotebookHeader', () => {
     expect(peek(notebookListResource.data)[0].title).toBe('My notebook')
   })
 
-  test('clearing the title mid-edit never persists an empty title (review PR #85)', async () => {
+  test('clearing the title mid-edit never persists an empty title and keeps the field editable (review PR #85)', async () => {
     render(<NotebookHeader />)
     const title = getTitle()
     await act(async () => title.focus())
     // User selects all and deletes, then pauses — `input` fires with empty text.
     title.textContent = ''
     await act(async () => title.dispatchEvent(new InputEvent('input', { bubbles: true })))
-    // The model holds the placeholder, never the empty string the backend rejects.
-    expect(notebookTitleAtom()).toBe('Untitled notebook')
+
+    // The model is NOT set to the empty string the backend rejects — the write is
+    // skipped, so the atom keeps its previous non-empty value.
+    expect(notebookTitleAtom()).toBe('My notebook')
+    // Crucially, the field stays EMPTY (the `[title]` effect must not dump the
+    // placeholder back into the contenteditable and jam the caret — the regression
+    // this guards). The user can keep typing a fresh title.
+    expect(title.textContent).toBe('')
+
+    // Typing a new title now syncs normally.
+    title.textContent = 'Fresh name'
+    await act(async () => title.dispatchEvent(new InputEvent('input', { bubbles: true })))
+    expect(notebookTitleAtom()).toBe('Fresh name')
   })
 })
