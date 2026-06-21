@@ -79,8 +79,15 @@ async function request<T>(
 }
 
 export async function list(): Promise<NotebookListItem[]> {
+  // TARDIS-167 (#3): request newest-first by CREATION time, not by `updatedAt`.
+  // The backend default is `sort=updatedAt&order=desc`, which re-orders the list
+  // on every edit (a touched notebook jumps to the top after a reload). The
+  // product order is "newest created first", so pass it explicitly. The backend
+  // whitelist already accepts `createdAt`/`desc`, so this changes no contract.
   const data = await request<Schemas['NotebookListResponse']>(
-    notebookClient.GET('/notebooks', { params: { query: { limit: LIST_PAGE_LIMIT } } }),
+    notebookClient.GET('/notebooks', {
+      params: { query: { limit: LIST_PAGE_LIMIT, sort: 'createdAt', order: 'desc' } },
+    }),
   )
   // Boundary validation (AGENTS §11): the 2xx body is typed but untrusted. A
   // schema drift or a garbage 2xx from an edge proxy could give us a body whose

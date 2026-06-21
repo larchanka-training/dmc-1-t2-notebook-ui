@@ -88,7 +88,7 @@ describe('auth middleware', () => {
 })
 
 describe('list', () => {
-  test('GETs /notebooks?limit=200 and returns the page items', async () => {
+  test('GETs /notebooks sorted by createdAt desc and returns the page items', async () => {
     const items = [
       { id: 'a', title: 'A', formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 },
       { id: 'b', title: 'B', formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 },
@@ -100,7 +100,8 @@ describe('list', () => {
     expect(result).toEqual(items)
     const req = lastRequest()
     expect(req.method).toBe('GET')
-    expect(req.url).toContain('/api/v1/notebooks?limit=200')
+    // TARDIS-167 (#3): explicit createdAt/desc so an edit never re-orders the list.
+    expect(req.url).toContain('/api/v1/notebooks?limit=200&sort=createdAt&order=desc')
   })
 
   test('rejects with a malformed_response ApiError when the body has no items array', async () => {

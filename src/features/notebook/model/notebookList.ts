@@ -83,6 +83,23 @@ function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
   }
 }
 
+/**
+ * TARDIS-167 (#2): keep the sidebar list row's title in step with a rename,
+ * locally and WITHOUT a list refetch. The title is persisted via the normal
+ * autosave → remote-sync PATCH path; the GET /notebooks list is NOT re-fetched on
+ * a rename (that round-trip is what made a freshly renamed notebook show its OLD
+ * title in the sidebar after switching to another notebook and back). Patching the
+ * cached row in place reconciles the list with the live editor title immediately.
+ * A no-op when the id is not a listed row (e.g. the local welcome floor).
+ */
+export function renameListItem(id: string, title: string): void {
+  notebookListResource.data.set((items) =>
+    items.some((it) => it.id === id && it.title !== title)
+      ? items.map((it) => (it.id === id ? { ...it, title } : it))
+      : items,
+  )
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a
@@ -110,10 +127,36 @@ export const createNotebookAction = action(async (title: string) => {
     cellsCount: 0,
   }
   try {
-    notebookListResource.data.set((items) => [...items, optimistic])
+    // TARDIS-167 (#3 follow-up): prepend, not append. The list is ordered
+    // `createdAt desc` (newest first), and a freshly created notebook is the
+    // newest — so it belongs at the TOP. Appending showed it at the bottom for a
+    // beat, then the post-create refetch re-ordered it to the top (a visible
+    // jump). Optimistically placing it where the server will return it removes
+    // that flicker.
+    notebookListResource.data.set((items) => [optimistic, ...items])
 
     const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
     await wrap(notebookStorage.put({ ...nb, cells: nb.cells.map((cell) => ({ ...cell })) }))
+    // TARDIS-167 (#10): the notebook already exists server-side (the POST above
+    // succeeded), so seed its sync-state as `remoteCreated` BEFORE the slot opens
+    // it. Otherwise the remote-sync engine boots from `initialSyncState`
+    // (`remoteCreated: false`) and the first edit re-POSTs the just-created
+    // notebook (a phantom create with `cells: []`) before the correct PATCH — the
+    // duplicate POST users observed. `lastSyncedUpdatedAt: nb.updatedAt` matches
+    // the doc just persisted, so the C-4 boot watermark check does not flag it
+    // falsely dirty. `ownerId` is the current account so the owner-gate lets the
+    // first real edit push. This write lands before `openNotebookInSlot` starts
+    // the engine for this id, so there is no live engine to race.
+    await wrap(
+      notebookStorage.putSyncState({
+        notebookId: id,
+        remoteCreated: true,
+        dirty: false,
+        deletedCells: [],
+        ownerId: userAtom()?.id,
+        lastSyncedUpdatedAt: nb.updatedAt,
+      }),
+    )
     // FU2: reconcile the optimistic row with the server's authoritative values
     // (same id) BEFORE the refetch, so the row is correct even if the refetch
     // fails. Without this, a transient list failure after a committed POST would
@@ -134,6 +177,70 @@ export const createNotebookAction = action(async (title: string) => {
     createInFlight = false
   }
 }, 'notebook.list.create').extend(withAsync(), withTransaction())
+
+/**
+ * TARDIS-167 (#9): promote the local welcome-seed floor to a real backend
+ * notebook BEFORE the user creates their first "real" notebook.
+ *
+ * The seed floor is shown in the sidebar only as a synthetic row while its id is
+ * NOT in the backend list (`showFloorRow = !activeInList`). Creating a new
+ * notebook makes that new id the active one, so the floor row vanished even
+ * though the seed still existed locally (the #9 report). Promoting the seed gives
+ * it a backend identity, so it becomes an ordinary listed row and stays visible.
+ *
+ * Scope is deliberately narrow — only a CLEAN, never-synced seed is promoted:
+ *   - the legacy floor id is never a syncable identity (#135 contract);
+ *   - a dirty / already-created seed belongs to the remote-sync engine, which
+ *     owns the live in-memory sync-state for the active id. Promoting it from the
+ *     outside would race the engine's own POST/PATCH. A clean seed (dirty=false,
+ *     not remoteCreated, no tombstones) is exactly the #9 case ("did not edit the
+ *     seed") and the engine never pushes it, so there is no race.
+ *
+ * Best-effort: a failed promote (offline / rejected) is logged and swallowed so
+ * it never blocks creating the new notebook — the seed stays a local floor row
+ * and syncs on its next edit.
+ */
+export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
+  const id = activeNotebookIdAtom()
+  if (id === LOCAL_NOTEBOOK_ID) return
+  const ownerId = userAtom()?.id
+  if (!ownerId) return
+  // Already a listed backend row → nothing to promote.
+  if (notebookListResource.data().some((it) => it.id === id)) return
+  try {
+    const sync = await wrap(notebookStorage.getSyncState(id))
+    // Only a clean, never-synced seed is promoted here (see doc comment).
+    if (sync && (sync.remoteCreated || sync.dirty || sync.deletedCells.length > 0)) return
+    const stored = await wrap(notebookStorage.get(id))
+    if (!stored) return
+    const created = await wrap(
+      notebookApi.create({
+        id: stored.id,
+        title: stored.title,
+        formatVersion: stored.formatVersion,
+        cells: stored.cells,
+      }),
+    )
+    await wrap(
+      notebookStorage.put({ ...created, cells: created.cells.map((cell) => ({ ...cell })) }),
+    )
+    await wrap(
+      notebookStorage.putSyncState({
+        notebookId: created.id,
+        remoteCreated: true,
+        dirty: false,
+        deletedCells: [],
+        ownerId,
+        lastSyncedUpdatedAt: created.updatedAt,
+      }),
+    )
+    notebookListResource.data.set((items) =>
+      items.some((it) => it.id === created.id) ? items : [...items, toListItem(created)],
+    )
+  } catch (error) {
+    console.warn('notebook: failed to promote the local seed before create', error)
+  }
+}, 'notebook.list.promoteSeedFloor')
 
 /**
  * Delete a notebook from the sidebar (#135). Optimistically drops the row (rolled

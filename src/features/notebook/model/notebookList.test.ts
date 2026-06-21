@@ -8,8 +8,10 @@ import { FORMAT_VERSION } from '../persistence/schema'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import {
   createNotebookAction,
+  promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   notebookListResource,
+  renameListItem,
   startNotebookListSync,
 } from './notebookList'
 
@@ -96,6 +98,28 @@ describe('createNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 
+  test('seeds remoteCreated sync-state so the first edit PATCHes, not re-POSTs (TARDIS-167 #10)', async () => {
+    userAtom.set({ id: 'owner-9', email: 'a@b.c', displayName: null, roles: [] })
+    const created = { ...fullNotebook(CLIENT_ID, 'new'), updatedAt: 4242 }
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+    const putSyncSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
+
+    await createNotebookAction('new')
+
+    // The notebook exists server-side already, so its sync-state must boot the
+    // remote-sync engine as `remoteCreated` — otherwise the first edit re-POSTs it.
+    expect(putSyncSpy).toHaveBeenCalledWith({
+      notebookId: CLIENT_ID,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+      ownerId: 'owner-9',
+      lastSyncedUpdatedAt: 4242,
+    })
+
+    userAtom.set(null)
+  })
+
   test('keeps the reconciled row when the post-create refetch fails (FU2)', async () => {
     const existing = listItem('nb1', 'old')
     notebookListResource.data.set([existing])
@@ -109,8 +133,10 @@ describe('createNotebookAction', () => {
 
     // The create succeeded, so the action resolves and the optimistic row is
     // reconciled to the server notebook — NOT rolled back by the failed refetch.
+    // Prepended (TARDIS-167 #3 follow-up): newest-first matches the createdAt-desc
+    // list order, so the new row sits at the TOP, not the bottom.
     expect(result).toEqual(created)
-    expect(peek(notebookListResource.data)).toEqual([existing, listItem(CLIENT_ID, 'new')])
+    expect(peek(notebookListResource.data)).toEqual([listItem(CLIENT_ID, 'new'), existing])
   })
 
   test('refuses empty titles without calling the API', async () => {
@@ -150,6 +176,102 @@ describe('createNotebookAction', () => {
 
     gate.resolve(created)
     expect(await first).toEqual(created)
+  })
+})
+
+describe('renameListItem (TARDIS-167 #2)', () => {
+  test('patches a listed row title in place (no refetch — the title rides autosave → PATCH)', () => {
+    notebookListResource.data.set([listItem('a', 'Old A'), listItem('b', 'B')])
+
+    renameListItem('a', 'New A')
+
+    expect(peek(notebookListResource.data)).toEqual([listItem('a', 'New A'), listItem('b', 'B')])
+  })
+
+  test('is a no-op for an id that is not in the list', () => {
+    const rows = [listItem('a', 'A')]
+    notebookListResource.data.set(rows)
+
+    renameListItem('missing', 'X')
+
+    expect(peek(notebookListResource.data)).toEqual([listItem('a', 'A')])
+  })
+})
+
+describe('promoteSeedFloorIfUnsynced (TARDIS-167 #9)', () => {
+  const SEED_ID = '99999999-9999-4999-8999-999999999999'
+
+  const storedSeed = (): import('../persistence/schema').NotebookJSON => ({
+    formatVersion: FORMAT_VERSION,
+    id: SEED_ID,
+    title: 'Welcome',
+    createdAt: 1,
+    updatedAt: 1,
+    cells: [],
+  })
+
+  beforeEach(() => {
+    userAtom.set({ id: 'owner-9', email: 'a@b.c', displayName: null, roles: [] })
+    activeNotebookIdAtom.set(SEED_ID)
+  })
+
+  afterEach(() => {
+    userAtom.set(null)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('creates a backend notebook for a clean unsynced seed and lists it', async () => {
+    vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedSeed())
+    vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+    vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
+    const created = { ...fullNotebook(SEED_ID, 'Welcome'), updatedAt: 7 }
+    const createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(createSpy).toHaveBeenCalledWith({
+      id: SEED_ID,
+      title: 'Welcome',
+      formatVersion: FORMAT_VERSION,
+      cells: [],
+    })
+    // The listed row carries the server's authoritative values (updatedAt: 7).
+    expect(peek(notebookListResource.data)).toEqual([
+      { ...listItem(SEED_ID, 'Welcome'), updatedAt: 7 },
+    ])
+  })
+
+  test('does nothing for the legacy local floor id', async () => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+
+  test('does nothing when the seed already has dirty/created sync-state', async () => {
+    vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue({
+      notebookId: SEED_ID,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+    })
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+
+  test('does nothing when the seed is already a listed backend row', async () => {
+    notebookListResource.data.set([listItem(SEED_ID, 'Welcome')])
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(createSpy).not.toHaveBeenCalled()
   })
 })
 

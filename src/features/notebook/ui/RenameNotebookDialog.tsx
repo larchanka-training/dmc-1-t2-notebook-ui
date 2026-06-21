@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { activeNotebookIdAtom, setNotebookTitle } from '../model/notebook'
+import { renameListItem } from '../model/notebookList'
 import { renameTargetAtom } from '../model/notebookSettings'
 
 // Rename dialog driven by renameTargetAtom (new-design-v2). Works for ANY
@@ -27,7 +28,11 @@ export const RenameNotebookDialog = reatomComponent(() => {
       // today (its title lives in the in-memory store + autosave). Renaming a
       // different backend row is presentational until the notebook-management
       // epic adds an update endpoint, so gate on the active slot id (#135).
-      if (target.id === activeNotebookIdAtom()) setNotebookTitle(next)
+      if (target.id === activeNotebookIdAtom()) {
+        setNotebookTitle(next)
+        // TARDIS-167 (#2): patch the sidebar row in step — no list refetch.
+        renameListItem(target.id, next)
+      }
     }
     renameTargetAtom.set(null)
   })
