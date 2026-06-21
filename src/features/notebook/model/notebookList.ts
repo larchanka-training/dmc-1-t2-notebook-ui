@@ -114,6 +114,26 @@ export const createNotebookAction = action(async (title: string) => {
 
     const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
     await wrap(notebookStorage.put({ ...nb, cells: nb.cells.map((cell) => ({ ...cell })) }))
+    // TARDIS-167 (#10): the notebook already exists server-side (the POST above
+    // succeeded), so seed its sync-state as `remoteCreated` BEFORE the slot opens
+    // it. Otherwise the remote-sync engine boots from `initialSyncState`
+    // (`remoteCreated: false`) and the first edit re-POSTs the just-created
+    // notebook (a phantom create with `cells: []`) before the correct PATCH — the
+    // duplicate POST users observed. `lastSyncedUpdatedAt: nb.updatedAt` matches
+    // the doc just persisted, so the C-4 boot watermark check does not flag it
+    // falsely dirty. `ownerId` is the current account so the owner-gate lets the
+    // first real edit push. This write lands before `openNotebookInSlot` starts
+    // the engine for this id, so there is no live engine to race.
+    await wrap(
+      notebookStorage.putSyncState({
+        notebookId: id,
+        remoteCreated: true,
+        dirty: false,
+        deletedCells: [],
+        ownerId: userAtom()?.id,
+        lastSyncedUpdatedAt: nb.updatedAt,
+      }),
+    )
     // FU2: reconcile the optimistic row with the server's authoritative values
     // (same id) BEFORE the refetch, so the row is correct even if the refetch
     // fails. Without this, a transient list failure after a committed POST would

@@ -96,6 +96,28 @@ describe('createNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([existing, createdItem])
   })
 
+  test('seeds remoteCreated sync-state so the first edit PATCHes, not re-POSTs (TARDIS-167 #10)', async () => {
+    userAtom.set({ id: 'owner-9', email: 'a@b.c', displayName: null, roles: [] })
+    const created = { ...fullNotebook(CLIENT_ID, 'new'), updatedAt: 4242 }
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+    const putSyncSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
+
+    await createNotebookAction('new')
+
+    // The notebook exists server-side already, so its sync-state must boot the
+    // remote-sync engine as `remoteCreated` — otherwise the first edit re-POSTs it.
+    expect(putSyncSpy).toHaveBeenCalledWith({
+      notebookId: CLIENT_ID,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+      ownerId: 'owner-9',
+      lastSyncedUpdatedAt: 4242,
+    })
+
+    userAtom.set(null)
+  })
+
   test('keeps the reconciled row when the post-create refetch fails (FU2)', async () => {
     const existing = listItem('nb1', 'old')
     notebookListResource.data.set([existing])
