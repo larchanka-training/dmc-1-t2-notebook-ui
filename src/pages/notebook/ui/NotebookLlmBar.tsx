@@ -1,11 +1,9 @@
-import { useEffect } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import {
-  AVAILABLE_MODELS,
   MODEL_CATALOG,
   engineAtom,
   loadModelAction,
@@ -20,19 +18,11 @@ export const NotebookLlmBar = reatomComponent(() => {
   const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
 
-  // Auto-load the smallest code model on first mount if no model is active or loading.
-  const autoLoad = wrap(() => {
-    if (!engineAtom() && !loadProgressAtom()) {
-      modelIdAtom.set(AVAILABLE_MODELS[0])
-      loadModelAction()
-    }
-  })
-  // autoLoad is intentionally from the first render only — it captures the
-  // Reatom context at mount time and must not re-run on subsequent renders.
-
-  useEffect(() => {
-    autoLoad()
-  }, [])
+  // TARDIS-167 (№4): model download is OPT-IN. There is deliberately NO auto-load
+  // on mount — pulling a multi-GB model into the browser without consent ate the
+  // memory of users who may not have it. The model loads ONLY when the user clicks
+  // "Load model" below. Cell / Ask-agent in-browser generate stays disabled with a
+  // tooltip until a model is loaded (see NotebookCell / AgentChatDialog).
 
   return (
     <div className="border-b border-border bg-muted/30 px-6 py-2.5">
