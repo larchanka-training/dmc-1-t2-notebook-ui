@@ -3,11 +3,14 @@ import { reatomComponent } from '@reatom/react'
 import { Check, Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { cn } from '@/shared/lib/cn'
 import {
   MODEL_CATALOG,
   downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
+  loadedModelIdAtom,
   loadProgressAtom,
   modelIdAtom,
 } from '@/features/web-llm'
@@ -15,11 +18,22 @@ import {
 export const NotebookLlmBar = reatomComponent(() => {
   const engine = engineAtom()
   const modelId = modelIdAtom()
+  const loadedModelId = loadedModelIdAtom()
   const progress = loadProgressAtom()
   const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
   // TARDIS-167 (№5): models already downloaded into the browser are highlighted.
   const downloaded = new Set(downloadedModelIdsAtom())
+  // TARDIS-167 (№15): "Reload" only makes sense when the SELECTED model is the one
+  // already loaded into the engine. After picking a different model the button must
+  // read "Load model" — it will load that newly selected model, not reload the old.
+  const isSelectedLoaded = !!engine && loadedModelId === modelId
+  const actionLabel = isSelectedLoaded ? 'Reload' : 'Load model'
+  const actionHint = isSelectedLoaded
+    ? 'Re-initialise the loaded model (clears its chat state)'
+    : downloaded.has(modelId)
+      ? 'Load this model into the browser (already downloaded — no re-download)'
+      : 'Download and load this model into the browser'
 
   // TARDIS-167 (№4): model download is OPT-IN. There is deliberately NO auto-load
   // on mount — pulling a multi-GB model into the browser without consent ate the
@@ -44,40 +58,48 @@ export const NotebookLlmBar = reatomComponent(() => {
               const isDownloaded = downloaded.has(m.id)
               return (
                 <SelectItem key={m.id} value={m.id} className="text-xs">
-                  <span className="flex w-full items-center justify-between gap-4">
-                    <span className="flex items-center gap-1.5">
+                  {/* TARDIS-167 (№16): name takes the slack and truncates; the size
+                      is a fixed right-aligned column (shrink-0) so sizes line up in
+                      a clean column instead of a ragged left edge after each name. */}
+                  <span className="flex w-full items-center gap-4">
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
                       {isDownloaded ? <Check className="size-3 shrink-0 text-primary" /> : null}
-                      <span className={isDownloaded ? 'font-medium text-primary' : undefined}>
+                      <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}
                       </span>
                     </span>
-                    <span className="text-muted-foreground">{m.size}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{m.size}</span>
                   </span>
                 </SelectItem>
               )
             })}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          onClick={wrap(() => {
-            loadModelAction()
-          })}
-          disabled={isLoading}
-          variant={engine ? 'outline' : 'default'}
-          className="h-8 text-xs"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
-              Loading…
-            </>
-          ) : engine ? (
-            'Reload'
-          ) : (
-            'Load model'
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="sm"
+                onClick={wrap(() => {
+                  loadModelAction()
+                })}
+                disabled={isLoading}
+                variant={isSelectedLoaded ? 'outline' : 'default'}
+                className="h-8 text-xs"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-1.5 size-3 animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  actionLabel
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent>{actionHint}</TooltipContent>
+        </Tooltip>
       </div>
 
       {progress && (

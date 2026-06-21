@@ -3,6 +3,7 @@ export {
   engineAtom,
   modelIdAtom,
   downloadedModelIdsAtom,
+  loadedModelIdAtom,
   loadProgressAtom,
   loadModelAction,
   messagesAtom,

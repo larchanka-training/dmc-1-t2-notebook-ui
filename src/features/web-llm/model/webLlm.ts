@@ -42,6 +42,13 @@ export const loadProgressAtom = atom<LoadProgress | null>(null, 'webLlm.loadProg
 
 export const engineAtom = atom<webllm.MLCEngine | null>(null, 'webLlm.engine')
 
+// TARDIS-167 (№15): id of the model currently LOADED into the engine (not the
+// one selected in the dropdown). The two differ once the user picks another
+// model after loading one — that is exactly when the action button must read
+// "Load model" (it will load the newly selected model) rather than "Reload"
+// (which only makes sense for re-initialising the already-loaded model).
+export const loadedModelIdAtom = atom<string | null>(null, 'webLlm.loadedModelId')
+
 export const messagesAtom = atom<ChatMessage[]>([], 'webLlm.messages')
 
 export const streamingResponseAtom = atom('', 'webLlm.streamingResponse')
@@ -50,6 +57,7 @@ export const loadModelAction = action(async () => {
   const modelId = modelIdAtom()
 
   engineAtom.set(null)
+  loadedModelIdAtom.set(null)
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
 
@@ -63,6 +71,7 @@ export const loadModelAction = action(async () => {
   )
 
   engineAtom.set(engine)
+  loadedModelIdAtom.set(modelId)
   loadProgressAtom.set(null)
   // Record this model as downloaded (de-duped) so the list can mark it local.
   downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))

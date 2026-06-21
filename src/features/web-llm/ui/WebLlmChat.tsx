@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { cn } from '@/shared/lib/cn'
 import {
   MODEL_CATALOG,
   downloadedModelIdsAtom,
@@ -72,14 +73,18 @@ export const WebLlmChat = reatomComponent(() => {
               const isDownloaded = downloaded.has(m.id)
               return (
                 <SelectItem key={m.id} value={m.id}>
-                  <span className="flex w-full items-center justify-between gap-4">
-                    <span className="flex items-center gap-1.5">
+                  {/* TARDIS-167 (№16): name truncates and takes the slack; size is a
+                      fixed right-aligned column so sizes line up cleanly. */}
+                  <span className="flex w-full items-center gap-4">
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
                       {isDownloaded ? <Check className="size-3.5 shrink-0 text-primary" /> : null}
-                      <span className={isDownloaded ? 'font-medium text-primary' : undefined}>
+                      <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}
                       </span>
                     </span>
-                    <span className="text-xs text-muted-foreground">{m.size}</span>
+                    <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                      {m.size}
+                    </span>
                   </span>
                 </SelectItem>
               )
