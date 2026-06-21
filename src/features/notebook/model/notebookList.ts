@@ -110,7 +110,13 @@ export const createNotebookAction = action(async (title: string) => {
     cellsCount: 0,
   }
   try {
-    notebookListResource.data.set((items) => [...items, optimistic])
+    // TARDIS-167 (#3 follow-up): prepend, not append. The list is ordered
+    // `createdAt desc` (newest first), and a freshly created notebook is the
+    // newest — so it belongs at the TOP. Appending showed it at the bottom for a
+    // beat, then the post-create refetch re-ordered it to the top (a visible
+    // jump). Optimistically placing it where the server will return it removes
+    // that flicker.
+    notebookListResource.data.set((items) => [optimistic, ...items])
 
     const nb = await wrap(notebookApi.create({ id, title: trimmed, formatVersion: FORMAT_VERSION }))
     await wrap(notebookStorage.put({ ...nb, cells: nb.cells.map((cell) => ({ ...cell })) }))

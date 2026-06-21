@@ -132,8 +132,10 @@ describe('createNotebookAction', () => {
 
     // The create succeeded, so the action resolves and the optimistic row is
     // reconciled to the server notebook — NOT rolled back by the failed refetch.
+    // Prepended (TARDIS-167 #3 follow-up): newest-first matches the createdAt-desc
+    // list order, so the new row sits at the TOP, not the bottom.
     expect(result).toEqual(created)
-    expect(peek(notebookListResource.data)).toEqual([existing, listItem(CLIENT_ID, 'new')])
+    expect(peek(notebookListResource.data)).toEqual([listItem(CLIENT_ID, 'new'), existing])
   })
 
   test('refuses empty titles without calling the API', async () => {
