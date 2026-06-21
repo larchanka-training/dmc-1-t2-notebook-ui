@@ -50,7 +50,7 @@ import { runCell, stopCell } from '../model/runtime'
 import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
 import {
   cloudGenerateAndInsertCodeAction,
-  cloudGeneratingCellIdAtom,
+  cloudGeneratingCellIdsAtom,
   cloudGenerateErrorsAtom,
 } from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
@@ -111,7 +111,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const hasGenerator = !!codeGeneratorAtom()
   const isGenerating = !generateAndInsertCodeAction.ready()
   const generateError = generateAndInsertCodeAction.error()
-  const isCloudGenerating = cloudGeneratingCellIdAtom() === cell.id
+  const isCloudGenerating = cloudGeneratingCellIdsAtom().has(cell.id)
   const cloudGenerateError = cloudGenerateErrorsAtom().get(cell.id) ?? null
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
   // reactive wrapper), NOT here. Reading searchMatchesAtom in this row would
