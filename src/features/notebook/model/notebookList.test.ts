@@ -427,6 +427,23 @@ describe('startNotebookListSync (refresh on account change)', () => {
     )
   })
 
+  test('does not refetch on the first sign-in null → user (sidebar fetches on its own) — №7', async () => {
+    userAtom.set(null)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(ALICE) // first sign-in within the session
+    await new Promise((resolve) => setTimeout(resolve))
+
+    // The slot is reset for the new owner and stale rows dropped, but the explicit
+    // retry is skipped: the sidebar's own subscription fetches after navigation,
+    // so an extra retry here would double-fetch GET /notebooks (TARDIS-167 №7).
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).not.toHaveBeenCalled()
+  })
+
   test('resets but does not refetch on sign-out', async () => {
     userAtom.set(ALICE)
     stop = startNotebookListSync()
