@@ -242,6 +242,24 @@ describe('promoteSeedFloorIfUnsynced (TARDIS-167 #9)', () => {
     ])
   })
 
+  test('inserts the promoted seed by createdAt desc, not at the bottom (PR #85 review)', async () => {
+    // Existing rows: one newer than the seed, one older. The promoted seed
+    // (createdAt 50) must land BETWEEN them, not appended at the end.
+    const newer = { ...listItem('newer', 'Newer'), createdAt: 100 }
+    const older = { ...listItem('older', 'Older'), createdAt: 10 }
+    notebookListResource.data.set([newer, older])
+    vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedSeed())
+    vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+    vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
+    const created = { ...fullNotebook(SEED_ID, 'Welcome'), createdAt: 50, updatedAt: 50 }
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(peek(notebookListResource.data).map((it) => it.id)).toEqual(['newer', SEED_ID, 'older'])
+  })
+
   test('does nothing for the legacy local floor id', async () => {
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     const createSpy = vi.spyOn(notebookApi, 'create')
@@ -425,6 +443,23 @@ describe('startNotebookListSync (refresh on account change)', () => {
     expect(slotMock.resetSlotToFloorForAccountChange.mock.invocationCallOrder[0]).toBeLessThan(
       retrySpy.mock.invocationCallOrder[0],
     )
+  })
+
+  test('does not refetch on the first sign-in null → user (sidebar fetches on its own) — №7', async () => {
+    userAtom.set(null)
+    stop = startNotebookListSync()
+    resetSpy.mockClear()
+    retrySpy.mockClear()
+
+    userAtom.set(ALICE) // first sign-in within the session
+    await new Promise((resolve) => setTimeout(resolve))
+
+    // The slot is reset for the new owner and stale rows dropped, but the explicit
+    // retry is skipped: the sidebar's own subscription fetches after navigation,
+    // so an extra retry here would double-fetch GET /notebooks (TARDIS-167 №7).
+    expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
+    expect(resetSpy).toHaveBeenCalledTimes(1)
+    expect(retrySpy).not.toHaveBeenCalled()
   })
 
   test('resets but does not refetch on sign-out', async () => {

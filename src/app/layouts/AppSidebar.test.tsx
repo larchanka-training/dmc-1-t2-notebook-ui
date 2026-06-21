@@ -199,3 +199,19 @@ describe('AppSidebar — UI contract (M7)', () => {
     expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
   })
 })
+
+describe('AppSidebar — no notebooks fetch before auth (TARDIS-167 №8)', () => {
+  test('signed out: the Notebooks section is not rendered and the list is not fetched', () => {
+    clearSession()
+    const listSpy = vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    listSpy.mockClear()
+
+    renderSidebar()
+
+    // The "+" create control lives inside NotebooksGroup, which returns null when
+    // signed out — so it must be absent.
+    expect(screen.queryByRole('button', { name: /new notebook/i })).toBeNull()
+    // And crucially: reading the list resource never happened, so no GET fired.
+    expect(listSpy).not.toHaveBeenCalled()
+  })
+})

@@ -45,7 +45,10 @@ notebookListResource.data.extend(withRollback())
  * across the await, so a rapid second account switch cannot fetch for a stale
  * owner. The initial synchronous emit is skipped — boot loads the list lazily
  * through the sidebar's own subscription, so there is no redundant fetch on
- * startup. Returns an unsubscribe handle.
+ * startup. The explicit retry is also skipped on the FIRST sign-in
+ * (null → user): the sidebar's own subscription already fetches after the
+ * post-login navigation, so retrying here too would double-fetch (TARDIS-167
+ * №7). Returns an unsubscribe handle.
  */
 export function startNotebookListSync(): () => void {
   let primed = false
@@ -58,17 +61,46 @@ export function startNotebookListSync(): () => void {
       return
     }
     if (ownerId === lastOwnerId) return
+    const prevOwnerId = lastOwnerId
     lastOwnerId = ownerId
     // Drop the previous account's cached rows synchronously, before any await, so
     // a foreign list cannot flash while the slot reset is still draining.
     notebookListResource.reset()
-    // Reset the editor slot away from the previous owner, THEN (signed in) refetch
-    // the new account's list behind an owner fence so a stale owner never wins.
+    // Reset the editor slot away from the previous owner, THEN refetch the new
+    // account's list behind an owner fence so a stale owner never wins.
     void (async () => {
       await wrap(resetSlotToFloorForAccountChange())
-      if (ownerId !== null && ownerId === lastOwnerId) await wrap(notebookListResource.retry())
+      // TARDIS-167 (№7): refetch here ONLY on a real account SWITCH (B after A).
+      // On the FIRST sign-in (null → user) the sidebar mounts after the post-login
+      // navigation and its own subscription fetches the list — an extra retry here
+      // produced the observed double `GET /notebooks` (one from this sync on
+      // /login, one from the sidebar on /). On a true account switch the sidebar is
+      // already hot (the computed does not read `userAtom`, so it won't refetch on
+      // its own), so this retry is what refreshes it. The owner fence guards a
+      // rapid second switch landing mid-await.
+      if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
+        await wrap(notebookListResource.retry())
+      }
     })()
   })
+}
+
+/**
+ * Insert a row into the list keeping the `createdAt desc` order the sidebar is
+ * fetched with (review PR #85). A no-op if the id is already present. Used by
+ * both create paths so a freshly created/promoted notebook lands where the
+ * server would return it (newest first), never at the bottom.
+ */
+function insertByCreatedAtDesc(
+  items: notebookApi.NotebookListItem[],
+  row: notebookApi.NotebookListItem,
+): notebookApi.NotebookListItem[] {
+  if (items.some((it) => it.id === row.id)) return items
+  const at = items.findIndex((it) => it.createdAt <= row.createdAt)
+  if (at === -1) return [...items, row]
+  const next = [...items]
+  next.splice(at, 0, row)
+  return next
 }
 
 /** Project a full notebook onto the lightweight list row (same id; FU2 reconcile). */
@@ -234,9 +266,7 @@ export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
         lastSyncedUpdatedAt: created.updatedAt,
       }),
     )
-    notebookListResource.data.set((items) =>
-      items.some((it) => it.id === created.id) ? items : [...items, toListItem(created)],
-    )
+    notebookListResource.data.set((items) => insertByCreatedAtDesc(items, toListItem(created)))
   } catch (error) {
     console.warn('notebook: failed to promote the local seed before create', error)
   }

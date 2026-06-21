@@ -5,7 +5,7 @@
 // (production builds talking to a dev backend).
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { devOtpDataAtom, loginStepAtom } from '../model/loginForm'
+import { devOtpDataAtom, loginEmailAtom, loginStepAtom } from '../model/loginForm'
 import { LoginForm } from './LoginForm'
 
 // Seed before render so the component reads the target state on its initial
@@ -20,6 +20,7 @@ describe('LoginForm dev OTP banner', () => {
     cleanup()
     devOtpDataAtom.set(null)
     loginStepAtom.set(1)
+    loginEmailAtom.set('')
     vi.unstubAllEnvs()
   })
 
@@ -36,5 +37,16 @@ describe('LoginForm dev OTP banner', () => {
     seedStep2(null)
     render(<LoginForm />)
     expect(screen.queryByText(/dev mode/i)).not.toBeInTheDocument()
+  })
+
+  test('shows which email the OTP was sent to on step 2 (TARDIS-167 №6)', () => {
+    // Seed BEFORE render so the component reads it on the initial synchronous
+    // render (no post-render state update → no act() warning).
+    seedStep2(null)
+    loginEmailAtom.set('user@example.com')
+    render(<LoginForm />)
+    // The address appears in the step-2 subtitle so the user can catch a typo.
+    expect(screen.getByText(/we just sent to/i)).toBeInTheDocument()
+    expect(screen.getByText('user@example.com')).toBeInTheDocument()
   })
 })

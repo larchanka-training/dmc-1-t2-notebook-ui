@@ -283,6 +283,14 @@ function nextNotebookTitle(): string {
 const NotebooksGroup = reatomComponent(() => {
   const user = userAtom()
   const { pathname } = urlAtom()
+  // TARDIS-167 (№8): gate on the signed-in user BEFORE reading
+  // `notebookListResource.data()`. Reading it makes the resource hot, which
+  // fires `GET /notebooks` — and the sidebar is mounted on EVERY route (incl.
+  // /login), so without this early return the list was fetched before sign-in.
+  // `useState` stays above the conditional return so hook order is stable.
+  const [filter, setFilter] = useState('')
+  if (!user) return null
+
   const items = notebookListResource.data()
   const createError = createNotebookAction.error()?.message
   const openError = slotOpenErrorAtom()
@@ -300,9 +308,6 @@ const NotebooksGroup = reatomComponent(() => {
   // fire two concurrent createNotebookAction calls (each pushing an optimistic
   // row + a list retry, which can transiently drop or mis-roll-back a row).
   const creating = !createNotebookAction.ready()
-  const [filter, setFilter] = useState('')
-
-  if (!user) return null
 
   const onCreate = wrap(async () => {
     // TARDIS-167 (#9): if an unsynced welcome-seed floor is open, give it a

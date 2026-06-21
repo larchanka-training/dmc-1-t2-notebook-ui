@@ -107,9 +107,23 @@ export const LoginForm = reatomComponent(() => {
         </div>
         <h1 className="text-[26px] font-semibold tracking-tight">Sign in to JS Notebook</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          {step === 1
-            ? "Passwordless. Enter your email and we'll send a one-time code."
-            : 'Enter the one-time code we just sent.'}
+          {step === 1 ? (
+            // TARDIS-167: hard break after "Passwordless." so the rest of the
+            // sentence wraps as one line instead of leaving a lone "code." on its
+            // own line. The space before <br/> keeps the normalised text intact
+            // ("Passwordless. Enter…"), so getByText still matches it as one string.
+            <>
+              Passwordless. <br />
+              {"Enter your email and we'll send a one-time code."}
+            </>
+          ) : (
+            // TARDIS-167 (№6): show WHICH email the code was sent to, so the user
+            // can spot a typo before entering the OTP. `email` is `loginEmailAtom`.
+            <>
+              Enter the one-time code we just sent to{' '}
+              <span className="font-medium text-foreground">{email}</span>.
+            </>
+          )}
         </p>
       </div>
 
