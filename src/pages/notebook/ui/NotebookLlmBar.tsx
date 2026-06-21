@@ -1,10 +1,11 @@
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Cpu, Loader2 } from 'lucide-react'
+import { Check, Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import {
   MODEL_CATALOG,
+  downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
   loadProgressAtom,
@@ -17,6 +18,8 @@ export const NotebookLlmBar = reatomComponent(() => {
   const progress = loadProgressAtom()
   const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
+  // TARDIS-167 (№5): models already downloaded into the browser are highlighted.
+  const downloaded = new Set(downloadedModelIdsAtom())
 
   // TARDIS-167 (№4): model download is OPT-IN. There is deliberately NO auto-load
   // on mount — pulling a multi-GB model into the browser without consent ate the
@@ -37,14 +40,22 @@ export const NotebookLlmBar = reatomComponent(() => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MODEL_CATALOG.map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-xs">
-                <span className="flex w-full items-center justify-between gap-4">
-                  <span>{m.id}</span>
-                  <span className="text-muted-foreground">{m.size}</span>
-                </span>
-              </SelectItem>
-            ))}
+            {MODEL_CATALOG.map((m) => {
+              const isDownloaded = downloaded.has(m.id)
+              return (
+                <SelectItem key={m.id} value={m.id} className="text-xs">
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="flex items-center gap-1.5">
+                      {isDownloaded ? <Check className="size-3 shrink-0 text-primary" /> : null}
+                      <span className={isDownloaded ? 'font-medium text-primary' : undefined}>
+                        {m.id}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">{m.size}</span>
+                  </span>
+                </SelectItem>
+              )
+            })}
           </SelectContent>
         </Select>
         <Button

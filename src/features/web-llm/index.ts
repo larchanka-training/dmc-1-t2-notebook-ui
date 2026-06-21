@@ -2,6 +2,7 @@ export { WebLlmChat } from './ui/WebLlmChat'
 export {
   engineAtom,
   modelIdAtom,
+  downloadedModelIdsAtom,
   loadProgressAtom,
   loadModelAction,
   messagesAtom,

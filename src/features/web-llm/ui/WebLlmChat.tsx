@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Bot, Send, Cpu } from 'lucide-react'
+import { Bot, Check, Send, Cpu } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import {
   MODEL_CATALOG,
+  downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
   loadProgressAtom,
@@ -27,6 +28,8 @@ export const WebLlmChat = reatomComponent(() => {
   const isSending = !sendMessageAction.ready()
   const loadError = loadModelAction.error()
   const sendError = sendMessageAction.error()
+  // TARDIS-167 (№5): highlight models already downloaded into the browser.
+  const downloaded = new Set(downloadedModelIdsAtom())
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -65,14 +68,22 @@ export const WebLlmChat = reatomComponent(() => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MODEL_CATALOG.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                <span className="flex w-full items-center justify-between gap-4">
-                  <span>{m.id}</span>
-                  <span className="text-xs text-muted-foreground">{m.size}</span>
-                </span>
-              </SelectItem>
-            ))}
+            {MODEL_CATALOG.map((m) => {
+              const isDownloaded = downloaded.has(m.id)
+              return (
+                <SelectItem key={m.id} value={m.id}>
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="flex items-center gap-1.5">
+                      {isDownloaded ? <Check className="size-3.5 shrink-0 text-primary" /> : null}
+                      <span className={isDownloaded ? 'font-medium text-primary' : undefined}>
+                        {m.id}
+                      </span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">{m.size}</span>
+                  </span>
+                </SelectItem>
+              )
+            })}
           </SelectContent>
         </Select>
         <Button

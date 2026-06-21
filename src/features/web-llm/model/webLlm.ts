@@ -1,4 +1,4 @@
-import { atom, action, wrap } from '@reatom/core'
+import { atom, action, wrap, withLocalStorage } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import * as webllm from '@mlc-ai/web-llm'
 
@@ -23,7 +23,20 @@ export const MODEL_CATALOG: ModelEntry[] = [
 
 export const AVAILABLE_MODELS = MODEL_CATALOG.map((m) => m.id)
 
-export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId')
+// TARDIS-167 (№5): remember the selected model across reloads. Read reactively
+// from components, so plain `withLocalStorage` (same pattern as themeModeAtom /
+// notebook.settings.lineNumbers) is enough.
+export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId').extend(
+  withLocalStorage('webLlm.modelId'),
+)
+
+// TARDIS-167 (№5): ids of models already downloaded into the browser (WebLLM
+// caches the weights in the Cache Storage; this is the UI-visible record of it).
+// Persisted so the list can highlight — across reloads — which models are already
+// local and won't re-download. Appended after each successful `loadModelAction`.
+export const downloadedModelIdsAtom = atom<string[]>([], 'webLlm.downloadedModelIds').extend(
+  withLocalStorage('webLlm.downloadedModelIds'),
+)
 
 export const loadProgressAtom = atom<LoadProgress | null>(null, 'webLlm.loadProgress')
 
@@ -51,6 +64,8 @@ export const loadModelAction = action(async () => {
 
   engineAtom.set(engine)
   loadProgressAtom.set(null)
+  // Record this model as downloaded (de-duped) so the list can mark it local.
+  downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))
 }, 'webLlm.loadModel').extend(withAsync())
 
 export const sendMessageAction = action(async (input: string) => {
