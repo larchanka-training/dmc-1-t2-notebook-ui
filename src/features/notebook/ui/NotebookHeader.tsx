@@ -36,17 +36,25 @@ export const NotebookHeader = reatomComponent(() => {
     if (el && el.textContent !== title) el.textContent = title
   }, [title])
 
-  // TARDIS-167 (#2): live sync while typing. Every keystroke writes the raw title
-  // into the model (`setNotebookTitle` bumps the revision so autosave persists it
-  // to IndexedDB) AND patches the sidebar list row in place. The list is NOT
+  // TARDIS-167 (#2): live sync while typing. Every keystroke writes the title into
+  // the model (`setNotebookTitle` bumps the revision so autosave persists it to
+  // IndexedDB) AND patches the sidebar list row in place. The list is NOT
   // re-fetched from the backend on a rename — the title rides the normal autosave
   // → remote-sync PATCH; refetching is what made a renamed notebook show its OLD
-  // title in the sidebar after switching away and back. Trimming + the empty
-  // fallback are deferred to commit so they don't fight the caret mid-word.
+  // title in the sidebar after switching away and back.
+  //
+  // Never persist an EMPTY title (review PR #85 🟠): the backend requires
+  // `min_length=1`, so a blank title (user cleared the field mid-edit, then
+  // paused past the autosave + remote debounce) would PATCH `title: ""` → 422,
+  // which remote-sync treats as terminal `failed`. Fall back to the placeholder
+  // until the user types again — mirroring the commit-time behaviour, and never
+  // writing back to the DOM here, so the caret is left untouched. The sidebar row
+  // gets the trimmed value (review PR #85 🔵: no leading/trailing-space flicker).
   const onInput = wrap(() => {
     const raw = ref.current?.textContent ?? ''
-    setNotebookTitle(raw)
-    renameListItem(activeNotebookIdAtom(), raw)
+    const trimmed = raw.trim()
+    setNotebookTitle(trimmed ? raw : PLACEHOLDER)
+    renameListItem(activeNotebookIdAtom(), trimmed || PLACEHOLDER)
   })
 
   // Commit on blur / Enter: normalise to a trimmed value (empty → placeholder) and

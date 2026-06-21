@@ -1,8 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { peek } from '@reatom/core'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { NotebookHeader } from './NotebookHeader'
-import { addCell, cellsAtom, notebookTitleAtom, setNotebookTitle } from '../model/notebook'
+import {
+  activeNotebookIdAtom,
+  addCell,
+  cellsAtom,
+  LOCAL_NOTEBOOK_ID,
+  notebookTitleAtom,
+  setNotebookTitle,
+} from '../model/notebook'
+import { notebookListResource } from '../model/notebookList'
 import { notebookRevisionAtom } from '../model/revision'
+
+// A list-row helper mirroring the lightweight NotebookListItem shape.
+function listRow(id: string, title: string) {
+  return { id, title, formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 }
+}
 
 // The title is a contenteditable element. jsdom supports contentEditable and
 // textContent, so we drive edits by setting textContent and firing the same
@@ -18,6 +32,11 @@ beforeEach(async () => {
 
 afterEach(() => {
   cleanup()
+  // Reset cross-test state touched by the live-sync tests below.
+  act(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    notebookListResource.data.set([])
+  })
 })
 
 describe('NotebookHeader', () => {
@@ -101,6 +120,56 @@ describe('NotebookHeader', () => {
     await act(async () => title.focus())
     title.textContent = '   '
     await act(async () => title.blur())
+    expect(notebookTitleAtom()).toBe('Untitled notebook')
+  })
+
+  // The point of TARDIS-167 #2: typing in the header live-patches the sidebar
+  // list row for the active notebook (no list refetch). Covered here so a
+  // refactor that drops the `renameListItem` call from `onInput` fails (review
+  // PR #85 🟡).
+  test('input live-patches the active notebook row in the sidebar', async () => {
+    const NB = '33333333-3333-4333-8333-333333333333'
+    await act(async () => {
+      activeNotebookIdAtom.set(NB)
+      notebookListResource.data.set([listRow(NB, 'My notebook')])
+    })
+    render(<NotebookHeader />)
+    const title = getTitle()
+    await act(async () => title.focus())
+    title.textContent = 'Renamed live'
+    await act(async () => title.dispatchEvent(new InputEvent('input', { bubbles: true })))
+
+    expect(peek(notebookListResource.data)[0].title).toBe('Renamed live')
+  })
+
+  test('Escape rolls back the sidebar row too, not just the DOM/model', async () => {
+    const NB = '33333333-3333-4333-8333-333333333333'
+    await act(async () => {
+      activeNotebookIdAtom.set(NB)
+      notebookListResource.data.set([listRow(NB, 'My notebook')])
+    })
+    render(<NotebookHeader />)
+    const title = getTitle()
+    await act(async () => title.focus())
+    title.textContent = 'Discard me'
+    await act(async () => title.dispatchEvent(new InputEvent('input', { bubbles: true })))
+    // Mid-edit the row already reflects the live text…
+    expect(peek(notebookListResource.data)[0].title).toBe('Discard me')
+    await act(async () => {
+      title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    // …and Escape restores the row to the pre-edit title.
+    expect(peek(notebookListResource.data)[0].title).toBe('My notebook')
+  })
+
+  test('clearing the title mid-edit never persists an empty title (review PR #85)', async () => {
+    render(<NotebookHeader />)
+    const title = getTitle()
+    await act(async () => title.focus())
+    // User selects all and deletes, then pauses — `input` fires with empty text.
+    title.textContent = ''
+    await act(async () => title.dispatchEvent(new InputEvent('input', { bubbles: true })))
+    // The model holds the placeholder, never the empty string the backend rejects.
     expect(notebookTitleAtom()).toBe('Untitled notebook')
   })
 })

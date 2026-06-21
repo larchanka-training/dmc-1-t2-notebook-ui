@@ -85,6 +85,24 @@ export function startNotebookListSync(): () => void {
   })
 }
 
+/**
+ * Insert a row into the list keeping the `createdAt desc` order the sidebar is
+ * fetched with (review PR #85). A no-op if the id is already present. Used by
+ * both create paths so a freshly created/promoted notebook lands where the
+ * server would return it (newest first), never at the bottom.
+ */
+function insertByCreatedAtDesc(
+  items: notebookApi.NotebookListItem[],
+  row: notebookApi.NotebookListItem,
+): notebookApi.NotebookListItem[] {
+  if (items.some((it) => it.id === row.id)) return items
+  const at = items.findIndex((it) => it.createdAt <= row.createdAt)
+  if (at === -1) return [...items, row]
+  const next = [...items]
+  next.splice(at, 0, row)
+  return next
+}
+
 /** Project a full notebook onto the lightweight list row (same id; FU2 reconcile). */
 function toListItem(nb: notebookApi.Notebook): notebookApi.NotebookListItem {
   return {
@@ -248,9 +266,7 @@ export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
         lastSyncedUpdatedAt: created.updatedAt,
       }),
     )
-    notebookListResource.data.set((items) =>
-      items.some((it) => it.id === created.id) ? items : [...items, toListItem(created)],
-    )
+    notebookListResource.data.set((items) => insertByCreatedAtDesc(items, toListItem(created)))
   } catch (error) {
     console.warn('notebook: failed to promote the local seed before create', error)
   }

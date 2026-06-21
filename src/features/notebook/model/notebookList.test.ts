@@ -242,6 +242,24 @@ describe('promoteSeedFloorIfUnsynced (TARDIS-167 #9)', () => {
     ])
   })
 
+  test('inserts the promoted seed by createdAt desc, not at the bottom (PR #85 review)', async () => {
+    // Existing rows: one newer than the seed, one older. The promoted seed
+    // (createdAt 50) must land BETWEEN them, not appended at the end.
+    const newer = { ...listItem('newer', 'Newer'), createdAt: 100 }
+    const older = { ...listItem('older', 'Older'), createdAt: 10 }
+    notebookListResource.data.set([newer, older])
+    vi.spyOn(notebookStorage, 'getSyncState').mockResolvedValue(undefined)
+    vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedSeed())
+    vi.spyOn(notebookStorage, 'put').mockResolvedValue()
+    vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
+    const created = { ...fullNotebook(SEED_ID, 'Welcome'), createdAt: 50, updatedAt: 50 }
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+
+    await promoteSeedFloorIfUnsynced()
+
+    expect(peek(notebookListResource.data).map((it) => it.id)).toEqual(['newer', SEED_ID, 'older'])
+  })
+
   test('does nothing for the legacy local floor id', async () => {
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     const createSpy = vi.spyOn(notebookApi, 'create')
