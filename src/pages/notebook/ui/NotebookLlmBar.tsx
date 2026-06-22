@@ -64,7 +64,7 @@ export const NotebookLlmBar = reatomComponent(() => {
                       {isDownloaded ? (
                         <Check className="size-3 shrink-0 text-primary" />
                       ) : (
-                        <span className="size-3 shrink-0 text-primary" />
+                        <span className="size-3 shrink-0" />
                       )}
                       <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}

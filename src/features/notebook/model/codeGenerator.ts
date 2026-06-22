@@ -14,6 +14,14 @@ export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | nu
   'notebook.codeGenerator',
 )
 
+// Display-only mirror of the loaded model's id (TARDIS-167, review PR #88 r2).
+// The SINGLE SOURCE OF TRUTH lives in `features/web-llm` (`loadedModelIdAtom`,
+// set inside `loadModelAction`). This notebook-side slot is filled ONLY by the
+// bridge in `pages/notebook` (the layer allowed to import both features), so
+// `NotebookHeader` can read the model name WITHOUT a forbidden cross-feature
+// import. null = no model loaded.
+export const loadedModelDisplayAtom = atom<string | null>(null, 'notebook.loadedModelDisplay')
+
 export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const generator = codeGeneratorAtom()
   if (!generator) return

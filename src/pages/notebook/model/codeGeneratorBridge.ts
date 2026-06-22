@@ -1,5 +1,5 @@
-import { codeGeneratorAtom } from '@/features/notebook'
-import { engineAtom } from '@/features/web-llm'
+import { codeGeneratorAtom, loadedModelDisplayAtom } from '@/features/notebook'
+import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
 
 function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>) {
   return async (prompt: string): Promise<string> => {
@@ -31,5 +31,10 @@ export function startCodeGeneratorBridge(): () => void {
     // that ignores prevValue and returns the generator — otherwise Reatom calls the
     // generator with prevValue as `prompt` and stores the resulting Promise.
     codeGeneratorAtom.set(() => (engine ? buildGenerator(engine) : null))
+    // Mirror the loaded model's id into the notebook display slot. The source of
+    // truth stays `web-llm.loadedModelIdAtom`; this is the legitimate place to
+    // cross the feature boundary (the bridge lives in `pages/`), so NotebookHeader
+    // need not import from `features/web-llm` (review PR #88 r2).
+    loadedModelDisplayAtom.set(engine ? loadedModelIdAtom() : null)
   })
 }

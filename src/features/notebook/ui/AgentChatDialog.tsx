@@ -28,12 +28,16 @@ export const AgentChatDialog = reatomComponent(() => {
   const doSendCloud = wrap(() => {
     const val = textareaRef.current?.value.trim()
     if (!val || isSending) return
+    // Clear a stale error from the OTHER tier so the popup only ever shows the
+    // error of the tier actually running now (review PR #88 r2).
+    agentSendInBrowserAction.error.set(undefined)
     agentSendAction(val)
   })
 
   const doSendInBrowser = wrap(() => {
     const val = textareaRef.current?.value.trim()
     if (!val || isSending || !hasLocalModel) return
+    agentSendAction.error.set(undefined)
     agentSendInBrowserAction(val)
   })
 
