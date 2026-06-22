@@ -325,4 +325,43 @@ describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
     expect(await notebookStorage.get(demoId)).toBeUndefined()
     expect(notebookLoadedAtom()).toBe(true)
   })
+
+  // Bootstrap step 3: open the NEWEST locally-stored notebook by creation time.
+  const makeLocal = (id: string, createdAt: number) => ({
+    formatVersion: FORMAT_VERSION,
+    id,
+    title: `nb-${id}`,
+    createdAt,
+    updatedAt: createdAt,
+    cells: [],
+  })
+
+  test('boot (pickNewest) opens the newest local notebook (createdAt desc), not the seed', async () => {
+    await notebookStorage.put(makeLocal('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 100))
+    await notebookStorage.put(makeLocal('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 300))
+    await notebookStorage.put(makeLocal('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 200))
+
+    await loadNotebook(true)
+
+    // The slot opened the createdAt-newest local notebook (300), not the seed.
+    expect(activeNotebookIdAtom()).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+  })
+
+  test('boot (pickNewest) falls back to the per-user seed when nothing is stored locally', async () => {
+    await loadNotebook(true)
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
+    expect(await notebookStorage.get(demoId)).toBeDefined()
+  })
+
+  test('degrade/reset (pickNewest=false) stays on the seed even when other notebooks exist', async () => {
+    // The slot controller's degrade/reset path must NOT be re-routed to another
+    // notebook — it specifically wants the seed floor.
+    await notebookStorage.put(makeLocal('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 300))
+
+    await loadNotebook()
+
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
+  })
 })

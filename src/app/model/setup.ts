@@ -140,7 +140,9 @@ rootFrame.run(async () => {
     // away, seeded from the stored timestamp — instead of a blank indicator
     // until the first edit. A fresh seed / newer-format / failure returns false
     // and keeps the idle state.
-    const restored = await wrap(loadNotebook())
+    // Boot picks the newest locally-stored notebook for the slot (TARDIS-167 №23
+    // bootstrap step 3); only this boot caller passes `true`.
+    const restored = await wrap(loadNotebook(true))
     bootedNotebook = true
     if (restored) markBootRestored()
   } finally {
