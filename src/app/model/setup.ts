@@ -12,6 +12,7 @@ import {
   startNotebookListSync,
   startSlot,
 } from '@/features/notebook'
+import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
@@ -103,6 +104,15 @@ rootFrame.run(() => {
   // one session, and clear it on sign-out (#135) — the list resource does not
   // track the user itself, so a stale/foreign list would otherwise linger.
   startNotebookListSync()
+  // TARDIS-167 (review PR #88 r3): sanitise localStorage-restored model state
+  // (drop garbage/stale ids, reset a phantom selected id) SYNCHRONOUSLY before
+  // any component reads it — otherwise `new Set(downloadedModelIdsAtom())` could
+  // throw on a corrupt record and crash the page render.
+  normalizeWebLlmPersistedState()
+  // TARDIS-167 (№5, review PR #88): drop persisted "downloaded" model ids whose
+  // WebLLM cache was cleared/evicted, so the list highlight reflects the real
+  // cache. Best-effort and self-contained — never blocks boot.
+  void reconcileDownloadedModelsAction()
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order

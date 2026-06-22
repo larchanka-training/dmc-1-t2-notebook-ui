@@ -1,28 +1,52 @@
 import { useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Bot, Cloud, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
-import { agentChatOpenAtom, agentSendAction, closeAgentChatAction } from '../model/agentChat'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import {
+  agentChatOpenAtom,
+  agentSendAction,
+  agentSendInBrowserAction,
+  closeAgentChatAction,
+} from '../model/agentChat'
+import { codeGeneratorAtom } from '../model/codeGenerator'
 
 export const AgentChatDialog = reatomComponent(() => {
   const open = agentChatOpenAtom()
-  const isSending = !agentSendAction.ready()
-  const sendError = agentSendAction.error()
+  const isCloudSending = !agentSendAction.ready()
+  const isInBrowserSending = !agentSendInBrowserAction.ready()
+  const isSending = isCloudSending || isInBrowserSending
+  // In-browser tier needs a loaded WebLLM model (№4/№13): the generator slot is
+  // null until the user loads one. Mirror the cell toolbar's gate.
+  const hasLocalModel = !!codeGeneratorAtom()
+  const sendError = agentSendAction.error() ?? agentSendInBrowserAction.error()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const doSend = wrap(() => {
+  const doSendCloud = wrap(() => {
     const val = textareaRef.current?.value.trim()
     if (!val || isSending) return
+    // Clear a stale error from the OTHER tier so the popup only ever shows the
+    // error of the tier actually running now (review PR #88 r2).
+    agentSendInBrowserAction.error.set(undefined)
     agentSendAction(val)
+  })
+
+  const doSendInBrowser = wrap(() => {
+    const val = textareaRef.current?.value.trim()
+    if (!val || isSending || !hasLocalModel) return
+    agentSendAction.error.set(undefined)
+    agentSendInBrowserAction(val)
   })
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      doSend()
+      // Enter defaults to the cloud tier (always available), matching the prior
+      // single-button behaviour so the keyboard flow is unchanged.
+      doSendCloud()
     }
   }
 
@@ -48,7 +72,7 @@ export const AgentChatDialog = reatomComponent(() => {
         <div className="flex flex-col gap-3">
           <Textarea
             ref={textareaRef}
-            placeholder="e.g. fetch a list of GitHub repos for a user and log the names…"
+            placeholder="e.g. generate the first 20 Fibonacci numbers and log them…"
             rows={4}
             className="resize-none"
             disabled={isSending}
@@ -64,6 +88,11 @@ export const AgentChatDialog = reatomComponent(() => {
             </p>
           )}
 
+          {/* TARDIS-167 (№13): two explicit tiers, like the cell toolbar —
+              in-browser (WebLLM) and cloud — so it is clear which agent runs.
+              Hints use Tooltip (matching the cell toolbar), which surfaces the
+              "load a model first" reason even on the disabled in-browser button
+              — native `title` is unreliable on disabled controls (review PR #88). */}
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
@@ -72,19 +101,45 @@ export const AgentChatDialog = reatomComponent(() => {
             >
               Cancel
             </Button>
-            <Button onClick={doSend} disabled={isSending} className="gap-2">
-              {isSending ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="size-4" />
-                  Generate code
-                </>
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    onClick={doSendInBrowser}
+                    disabled={isSending || !hasLocalModel}
+                    className="gap-2"
+                  >
+                    {isInBrowserSending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Bot className="size-4" />
+                    )}
+                    In-browser
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                {hasLocalModel
+                  ? 'Generate with the in-browser model (WebLLM)'
+                  : 'Load an in-browser model first'}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button onClick={doSendCloud} disabled={isSending} className="gap-2">
+                    {isCloudSending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Cloud className="size-4" />
+                    )}
+                    Cloud
+                  </Button>
+                }
+              />
+              <TooltipContent>Generate with the cloud agent</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </DialogContent>

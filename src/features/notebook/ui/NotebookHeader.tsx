@@ -9,7 +9,7 @@ import {
   setNotebookTitle,
 } from '../model/notebook'
 import { renameListItem } from '../model/notebookList'
-import { loadedModelAtom } from '../model/codeGenerator'
+import { loadedModelDisplayAtom } from '../model/codeGenerator'
 
 const PLACEHOLDER = 'Untitled notebook'
 
@@ -22,7 +22,7 @@ const PLACEHOLDER = 'Untitled notebook'
 export const NotebookHeader = reatomComponent(() => {
   const title = notebookTitleAtom()
   const cellCount = cellsAtom().length
-  const loadedModel = loadedModelAtom()
+  const loadedModel = loadedModelDisplayAtom()
   const ref = useRef<HTMLHeadingElement>(null)
   // The title at the moment editing started, captured on focus, so Escape can
   // restore it. The atom is written only on commit, so nothing reactive changes

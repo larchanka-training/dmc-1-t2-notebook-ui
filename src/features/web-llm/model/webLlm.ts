@@ -1,4 +1,4 @@
-import { atom, action, wrap } from '@reatom/core'
+import { atom, action, wrap, withLocalStorage } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import * as webllm from '@mlc-ai/web-llm'
 
@@ -23,11 +23,65 @@ export const MODEL_CATALOG: ModelEntry[] = [
 
 export const AVAILABLE_MODELS = MODEL_CATALOG.map((m) => m.id)
 
-export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId')
+// TARDIS-167 (№5): remember the selected model across reloads. Read reactively
+// from components, so plain `withLocalStorage` (same pattern as themeModeAtom /
+// notebook.settings.lineNumbers) is enough.
+export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId').extend(
+  withLocalStorage('webLlm.modelId'),
+)
+
+// TARDIS-167 (№5): ids of models downloaded into the browser. The real weights
+// live in WebLLM's Cache Storage; this localStorage list drives the UI highlight
+// and is kept honest two ways: appended after each successful `loadModelAction`,
+// and reconciled against the actual cache on startup via
+// `reconcileDownloadedModelsAction` (review PR #88) — so a list entry whose
+// weights were evicted / cleared is dropped rather than shown with a stale check.
+export const downloadedModelIdsAtom = atom<string[]>([], 'webLlm.downloadedModelIds').extend(
+  withLocalStorage('webLlm.downloadedModelIds'),
+)
 
 export const loadProgressAtom = atom<LoadProgress | null>(null, 'webLlm.loadProgress')
 
 export const engineAtom = atom<webllm.MLCEngine | null>(null, 'webLlm.engine')
+
+// TARDIS-167 (review PR #88 r3): sanitise the localStorage-restored model state.
+// `localStorage` outlives the code — a record can be a stale id (a model dropped
+// from the catalogue), the wrong type after a manual DevTools edit / bad
+// migration, or an array with garbage entries. The UI then does
+// `new Set(downloadedModelIdsAtom())` and `<Select value={modelId}>`; a non-array
+// throws on render and a phantom id breaks the select. Normalise both atoms
+// synchronously at boot (called from setup before first paint):
+//   - downloaded ids → only known string ids from AVAILABLE_MODELS, de-duped;
+//   - selected id    → reset to the default when it is not in the catalogue.
+// Writing back also repairs the persisted storage, not just the in-memory atom.
+export function normalizeWebLlmPersistedState(): void {
+  const known = new Set(AVAILABLE_MODELS)
+
+  const rawDownloaded: unknown = downloadedModelIdsAtom()
+  const cleaned = Array.isArray(rawDownloaded)
+    ? rawDownloaded.filter((id): id is string => typeof id === 'string' && known.has(id))
+    : []
+  const deduped = [...new Set(cleaned)]
+  // Replace only when it actually changed (avoid a redundant storage write).
+  if (
+    !Array.isArray(rawDownloaded) ||
+    deduped.length !== rawDownloaded.length ||
+    deduped.some((id, i) => id !== rawDownloaded[i])
+  ) {
+    downloadedModelIdsAtom.set(deduped)
+  }
+
+  if (!known.has(modelIdAtom())) {
+    modelIdAtom.set(AVAILABLE_MODELS[1])
+  }
+}
+
+// TARDIS-167 (№15): id of the model currently LOADED into the engine (not the
+// one selected in the dropdown). The two differ once the user picks another
+// model after loading one — that is exactly when the action button must read
+// "Load model" (it will load the newly selected model) rather than "Reload"
+// (which only makes sense for re-initialising the already-loaded model).
+export const loadedModelIdAtom = atom<string | null>(null, 'webLlm.loadedModelId')
 
 export const messagesAtom = atom<ChatMessage[]>([], 'webLlm.messages')
 
@@ -37,6 +91,7 @@ export const loadModelAction = action(async () => {
   const modelId = modelIdAtom()
 
   engineAtom.set(null)
+  loadedModelIdAtom.set(null)
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
 
@@ -49,9 +104,46 @@ export const loadModelAction = action(async () => {
     }),
   )
 
+  // Set the loaded id BEFORE the engine (review PR #88 r3): the code-generator
+  // bridge subscribes to `engineAtom` and reads `loadedModelIdAtom()` inside the
+  // callback. If the engine were set first, that subscriber would fire while the
+  // id still held the PREVIOUS model, mirroring a stale name into the notebook
+  // header. Writing the id first means the engine-triggered read sees the fresh one.
+  loadedModelIdAtom.set(modelId)
   engineAtom.set(engine)
   loadProgressAtom.set(null)
+  // Record this model as downloaded (de-duped) so the list can mark it local.
+  downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))
 }, 'webLlm.loadModel').extend(withAsync())
+
+// TARDIS-167 (№5, review PR #88): reconcile the persisted downloaded-list with
+// the REAL WebLLM cache on startup. localStorage and Cache Storage are
+// independent: the user can clear site data or the browser can evict weights,
+// after which the list would still claim a model is local. Cross-check each id
+// with `webllm.hasModelInCache` and keep only those actually cached, so the UI
+// highlight reflects reality instead of a stale hint. Best-effort: any probe
+// failure leaves that id as-is (we don't drop a model just because the check
+// itself errored), and the whole action never throws into boot.
+export const reconcileDownloadedModelsAction = action(async () => {
+  const ids = downloadedModelIdsAtom()
+  if (ids.length === 0) return
+  const checks = await wrap(
+    Promise.all(
+      ids.map(async (id) => {
+        try {
+          return { id, cached: await webllm.hasModelInCache(id) }
+        } catch {
+          // Probe failed — don't penalise the id on an inconclusive check.
+          return { id, cached: true }
+        }
+      }),
+    ),
+  )
+  const stillCached = checks.filter((c) => c.cached).map((c) => c.id)
+  if (stillCached.length !== ids.length) {
+    downloadedModelIdsAtom.set(stillCached)
+  }
+}, 'webLlm.reconcileDownloadedModels').extend(withAsync())
 
 export const sendMessageAction = action(async (input: string) => {
   if (!input.trim()) return

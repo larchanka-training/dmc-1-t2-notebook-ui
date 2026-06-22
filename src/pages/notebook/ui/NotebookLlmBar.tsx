@@ -1,14 +1,16 @@
-import { useEffect } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Cpu, Loader2 } from 'lucide-react'
+import { Check, Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { cn } from '@/shared/lib/cn'
 import {
-  AVAILABLE_MODELS,
   MODEL_CATALOG,
+  downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
+  loadedModelIdAtom,
   loadProgressAtom,
   modelIdAtom,
 } from '@/features/web-llm'
@@ -16,67 +18,90 @@ import {
 export const NotebookLlmBar = reatomComponent(() => {
   const engine = engineAtom()
   const modelId = modelIdAtom()
+  const loadedModelId = loadedModelIdAtom()
   const progress = loadProgressAtom()
   const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
+  // TARDIS-167 (№5): models already downloaded into the browser are highlighted.
+  const downloaded = new Set(downloadedModelIdsAtom())
+  // TARDIS-167 (№15): "Reload" only makes sense when the SELECTED model is the one
+  // already loaded into the engine. After picking a different model the button must
+  // read "Load model" — it will load that newly selected model, not reload the old.
+  const isSelectedLoaded = !!engine && loadedModelId === modelId
+  const actionLabel = isSelectedLoaded ? 'Reload' : 'Load model'
+  const actionHint = isSelectedLoaded
+    ? 'Re-initialise the loaded model (clears its chat state)'
+    : downloaded.has(modelId)
+      ? 'Load this model into the browser (previously downloaded)'
+      : 'Download and load this model into the browser'
 
-  // Auto-load the smallest code model on first mount if no model is active or loading.
-  const autoLoad = wrap(() => {
-    if (!engineAtom() && !loadProgressAtom()) {
-      modelIdAtom.set(AVAILABLE_MODELS[0])
-      loadModelAction()
-    }
-  })
-  // autoLoad is intentionally from the first render only — it captures the
-  // Reatom context at mount time and must not re-run on subsequent renders.
-
-  useEffect(() => {
-    autoLoad()
-  }, [])
+  // TARDIS-167 (№4): model download is OPT-IN. There is deliberately NO auto-load
+  // on mount — pulling a multi-GB model into the browser without consent ate the
+  // memory of users who may not have it. The model loads ONLY when the user clicks
+  // "Load model" below. Cell / Ask-agent in-browser generate stays disabled with a
+  // tooltip until a model is loaded (see NotebookCell / AgentChatDialog).
 
   return (
-    <div className="border-b border-border bg-muted/30 px-6 py-2.5">
+    <div className="border-b border-border bg-muted/30 px-6 py-2.5" data-test-id="llm-bar">
       <div className="flex items-center gap-3">
         <Cpu className="size-4 shrink-0 text-muted-foreground" />
         <Select
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
           disabled={isLoading}
+          data-test-id="llm-bar-select"
         >
-          <SelectTrigger className="h-8 w-80 text-xs">
+          <SelectTrigger className="h-8 w-100 text-xs">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
-            {MODEL_CATALOG.map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-xs">
-                <span className="flex w-full items-center justify-between gap-4">
-                  <span>{m.id}</span>
-                  <span className="text-muted-foreground">{m.size}</span>
-                </span>
-              </SelectItem>
-            ))}
+          <SelectContent alignItemWithTrigger={false}>
+            {MODEL_CATALOG.map((m) => {
+              const isDownloaded = downloaded.has(m.id)
+              return (
+                <SelectItem key={m.id} value={m.id} className="text-xs">
+                  <span className="flex w-full items-center gap-4 justify-between">
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      {isDownloaded ? (
+                        <Check className="size-3 shrink-0 text-primary" />
+                      ) : (
+                        <span className="size-3 shrink-0" />
+                      )}
+                      <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
+                        {m.id}
+                      </span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{m.size}</span>
+                  </span>
+                </SelectItem>
+              )
+            })}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          onClick={wrap(() => {
-            loadModelAction()
-          })}
-          disabled={isLoading}
-          variant={engine ? 'outline' : 'default'}
-          className="h-8 text-xs"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
-              Loading…
-            </>
-          ) : engine ? (
-            'Reload'
-          ) : (
-            'Load model'
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="sm"
+                onClick={wrap(() => {
+                  loadModelAction()
+                })}
+                disabled={isLoading}
+                variant={isSelectedLoaded ? 'outline' : 'default'}
+                className="h-8 text-xs"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-1.5 size-3 animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  actionLabel
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent>{actionHint}</TooltipContent>
+        </Tooltip>
       </div>
 
       {progress && (

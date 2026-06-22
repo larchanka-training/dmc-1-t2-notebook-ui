@@ -1,9 +1,12 @@
-export { WebLlmChat } from './ui/WebLlmChat'
 export {
   engineAtom,
   modelIdAtom,
+  downloadedModelIdsAtom,
+  loadedModelIdAtom,
   loadProgressAtom,
   loadModelAction,
+  reconcileDownloadedModelsAction,
+  normalizeWebLlmPersistedState,
   messagesAtom,
   streamingResponseAtom,
   sendMessageAction,

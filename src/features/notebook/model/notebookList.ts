@@ -87,9 +87,13 @@ export function startNotebookListSync(): () => void {
 
 /**
  * Insert a row into the list keeping the `createdAt desc` order the sidebar is
- * fetched with (review PR #85). A no-op if the id is already present. Used by
- * both create paths so a freshly created/promoted notebook lands where the
- * server would return it (newest first), never at the bottom.
+ * fetched with (review PR #85). A no-op if the id is already present.
+ *
+ * Used only by the seed-promotion path (`promoteSeedFloorIfUnsynced`), where the
+ * promoted notebook can be OLDER than rows already in the list and so needs a
+ * real ordered insert. The ordinary `createNotebookAction` does NOT use this: a
+ * freshly created notebook is by definition the newest, so it deliberately
+ * prepends (`[optimistic, ...items]`) — the cheap equivalent for the newest row.
  */
 function insertByCreatedAtDesc(
   items: notebookApi.NotebookListItem[],
