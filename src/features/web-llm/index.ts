@@ -6,6 +6,7 @@ export {
   loadProgressAtom,
   loadModelAction,
   reconcileDownloadedModelsAction,
+  normalizeWebLlmPersistedState,
   messagesAtom,
   streamingResponseAtom,
   sendMessageAction,

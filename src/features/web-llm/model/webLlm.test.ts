@@ -12,11 +12,13 @@ vi.mock('@mlc-ai/web-llm', () => ({
 
 import * as webllm from '@mlc-ai/web-llm'
 import {
+  AVAILABLE_MODELS,
   downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
   loadedModelIdAtom,
   modelIdAtom,
+  normalizeWebLlmPersistedState,
   reconcileDownloadedModelsAction,
 } from './webLlm'
 
@@ -30,6 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   downloadedModelIdsAtom.set([])
+  modelIdAtom.set(AVAILABLE_MODELS[1])
 })
 
 describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
@@ -94,5 +97,41 @@ describe('reconcileDownloadedModelsAction (TARDIS-167 №5, review PR #88)', () 
     await wrap(reconcileDownloadedModelsAction())
 
     expect(vi.mocked(webllm.hasModelInCache)).not.toHaveBeenCalled()
+  })
+})
+
+describe('normalizeWebLlmPersistedState (TARDIS-167, review PR #88 r3)', () => {
+  test('drops non-string / unknown / duplicate downloaded ids', () => {
+    const known = AVAILABLE_MODELS[0]
+    // Simulate a corrupt persisted record (manual edit / bad migration).
+    downloadedModelIdsAtom.set([known, 'ghost-model', known, 123, null] as unknown as string[])
+
+    normalizeWebLlmPersistedState()
+
+    expect(peek(downloadedModelIdsAtom)).toEqual([known])
+  })
+
+  test('resets the downloaded list to [] when the persisted value is not an array', () => {
+    downloadedModelIdsAtom.set({ junk: true } as unknown as string[])
+
+    normalizeWebLlmPersistedState()
+
+    expect(peek(downloadedModelIdsAtom)).toEqual([])
+  })
+
+  test('resets a phantom selected model id to the default', () => {
+    modelIdAtom.set('removed-from-catalogue')
+
+    normalizeWebLlmPersistedState()
+
+    expect(peek(modelIdAtom)).toBe(AVAILABLE_MODELS[1])
+  })
+
+  test('keeps a valid selected id untouched', () => {
+    modelIdAtom.set(AVAILABLE_MODELS[3])
+
+    normalizeWebLlmPersistedState()
+
+    expect(peek(modelIdAtom)).toBe(AVAILABLE_MODELS[3])
   })
 })

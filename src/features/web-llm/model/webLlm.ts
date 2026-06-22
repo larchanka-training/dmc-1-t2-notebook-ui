@@ -44,6 +44,38 @@ export const loadProgressAtom = atom<LoadProgress | null>(null, 'webLlm.loadProg
 
 export const engineAtom = atom<webllm.MLCEngine | null>(null, 'webLlm.engine')
 
+// TARDIS-167 (review PR #88 r3): sanitise the localStorage-restored model state.
+// `localStorage` outlives the code — a record can be a stale id (a model dropped
+// from the catalogue), the wrong type after a manual DevTools edit / bad
+// migration, or an array with garbage entries. The UI then does
+// `new Set(downloadedModelIdsAtom())` and `<Select value={modelId}>`; a non-array
+// throws on render and a phantom id breaks the select. Normalise both atoms
+// synchronously at boot (called from setup before first paint):
+//   - downloaded ids → only known string ids from AVAILABLE_MODELS, de-duped;
+//   - selected id    → reset to the default when it is not in the catalogue.
+// Writing back also repairs the persisted storage, not just the in-memory atom.
+export function normalizeWebLlmPersistedState(): void {
+  const known = new Set(AVAILABLE_MODELS)
+
+  const rawDownloaded: unknown = downloadedModelIdsAtom()
+  const cleaned = Array.isArray(rawDownloaded)
+    ? rawDownloaded.filter((id): id is string => typeof id === 'string' && known.has(id))
+    : []
+  const deduped = [...new Set(cleaned)]
+  // Replace only when it actually changed (avoid a redundant storage write).
+  if (
+    !Array.isArray(rawDownloaded) ||
+    deduped.length !== rawDownloaded.length ||
+    deduped.some((id, i) => id !== rawDownloaded[i])
+  ) {
+    downloadedModelIdsAtom.set(deduped)
+  }
+
+  if (!known.has(modelIdAtom())) {
+    modelIdAtom.set(AVAILABLE_MODELS[1])
+  }
+}
+
 // TARDIS-167 (№15): id of the model currently LOADED into the engine (not the
 // one selected in the dropdown). The two differ once the user picks another
 // model after loading one — that is exactly when the action button must read
@@ -72,8 +104,13 @@ export const loadModelAction = action(async () => {
     }),
   )
 
-  engineAtom.set(engine)
+  // Set the loaded id BEFORE the engine (review PR #88 r3): the code-generator
+  // bridge subscribes to `engineAtom` and reads `loadedModelIdAtom()` inside the
+  // callback. If the engine were set first, that subscriber would fire while the
+  // id still held the PREVIOUS model, mirroring a stale name into the notebook
+  // header. Writing the id first means the engine-triggered read sees the fresh one.
   loadedModelIdAtom.set(modelId)
+  engineAtom.set(engine)
   loadProgressAtom.set(null)
   // Record this model as downloaded (de-duped) so the list can mark it local.
   downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))
