@@ -178,10 +178,15 @@ async function pickNewestLocalNotebookId(): Promise<string | undefined> {
 }
 
 async function migrateLegacySeedIfNeeded(demoId: string): Promise<void> {
-  const [demo, legacy] = await Promise.all([
-    wrap(notebookStorage.get(demoId)),
-    wrap(notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID)),
-  ])
+  // Read sequentially with `await wrap(...)` rather than `await Promise.all([wrap,
+  // wrap])`: `Promise.all` returns a NEW, unwrapped promise, so awaiting IT drops
+  // the Reatom frame — every `wrap(...)` AFTER the Promise.all (the deletes below)
+  // then throws `ReatomError: missing async stack` under production `clearStack()`.
+  // That frame loss cascaded into `loadNotebook` (its post-migration `pickNewest`
+  // / storage reads failed), which is why a fresh sign-in fell back to the seed
+  // (TARDIS-167 №23). Two IndexedDB reads in series is negligible.
+  const demo = await wrap(notebookStorage.get(demoId))
+  const legacy = await wrap(notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID))
   if (!demo && legacy) {
     const migrated: NotebookJSON = { ...legacy, id: demoId }
     await wrap(notebookStorage.put(migrated))

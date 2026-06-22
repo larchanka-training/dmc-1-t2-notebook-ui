@@ -66,9 +66,13 @@ describe('reconcileBootFromServer (TARDIS-167 №23, step 4b)', () => {
     const getSpy = vi.spyOn(notebookApi, 'get').mockResolvedValue(serverDoc(newest))
 
     expect(await reconcileBootFromServer()).toBe('reconciled')
-    // Newest (list[0]) was fetched and written into local storage.
+    // Newest (list[0]) was fetched and written into local storage, stamped with
+    // the current owner so the boot slot picker will open it (not fall to seed).
     expect(getSpy).toHaveBeenCalledWith(newest)
     expect(await notebookStorage.get(newest)).toBeDefined()
+    const state = await notebookStorage.getSyncState(newest)
+    expect(state?.ownerId).toBe(USER.id)
+    expect(state?.remoteCreated).toBe(true)
     expect(await isSeedTombstoned()).toBe(false)
   })
 

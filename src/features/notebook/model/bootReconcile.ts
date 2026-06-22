@@ -23,6 +23,7 @@
 
 import { wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { resolveDemoNotebookId } from './notebook'
 import { pullServerNotebook } from './pull'
@@ -92,6 +93,27 @@ export async function reconcileBootFromServer(): Promise<BootReconcileOutcome> {
   try {
     const full = await wrap(notebookApi.get(newest.id))
     await wrap(pullServerNotebook(full))
+    // Stamp the pulled notebook with its owner + remoteCreated sync-state. The
+    // boot slot picker (`pickNewestLocalNotebookId`) only opens notebooks proven
+    // to belong to the current user (cross-account safety); `pullServerNotebook`
+    // writes the document only, no sync-state, so without this the just-pulled
+    // notebook would be treated as unowned and the slot would fall back to the
+    // seed. It is already created server-side (we just fetched it), so
+    // `remoteCreated: true`.
+    const ownerId = userAtom()?.id
+    const existing = await wrap(notebookStorage.getSyncState(newest.id))
+    if (!existing) {
+      await wrap(
+        notebookStorage.putSyncState({
+          notebookId: newest.id,
+          remoteCreated: true,
+          dirty: false,
+          deletedCells: [],
+          ...(ownerId !== undefined ? { ownerId } : {}),
+          lastSyncedUpdatedAt: full.updatedAt,
+        }),
+      )
+    }
   } catch (error) {
     // A failed pull is not fatal: loadNotebook will seed, and the regular
     // open-into-slot / list flow can fetch it later.
