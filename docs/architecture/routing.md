@@ -42,6 +42,13 @@ prefix:
 | `/components/shadcn` | `ShadcnComponentsPage` | `src/pages/shadcn-components/` |
 | `/components/custom` | `CustomComponentsPage` | `src/pages/custom-components/` |
 | `/about`             | `AboutPage`            | `src/pages/about/`             |
+| `/usage`             | `UsagePage`            | `src/pages/usage/`             |
+| `/llm-playground`    | `LlmPlaygroundPage`    | `src/pages/llm-playground/`    |
+| _any unknown URL_    | `NotFoundPage` (404)   | `src/pages/not-found/`         |
+
+`/about` and `/usage` are public (no `AuthRouteGuard`); the rest of the
+feature pages stay behind it. The 404 row is not a registered route — it is
+the root layout's fallback when no child route matches (see below).
 
 ---
 
@@ -49,14 +56,17 @@ prefix:
 
 ```
 rootRoute (layout: true)                    src/app/model/routes.tsx
-  └── render(self) → <AppLayout>{self.outlet()}</AppLayout>
+  └── render(self) → <AppLayout>{outlet().length ? outlet() : <NotFoundPage/>}</AppLayout>
         │
         └── child page routes (registered as side effects when their modules load)
               ├── notebookRoute    path: ''                  → NotebookPage
               ├── loginRoute       path: 'login'             → LoginPage
-              ├── aboutRoute       path: 'about'             → AboutPage
+              ├── aboutRoute       path: 'about'             → AboutPage (public)
+              ├── usageRoute       path: 'usage'             → UsagePage (public)
+              ├── llmPlaygroundRoute path: 'llm-playground'  → LlmPlaygroundPage
               ├── shadcnRoute      path: 'components/shadcn' → ShadcnComponentsPage
               └── customRoute     path: 'components/custom'  → CustomComponentsPage
+        (no child matches → empty outlet → NotFoundPage)
 ```
 
 `App.tsx` renders the root and imports each page module so their `reatomRoute(...)` calls register at module-evaluation time:
@@ -90,7 +100,13 @@ export const rootRoute = reatomRoute({
   path: basePath,
   layout: true,
   render(self) {
-    return <AppLayout>{self.outlet()}</AppLayout>
+    // `outlet()` holds the rendered children of the matched child route. When
+    // NO child matches (an unknown URL under the base path) it is empty — render
+    // the 404 page instead of a blank shell. The exact base URL is owned by the
+    // notebook route (path ''), so an empty outlet is a genuine no-match.
+    const children = self.outlet()
+    const content = children.length > 0 ? children : <NotFoundPage />
+    return <AppLayout>{content}</AppLayout>
   },
 })
 ```

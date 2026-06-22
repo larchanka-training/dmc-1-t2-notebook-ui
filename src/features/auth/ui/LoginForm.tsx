@@ -18,31 +18,77 @@ import {
 import { DevOtpBanner } from './DevOtpBanner'
 import { OtpInput } from './OtpInput'
 
+// TARDIS-167 (№21): step-1 email form as its own component, mounted ONLY while
+// `step === 1`. The email field is UNCONTROLLED (defaultValue + ref): a
+// controlled `value` re-set the input on every keystroke (writing the atom
+// re-renders this reatomComponent outside React's input-event batch, collapsing
+// the caret to the end). `onChange` still mirrors into the atom (handlers + the
+// step-2 subtitle read it). Because this component UNMOUNTS on the move to
+// step 2 and re-MOUNTS on return, `initialEmailRef` re-seeds from the live atom
+// each time — so "← Use a different email" shows the previously typed address,
+// not a stale value frozen at the first LoginForm mount (review PR #89).
+const EmailStep = reatomComponent(() => {
+  const email = loginEmailAtom()
+  const isSending = !requestOtpAction.ready()
+  const sendError = requestOtpAction.error()?.message ?? null
+  const emailRef = useRef<HTMLInputElement>(null)
+  // Frozen at THIS component's mount (not LoginForm's): feeding the live atom
+  // into `defaultValue` makes Base UI warn about changing an uncontrolled
+  // control's default. Re-mounting on each step-1 entry re-seeds it correctly.
+  const initialEmailRef = useRef(loginEmailAtom())
+
+  const onSendCode = wrap(async (e: FormEvent) => {
+    e.preventDefault()
+    try {
+      await sendCodeAction(email)
+    } catch {
+      // Error displayed via requestOtpAction.error().
+    }
+  })
+
+  return (
+    <form onSubmit={onSendCode} className="space-y-4">
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium" htmlFor="email">
+          Email
+        </label>
+        <Input
+          id="email"
+          ref={emailRef}
+          type="email"
+          placeholder="you@example.com"
+          autoComplete="email"
+          required
+          defaultValue={initialEmailRef.current}
+          onChange={wrap((e) => loginEmailAtom.set(e.target.value))}
+          disabled={isSending}
+          className="h-[38px]"
+        />
+      </div>
+
+      {sendError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {sendError}
+        </p>
+      ) : null}
+
+      <Button className="h-11 w-full font-semibold" type="submit" disabled={isSending || !email}>
+        {isSending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+        {isSending ? 'Sending…' : 'Send code'}
+      </Button>
+    </form>
+  )
+}, 'EmailStep')
+
 export const LoginForm = reatomComponent(() => {
   const step = loginStepAtom()
   const email = loginEmailAtom()
   const otp = loginOtpAtom()
-  // TARDIS-167 (№21): the email field is UNCONTROLLED (defaultValue + this ref).
-  // A controlled `value={email}` re-set the input on every keystroke, because
-  // writing the atom re-renders this reatomComponent outside React's input-event
-  // batch — React then re-applied `value` and collapsed the caret to the end
-  // (even a bare Shift/Ctrl tap triggered a re-render). The atom is still written
-  // on change (handlers + the step-2 subtitle read it); we just don't bind it
-  // back into `value`. The step-1 form unmounts on step change, so returning via
-  // "← Use a different email" remounts the input with the seeded value — the
-  // previously typed address is preserved without a controlled binding.
-  const emailRef = useRef<HTMLInputElement>(null)
-  // Freeze the default value at mount: feeding the live atom into `defaultValue`
-  // makes Base UI warn ("changing the default value of an uncontrolled control")
-  // whenever a re-render carries a new atom value. The form remounts on step
-  // change, so this ref re-seeds correctly on each entry to step 1.
-  const initialEmailRef = useRef(loginEmailAtom())
   const devData = devOtpDataAtom()
   const countdown = resendCountdownAtom()
 
   const isSending = !requestOtpAction.ready()
   const isVerifying = !verifyOtpAction.ready()
-  const sendError = requestOtpAction.error()?.message ?? null
   const verifyError = verifyOtpAction.error()?.message ?? null
 
   // wrap() must be called at render time, where reatomComponent provides the
@@ -70,15 +116,6 @@ export const LoginForm = reatomComponent(() => {
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
-
-  const onSendCode = wrap(async (e: FormEvent) => {
-    e.preventDefault()
-    try {
-      await sendCodeAction(email)
-    } catch {
-      // Error displayed via requestOtpAction.error().
-    }
-  })
 
   const onVerify = wrap(async (e: FormEvent) => {
     e.preventDefault()
@@ -143,40 +180,7 @@ export const LoginForm = reatomComponent(() => {
       </div>
 
       {step === 1 ? (
-        <form onSubmit={onSendCode} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="email">
-              Email
-            </label>
-            <Input
-              id="email"
-              ref={emailRef}
-              type="email"
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-              defaultValue={initialEmailRef.current}
-              onChange={wrap((e) => loginEmailAtom.set(e.target.value))}
-              disabled={isSending}
-              className="h-[38px]"
-            />
-          </div>
-
-          {sendError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {sendError}
-            </p>
-          ) : null}
-
-          <Button
-            className="h-11 w-full font-semibold"
-            type="submit"
-            disabled={isSending || !email}
-          >
-            {isSending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            {isSending ? 'Sending…' : 'Send code'}
-          </Button>
-        </form>
+        <EmailStep />
       ) : (
         <div className="space-y-4">
           {/* Gated by the response alone (docs/auth.md §14.2): the backend

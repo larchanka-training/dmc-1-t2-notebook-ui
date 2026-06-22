@@ -4,8 +4,9 @@
 // `import.meta.env.DEV &&` guard that hid the banner in preview deployments
 // (production builds talking to a dev backend).
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { auth as authApi } from '@/shared/api'
 import { devOtpDataAtom, loginEmailAtom, loginStepAtom } from '../model/loginForm'
 import { LoginForm } from './LoginForm'
 
@@ -61,5 +62,27 @@ describe('LoginForm dev OTP banner', () => {
     // but onChange must still mirror into the atom so the handlers + step-2
     // subtitle see the address.
     expect(loginEmailAtom()).toBe('a@b.com')
+  })
+
+  test('returning from the OTP step shows the previously typed email, not a stale value (TARDIS-167 №21, review PR #89)', async () => {
+    const user = userEvent.setup()
+    // 204 (no dev otp) — just advance to step 2.
+    vi.spyOn(authApi, 'requestOtp').mockResolvedValue(null)
+    render(<LoginForm />)
+
+    await user.type(screen.getByLabelText(/email/i), 'a@b.com')
+    await user.click(screen.getByRole('button', { name: /send code/i }))
+
+    // Now on step 2 (the OTP entry screen).
+    await waitFor(() => expect(screen.getByText(/we just sent to/i)).toBeInTheDocument())
+
+    // Go back to the email step.
+    await user.click(screen.getByRole('button', { name: /use a different email/i }))
+
+    // The email field must show the address the user typed — the EmailStep
+    // remounts and re-seeds its defaultValue from the live atom, so it is NOT
+    // empty/stale (the bug: a value frozen at the first LoginForm mount).
+    const field = screen.getByLabelText(/email/i) as HTMLInputElement
+    expect(field).toHaveValue('a@b.com')
   })
 })
