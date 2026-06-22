@@ -1,44 +1,79 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { ArrowLeft, BookText } from 'lucide-react'
 
-// 404 page ported from new-design-v2/404.html (TARDIS-167 №14). The "0" in 404
-// is a pair of googly eyes that track the cursor; copy is in English per the UI
-// language policy. Standalone — NOT behind the auth wall (a wrong URL must be
-// reachable signed-out too); rendered by the root route when no child matches.
+// 404 page ported pixel-for-pixel from new-design-v2/404.html (TARDIS-167 №14).
+// The "0" in 404 is a pair of googly eyes whose pupils track the cursor, with an
+// occasional blink. Copy is in English per the UI language policy. Standalone —
+// NOT behind the auth wall (a wrong URL must be reachable signed-out); rendered
+// by the root route when no child route matches.
 const HOME_PATH = import.meta.env.BASE_URL
 
-export default function NotFoundPage() {
-  const eyesRef = useRef<HTMLSpanElement>(null)
+// Sizes are in `em` (relative to the 404 font-size), exactly like the prototype,
+// so the eyes scale with the responsive 88px→112px glyph.
+const EYE_ZERO: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '0.04em',
+  width: '0.66em',
+  height: '0.8em',
+  margin: '0 0.03em',
+  boxSizing: 'border-box',
+  border: '0.1em solid var(--foreground)',
+  borderRadius: '50%',
+  verticalAlign: 'baseline',
+}
+const EYE: CSSProperties = {
+  position: 'relative',
+  width: '0.2em',
+  height: '0.2em',
+  borderRadius: '50%',
+  background: '#fbfbf9',
+  boxShadow: 'inset 0 0 0 0.012em rgb(0 0 0 / 0.12)',
+  transition: 'transform 0.1s ease',
+}
+const PUPIL: CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  width: '0.1em',
+  height: '0.1em',
+  borderRadius: '50%',
+  background: '#15110e',
+  transform: 'translate(-50%, -50%)',
+  transition: 'transform 0.06s linear',
+}
 
-  // Pupils follow the cursor. Pure DOM (no React state) so the rAF loop never
-  // re-renders; cleaned up on unmount.
+export default function NotFoundPage() {
+  const zeroRef = useRef<HTMLSpanElement>(null)
+
   useEffect(() => {
-    const root = eyesRef.current
-    if (!root) return
-    const eyes = Array.from(root.querySelectorAll<HTMLElement>('.eye'))
+    const zero = zeroRef.current
+    if (!zero) return
+    const eyes = Array.from(zero.querySelectorAll<HTMLElement>('[data-eye]'))
     if (eyes.length === 0) return
 
     let targetX = window.innerWidth / 2
     let targetY = 0
-    let frame = 0
+    let raf = 0
 
     const render = () => {
-      frame = 0
+      raf = 0
       for (const eye of eyes) {
         const pupil = eye.firstElementChild as HTMLElement | null
         if (!pupil) continue
         const r = eye.getBoundingClientRect()
         const cx = r.left + r.width / 2
         const cy = r.top + r.height / 2
-        const angle = Math.atan2(targetY - cy, targetX - cx)
+        const ang = Math.atan2(targetY - cy, targetX - cx)
         const max = (r.width / 2 - pupil.offsetWidth / 2) * 0.92
-        const px = Math.cos(angle) * max
-        const py = Math.sin(angle) * max
+        const px = Math.cos(ang) * max
+        const py = Math.sin(ang) * max
         pupil.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`
       }
     }
     const schedule = () => {
-      if (frame === 0) frame = requestAnimationFrame(render)
+      if (raf === 0) raf = requestAnimationFrame(render)
     }
     const onMove = (e: PointerEvent) => {
       targetX = e.clientX
@@ -49,10 +84,30 @@ export default function NotFoundPage() {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('resize', schedule)
     render()
+
+    // Occasional blink: briefly squash the eyeballs (the prototype's .blink).
+    let blinkTimer = 0
+    let unblinkTimer = 0
+    const blink = () => {
+      blinkTimer = window.setTimeout(
+        () => {
+          for (const eye of eyes) eye.style.transform = 'scaleY(0.12)'
+          unblinkTimer = window.setTimeout(() => {
+            for (const eye of eyes) eye.style.transform = ''
+          }, 150)
+          blink()
+        },
+        2400 + Math.random() * 3600,
+      )
+    }
+    blink()
+
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('resize', schedule)
-      if (frame) cancelAnimationFrame(frame)
+      if (raf) cancelAnimationFrame(raf)
+      clearTimeout(blinkTimer)
+      clearTimeout(unblinkTimer)
     }
   }, [])
 
@@ -66,20 +121,18 @@ export default function NotFoundPage() {
         {/* 404 with googly eyes for the "0" */}
         <div className="mb-3 flex items-baseline gap-4">
           <span
-            ref={eyesRef}
-            className="inline-flex select-none items-center font-mono text-[88px] leading-none font-bold tracking-[-0.04em] sm:text-[112px]"
+            ref={zeroRef}
+            className="inline-flex select-none items-center font-mono text-[88px] leading-none font-bold text-foreground sm:text-[112px]"
+            style={{ fontFeatureSettings: '"ss03"', letterSpacing: '-0.04em' }}
             aria-label="404"
           >
             <span aria-hidden="true">4</span>
-            <span
-              className="mx-[0.03em] box-border inline-flex h-[0.8em] w-[0.66em] items-center justify-center gap-[0.04em] rounded-full border-[0.1em] border-foreground align-baseline"
-              aria-hidden="true"
-            >
-              <span className="relative h-[0.2em] w-[0.2em] rounded-full bg-white shadow-[inset_0_0_0_0.012em_rgb(0_0_0/0.12)]">
-                <span className="absolute top-1/2 left-1/2 h-[0.1em] w-[0.1em] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#15110e]" />
+            <span style={EYE_ZERO} aria-hidden="true">
+              <span data-eye style={EYE}>
+                <span style={PUPIL} />
               </span>
-              <span className="relative h-[0.2em] w-[0.2em] rounded-full bg-white shadow-[inset_0_0_0_0.012em_rgb(0_0_0/0.12)]">
-                <span className="absolute top-1/2 left-1/2 h-[0.1em] w-[0.1em] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#15110e]" />
+              <span data-eye style={EYE}>
+                <span style={PUPIL} />
               </span>
             </span>
             <span aria-hidden="true">4</span>
