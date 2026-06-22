@@ -5,6 +5,7 @@ export {
   loadedModelIdAtom,
   loadProgressAtom,
   loadModelAction,
+  reconcileDownloadedModelsAction,
   messagesAtom,
   streamingResponseAtom,
   sendMessageAction,

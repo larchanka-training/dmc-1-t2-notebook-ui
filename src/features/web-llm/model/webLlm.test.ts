@@ -7,6 +7,7 @@ import { peek, wrap } from '@reatom/core'
 // itself (review PR #88).
 vi.mock('@mlc-ai/web-llm', () => ({
   CreateMLCEngine: vi.fn(async () => ({ stub: 'engine' })),
+  hasModelInCache: vi.fn(async () => true),
 }))
 
 import * as webllm from '@mlc-ai/web-llm'
@@ -16,6 +17,7 @@ import {
   loadModelAction,
   loadedModelIdAtom,
   modelIdAtom,
+  reconcileDownloadedModelsAction,
 } from './webLlm'
 
 beforeEach(() => {
@@ -23,6 +25,7 @@ beforeEach(() => {
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
   vi.mocked(webllm.CreateMLCEngine).mockClear()
+  vi.mocked(webllm.hasModelInCache).mockReset().mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -61,5 +64,35 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
       'Llama-3.2-1B-Instruct-q4f32_1-MLC',
     ])
     expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+  })
+})
+
+describe('reconcileDownloadedModelsAction (TARDIS-167 №5, review PR #88)', () => {
+  test('drops ids whose weights are no longer in the WebLLM cache', async () => {
+    downloadedModelIdsAtom.set(['cached-model', 'evicted-model'])
+    vi.mocked(webllm.hasModelInCache).mockImplementation(
+      async (id: string) => id === 'cached-model',
+    )
+
+    await wrap(reconcileDownloadedModelsAction())
+
+    expect(peek(downloadedModelIdsAtom)).toEqual(['cached-model'])
+  })
+
+  test('keeps an id when the cache probe throws (inconclusive, do not penalise)', async () => {
+    downloadedModelIdsAtom.set(['flaky-model'])
+    vi.mocked(webllm.hasModelInCache).mockRejectedValue(new Error('probe boom'))
+
+    await wrap(reconcileDownloadedModelsAction())
+
+    expect(peek(downloadedModelIdsAtom)).toEqual(['flaky-model'])
+  })
+
+  test('no-op on an empty list (no cache probes)', async () => {
+    downloadedModelIdsAtom.set([])
+
+    await wrap(reconcileDownloadedModelsAction())
+
+    expect(vi.mocked(webllm.hasModelInCache)).not.toHaveBeenCalled()
   })
 })
