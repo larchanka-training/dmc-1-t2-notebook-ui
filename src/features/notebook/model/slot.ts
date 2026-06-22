@@ -22,6 +22,7 @@ import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { pullServerNotebook } from './pull'
+import { reconcileBootFromServer } from './bootReconcile'
 
 // Live teardown handles for the bindings of the notebook currently in the slot.
 // `null` when a binding is not running (AI context only runs in persisted mode).
@@ -203,10 +204,17 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     return
   }
   try {
-    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution, so
-    // the floor becomes THIS owner's deterministic demo notebook.
+    // First sign-in / account switch is a boot for THIS owner (TARDIS-167 №23):
+    // reconcile local storage against the server (pull the newest notebook, honour
+    // a deleted-seed tombstone) so a fresh device opens the user's newest notebook
+    // instead of a brand-new seed. Best-effort; never blocks the slot.
+    await wrap(reconcileBootFromServer())
+    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution; with
+    // `pickNewest` it then opens the newest notebook OWNED BY this user (the seed
+    // id is derived from user.id; others are matched by sync-state ownerId), so
+    // the slot never lands on another account's local notebook.
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
-    await wrap(loadNotebook())
+    await wrap(loadNotebook(true))
     startBindings()
     slotOpenErrorAtom.set(null)
   } catch (error) {

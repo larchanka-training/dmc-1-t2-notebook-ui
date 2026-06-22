@@ -146,11 +146,34 @@ function resetToFreshSeed(demoId: string): void {
  * re-opened notebook does not outrank a newer one; we sort explicitly here.
  */
 async function pickNewestLocalNotebookId(): Promise<string | undefined> {
+  // SAFETY (AGENTS §11, cross-account): IndexedDB is shared by every account on
+  // the device and `NotebookJSON` carries no owner, so a bare "newest local"
+  // could open another account's notebook under this user. Restrict the choice
+  // to notebooks that belong to the CURRENT user, determined deterministically
+  // from `user.id`:
+  //   • the per-user seed id (`resolveDemoNotebookId`) is derived from `user.id`,
+  //     so it is always ours; and
+  //   • every other notebook is ours only when its sync-state `ownerId` matches.
+  // A notebook with no sync-state and a non-seed id has no provable owner — it is
+  // excluded rather than risk a leak.
+  const ownerId = userAtom()?.id?.toLowerCase()
+  if (!ownerId) return undefined
+  const demoId = await wrap(resolveDemoNotebookId())
+
   const local = await wrap(notebookStorage.list())
-  if (local.length === 0) return undefined
+  const mine: NotebookJSON[] = []
+  for (const nb of local) {
+    if (nb.id === demoId) {
+      mine.push(nb)
+      continue
+    }
+    const state = await wrap(notebookStorage.getSyncState(nb.id))
+    if (state?.ownerId?.toLowerCase() === ownerId) mine.push(nb)
+  }
+  if (mine.length === 0) return undefined
   // createdAt desc, ties broken by id desc — a deterministic "newest first" that
   // matches the sidebar order.
-  const sorted = [...local].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+  const sorted = [...mine].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
   return sorted[0].id
 }
 

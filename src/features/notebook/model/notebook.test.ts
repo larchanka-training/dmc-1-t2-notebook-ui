@@ -326,7 +326,7 @@ describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
     expect(notebookLoadedAtom()).toBe(true)
   })
 
-  // Bootstrap step 3: open the NEWEST locally-stored notebook by creation time.
+  // Bootstrap step 3: open the NEWEST locally-stored notebook OWNED by this user.
   const makeLocal = (id: string, createdAt: number) => ({
     formatVersion: FORMAT_VERSION,
     id,
@@ -335,16 +335,43 @@ describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
     updatedAt: createdAt,
     cells: [],
   })
+  // Mark a stored notebook as owned by `ownerId` via its sync-state (the only
+  // place ownership lives — NotebookJSON carries none).
+  const own = async (id: string, ownerId: string) => {
+    await notebookStorage.putSyncState({
+      notebookId: id,
+      remoteCreated: true,
+      dirty: false,
+      ownerId,
+      deletedCells: [],
+    })
+  }
 
-  test('boot (pickNewest) opens the newest local notebook (createdAt desc), not the seed', async () => {
+  test('boot (pickNewest) opens the newest notebook OWNED by this user (createdAt desc)', async () => {
     await notebookStorage.put(makeLocal('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 100))
+    await own('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', USER.id)
     await notebookStorage.put(makeLocal('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 300))
+    await own('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', USER.id)
     await notebookStorage.put(makeLocal('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 200))
+    await own('cccccccc-cccc-4ccc-8ccc-cccccccccccc', USER.id)
 
     await loadNotebook(true)
 
-    // The slot opened the createdAt-newest local notebook (300), not the seed.
+    // The slot opened the createdAt-newest OWNED notebook (300), not the seed.
     expect(activeNotebookIdAtom()).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+  })
+
+  test('boot (pickNewest) ignores another account local notebooks (cross-account safety)', async () => {
+    // A newer notebook owned by a DIFFERENT account is present on this shared
+    // device; it must NOT be opened under the current user. With no notebook of
+    // ours, boot falls back to our per-user seed.
+    await notebookStorage.put(makeLocal('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 999))
+    await own('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'someone-else')
+
+    await loadNotebook(true)
+
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
   })
 
   test('boot (pickNewest) falls back to the per-user seed when nothing is stored locally', async () => {
