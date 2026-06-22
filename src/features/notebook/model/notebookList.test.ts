@@ -1,11 +1,14 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, notebook as notebookApi } from '@/shared/api'
+import { NotFoundError } from '@/shared/api/errors'
 import { userAtom } from '@/entities/session'
 import * as idLib from '@/shared/lib/id'
 import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
+import * as notebookModel from './notebook'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { isSeedTombstoned } from './seedTombstone'
 import {
   createNotebookAction,
   promoteSeedFloorIfUnsynced,
@@ -296,17 +299,23 @@ describe('promoteSeedFloorIfUnsynced (TARDIS-167 #9)', () => {
 describe('deleteNotebookAction', () => {
   const NB_ID = '55555555-5555-4555-8555-555555555555'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     slotMock.quiesceActiveSlot.mockReset().mockResolvedValue(undefined)
     slotMock.restoreActiveSlotBindings.mockReset()
     slotMock.settleDeletedSlotToFloor.mockReset().mockResolvedValue(undefined)
     vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
     vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    // A signed-in user so the per-account seed tombstone has an owner; clear any
+    // tombstone left by a previous test for isolation.
+    userAtom.set({ id: 'delete-suite-owner', roles: [] } as never)
+    await notebookStorage.clearAll()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    await notebookStorage.clearAll()
+    userAtom.set(null)
   })
 
   test('removes the row, deletes server-side, and cleans up local storage', async () => {
@@ -392,6 +401,48 @@ describe('deleteNotebookAction', () => {
     expect(removeSpy).not.toHaveBeenCalled()
     expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
     expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
+  })
+
+  // TARDIS-167 №23 contract A: deleting the seed leaves a durable tombstone so
+  // boot never resurrects it.
+  test('tombstones the seed when the seed notebook is deleted', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(SEED_ID, 'Welcome')])
+
+    await deleteNotebookAction(SEED_ID)
+
+    expect(await isSeedTombstoned()).toBe(true)
+    expect(peek(notebookListResource.data)).toEqual([])
+  })
+
+  test('does not tombstone when a non-seed notebook is deleted', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(NB_ID, 'Regular')])
+
+    await deleteNotebookAction(NB_ID)
+
+    expect(await isSeedTombstoned()).toBe(false)
+  })
+
+  // A stale client deleting an already-deleted notebook gets 404; that is an
+  // idempotent success, not a "Delete failed" error.
+  test('treats a 404 as an idempotent success and still tombstones the seed', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockRejectedValue(
+      new NotFoundError('NOTEBOOK_NOT_FOUND', 'Notebook not found'),
+    )
+    notebookListResource.data.set([listItem(SEED_ID, 'Welcome')])
+
+    // Resolves (no throw) — the dialog must NOT show a failure.
+    await expect(deleteNotebookAction(SEED_ID)).resolves.toBeUndefined()
+    // Row stays removed and the seed is tombstoned.
+    expect(peek(notebookListResource.data)).toEqual([])
+    expect(await isSeedTombstoned()).toBe(true)
   })
 })
 

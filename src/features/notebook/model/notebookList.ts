@@ -8,11 +8,13 @@ import {
   wrap,
 } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { NotFoundError } from '@/shared/api/errors'
 import { userAtom } from '@/entities/session'
 import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { notebookStorage } from '../persistence/activeStorage'
-import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, resolveDemoNotebookId } from './notebook'
+import { setSeedTombstone } from './seedTombstone'
 import {
   bumpSlotGeneration,
   quiesceActiveSlot,
@@ -315,18 +317,46 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
     await wrap(quiesceActiveSlot())
   }
 
+  // Is this the user's welcome/feature-demo seed? If so, deleting it must leave a
+  // durable tombstone (TARDIS-167 №23 contract A) so boot never resurrects it.
+  // Resolved before the server call so the 404 (already-deleted) path can tombstone
+  // too. Best-effort: a resolution failure (e.g. signed out) must not block delete.
+  let isSeed = false
+  try {
+    isSeed = id === (await wrap(resolveDemoNotebookId()))
+  } catch {
+    // signed out / id unresolvable — cannot be the per-user seed; leave isSeed=false
+  }
+
   // Optimistically remove the row; a failed DELETE rolls it back (withTransaction).
   notebookListResource.data.set((items) => items.filter((it) => it.id !== id))
 
   try {
     await wrap(notebookApi.remove(id))
   } catch (error) {
-    // The DELETE failed (offline/5xx). withTransaction will roll the row back; we
-    // must also re-arm the slot we quiesced, so the user is left exactly where
-    // they were (open notebook, bindings live, pending edits intact). Re-throw so
-    // the transaction rolls back and the dialog surfaces the failure.
-    if (wasActive) restoreActiveSlotBindings()
-    throw error
+    // A 404 (NOTEBOOK_NOT_FOUND) means the notebook is ALREADY deleted server-side
+    // — a stale client (e.g. the seed was deleted on another device). That is not
+    // a failure: treat it as a successful delete (idempotent) so the row stays
+    // removed and we still tombstone/clean up, instead of showing "Delete failed".
+    if (!(error instanceof NotFoundError)) {
+      // A real failure (offline/5xx). withTransaction rolls the row back; re-arm
+      // the slot we quiesced so the user is left exactly where they were, then
+      // re-throw so the dialog surfaces the failure.
+      if (wasActive) restoreActiveSlotBindings()
+      throw error
+    }
+    console.info(`notebook.delete: ${id} was already deleted server-side (404); treating as done`)
+  }
+
+  // The seed was deleted (by us now, or already gone server-side): record the
+  // tombstone so boot does not recreate it. Best-effort — a meta-write hiccup
+  // must not roll back a delete that already succeeded.
+  if (isSeed) {
+    try {
+      await wrap(setSeedTombstone())
+    } catch (error) {
+      console.warn('notebook.delete: failed to record the seed tombstone', error)
+    }
   }
 
   // DELETE committed. From here nothing may throw out of the action, or

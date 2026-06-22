@@ -7,6 +7,7 @@ import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
 import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 import { DEMO_CELLS, SEED_TITLE } from './featureDemoNotebook'
+import { isSeedTombstoned } from './seedTombstone'
 import { userAtom } from '@/entities/session'
 import { uuidV5 } from '@/shared/lib/id'
 
@@ -221,6 +222,14 @@ export const loadNotebook = action(async () => {
     if (stored) {
       restoreNotebook(stored)
       restored = true
+    } else if (await wrap(isSeedTombstoned())) {
+      // The user deleted their welcome/feature-demo seed (TARDIS-167 №23 contract
+      // A). Do NOT recreate it: writing a fresh seed here is exactly the bug that
+      // resurrected a deleted welcome notebook on every boot (and then failed to
+      // sync against the server-side deleted id). Leave the in-memory seed for the
+      // brief pre-load paint, but persist nothing — the full boot rework (Commit 3)
+      // picks the newest remaining notebook for the slot.
+      notebookBaseUpdatedAtAtom.set(null)
     } else {
       // No stored notebook for the active id. Establish a FRESH welcome seed in
       // memory before snapshotting it: `notebookSnapshot()` serializes the current

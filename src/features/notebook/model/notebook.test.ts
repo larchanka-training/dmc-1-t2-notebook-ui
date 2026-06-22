@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { userAtom } from '@/entities/session'
+import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
 import {
   activeNotebookIdAtom,
@@ -7,13 +9,17 @@ import {
   cellsAtom,
   changeCellKind,
   deleteCell,
+  loadNotebook,
   LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
+  notebookLoadedAtom,
   notebookSnapshot,
+  resolveDemoNotebookId,
   restoreNotebook,
   updateCellCode,
 } from './notebook'
+import { setSeedTombstone } from './seedTombstone'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
 
 describe('notebook store', () => {
@@ -286,5 +292,37 @@ describe('activeNotebookIdAtom (slot id source)', () => {
     // serializer keys the snapshot by the active id so autosave writes under it.
     expect(activeNotebookIdAtom()).toBe(otherId)
     expect(notebookSnapshot().id).toBe(otherId)
+  })
+})
+
+describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
+  const USER = { id: 'boot-owner', roles: [] }
+
+  beforeEach(async () => {
+    await notebookStorage.clearAll()
+    userAtom.set(USER as never)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    notebookLoadedAtom.set(false)
+  })
+  afterEach(async () => {
+    await notebookStorage.clearAll()
+    userAtom.set(null)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('recreates the seed on boot when it is NOT tombstoned', async () => {
+    await loadNotebook()
+    const demoId = await resolveDemoNotebookId()
+    // A fresh welcome seed was persisted under the per-user demo id.
+    expect(await notebookStorage.get(demoId)).toBeDefined()
+  })
+
+  test('does NOT recreate the seed on boot when it is tombstoned', async () => {
+    await setSeedTombstone()
+    await loadNotebook()
+    const demoId = await resolveDemoNotebookId()
+    // The deleted seed stays gone — boot must not resurrect it.
+    expect(await notebookStorage.get(demoId)).toBeUndefined()
+    expect(notebookLoadedAtom()).toBe(true)
   })
 })
