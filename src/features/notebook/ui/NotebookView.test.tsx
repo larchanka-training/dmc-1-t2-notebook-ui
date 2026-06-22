@@ -23,11 +23,10 @@ function getCodeEditors() {
 }
 
 async function addCodeCell(user: UserEvent) {
-  // The inserter renders direct "Code" / "Text" pills (no overflow menu). The
-  // end-of-notebook strip is always present; click its "Code" pill (the last
-  // one, since between-cell gutters also expose a "Code" pill).
-  const codeButtons = screen.getAllByRole('button', { name: /^code$/i })
-  await user.click(codeButtons[codeButtons.length - 1])
+  // TARDIS-167 (№11): the end-of-notebook inserter is now a single "Add cell"
+  // button that opens a menu (Code / Text / Ask agent). Open it, then pick Code.
+  await user.click(screen.getByRole('button', { name: /add cell/i }))
+  await user.click(await screen.findByRole('menuitem', { name: /^code/i }))
 }
 
 describe('NotebookView (RTL integration)', () => {
@@ -52,6 +51,20 @@ describe('NotebookView (RTL integration)', () => {
     await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
     await addCodeCell(user)
     await waitFor(() => expect(getCodeEditors()).toHaveLength(2))
+  })
+
+  test('end-of-notebook inserter is a single "Add cell" menu with three items (TARDIS-167 №11)', async () => {
+    const user = userEvent.setup()
+    renderView()
+    await waitFor(() => expect(getCodeEditors()).toHaveLength(1))
+
+    // A single subtle "Add cell" button (not two bare Code/Text pills).
+    await user.click(screen.getByRole('button', { name: /add cell/i }))
+
+    // Opening it reveals exactly the three tiers from the design.
+    expect(await screen.findByRole('menuitem', { name: /^code/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /^text/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /ask agent/i })).toBeInTheDocument()
   })
 
   test('running a cell populates its output area', async () => {

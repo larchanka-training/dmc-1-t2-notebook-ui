@@ -1,5 +1,11 @@
 import { useEffect } from 'react'
-import { Code2, Sparkles, Type } from 'lucide-react'
+import { Code2, Plus, Sparkles, Type } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/shared/ui/dropdown-menu'
 import { appPath } from '@/shared/lib/paths'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -187,7 +193,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
 
 interface CellInserterProps {
   afterId?: string
-  variant?: 'between' | 'end'
+  variant?: 'between' | 'end' | 'empty'
 }
 
 const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'between' }) => {
@@ -202,8 +208,12 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
   const pill =
     'inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[11.5px] font-medium text-foreground shadow-[var(--shadow-pop)] transition-colors hover:border-primary hover:text-primary'
 
-  if (variant === 'end') {
-    // Full-width dashed "Add cell" affordance at the end of the notebook.
+  if (variant === 'empty') {
+    // The zero-cell empty state keeps THREE explicit full-width buttons (Code /
+    // Text / Ask agent): with no cells at all, a direct one-click choice is
+    // friendlier than a single button hiding a menu. (№11 only restyles the
+    // END-of-notebook inserter, not this empty-state affordance.) "Ask agent"
+    // opens the same dialog as the between-cells inserter.
     return (
       <div className="flex items-center gap-2">
         <button
@@ -226,7 +236,70 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
         >
           <Type className="size-3.5" /> Text
         </button>
+        <button
+          type="button"
+          onClick={wrap(() => openAgentChatAction(afterId))}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed text-primary shadow-none hover:border-primary hover:text-primary',
+          )}
+        >
+          <Sparkles className="size-3.5" /> Ask agent
+        </button>
       </div>
+    )
+  }
+
+  if (variant === 'end') {
+    // TARDIS-167 (№11): a SINGLE subtle full-width dashed "Add cell" button at the
+    // end of the notebook (new-design-v2 #addCellBtn). Clicking opens a popup menu
+    // with three items — Code / Text / Ask agent — mirroring the prototype's
+    // `addCellPicker` popover. It opens upward (`side="top"`, last thing on the
+    // page); Base UI auto-flips when there isn't room above.
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              className="flex h-[46px] w-full items-center justify-center gap-2 rounded-[var(--radius-cell)] border border-dashed border-border text-[13px] font-medium text-muted-foreground transition-colors hover:border-primary hover:bg-[color-mix(in_oklch,var(--primary)_6%,transparent)] hover:text-primary"
+            >
+              <Plus className="size-4" /> Add cell
+            </button>
+          }
+        />
+        <DropdownMenuContent
+          side="top"
+          align="center"
+          className="w-[min(var(--anchor-width),260px)]"
+        >
+          <DropdownMenuItem onClick={onAddCode}>
+            <Code2 className="size-4" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-semibold">Code</span>
+              <span className="text-[11.5px] text-muted-foreground">
+                Run JavaScript / TypeScript
+              </span>
+            </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onAddText}>
+            <Type className="size-4" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-semibold">Text</span>
+              <span className="text-[11.5px] text-muted-foreground">Markdown, tables, LaTeX</span>
+            </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={wrap(() => openAgentChatAction(afterId))}>
+            <Sparkles className="size-4 text-primary" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-semibold text-primary">Ask agent</span>
+              <span className="text-[11.5px] text-muted-foreground">
+                Describe it — the agent drafts the code
+              </span>
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
   }
   // Between-cells gutter: a hairline that lights up on hover, revealing the
@@ -340,7 +413,7 @@ export const NotebookView = reatomComponent(() => {
                   want and let the agent draft it for you.
                 </p>
                 <div className="w-full max-w-sm">
-                  <CellInserter variant="end" />
+                  <CellInserter variant="empty" />
                 </div>
                 <a
                   href={appPath('usage')}

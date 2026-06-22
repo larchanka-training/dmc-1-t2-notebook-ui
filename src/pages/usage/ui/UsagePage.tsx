@@ -2,6 +2,7 @@ import { Check, Copy, RefreshCcw } from 'lucide-react'
 import { action, atom, computed, withAsync, withAsyncData, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import { resolveDemoNotebookId } from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
@@ -110,6 +111,10 @@ const CodeExample = reatomComponent(({ title, code }: { title: string; code: str
 const UsagePage = reatomComponent(() => {
   const restoring = !restoreDemo.ready()
   const error = restoreDemo.error()
+  // TARDIS-167 (№22): the seed-restore block only makes sense for a signed-in
+  // user (the demo notebook id is per-owner). Public visitors see the examples
+  // only. `demoExists` is forced true when signed out, but gate on the user too.
+  const isSignedIn = userAtom() !== null
   const demoExists = demoPresenceResource.data()
 
   return (
@@ -119,7 +124,7 @@ const UsagePage = reatomComponent(() => {
         Copy-paste examples and the exact output contract used by code cells.
       </p>
 
-      {!demoExists ? (
+      {isSignedIn && !demoExists ? (
         <div className="mb-8 rounded-[var(--radius-card)] border border-border bg-card p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -213,6 +218,11 @@ const UsagePage = reatomComponent(() => {
 }, 'UsagePage')
 
 const demoPresenceResource = computed(async () => {
+  // TARDIS-167 (№22): Usage is now public. The demo id is per-owner
+  // (`resolveDemoNotebookId` throws before user hydration), and restoring a
+  // per-account seed is meaningless when signed out — so without a user report
+  // "present" (true) to keep the restore block hidden and never call the resolver.
+  if (!userAtom()) return true
   const demoId = await wrap(resolveDemoNotebookId())
   return Boolean(await wrap(notebookStorage.get(demoId)))
 }, 'usage.demoPresence').extend(withAsyncData({ initState: true }))

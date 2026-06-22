@@ -373,7 +373,11 @@ const NotebooksGroup = reatomComponent(() => {
                   className={cn(NAV_ACTIVE, 'pr-8')}
                   render={<a href={notebookHref} />}
                 >
-                  <span className="truncate">{currentTitle || NEW_NOTEBOOK_TITLE}</span>
+                  {/* TARDIS-167 (№20): native tooltip with the full title — long
+                      names are clipped by the sidebar width. */}
+                  <span className="truncate" title={currentTitle || NEW_NOTEBOOK_TITLE}>
+                    {currentTitle || NEW_NOTEBOOK_TITLE}
+                  </span>
                 </SidebarMenuButton>
                 <NotebookRowMenu
                   onRename={wrap(() =>
@@ -425,7 +429,10 @@ const NotebooksGroup = reatomComponent(() => {
                       }
                     })}
                   >
-                    <span className="truncate">{title}</span>
+                    {/* TARDIS-167 (№20): native tooltip with the full title. */}
+                    <span className="truncate" title={title}>
+                      {title}
+                    </span>
                   </SidebarMenuButton>
                   <NotebookRowMenu
                     onRename={wrap(() => renameTargetAtom.set({ id: nb.id, title }))}

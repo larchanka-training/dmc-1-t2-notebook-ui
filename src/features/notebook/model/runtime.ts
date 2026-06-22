@@ -12,6 +12,7 @@ import { clampTimeoutMs } from '../runtime/limits'
 import type { OutputItem, RuntimeStatus } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
 import { cellsAtom } from './notebook'
+import { enterCommand } from './cellMode'
 import { timeoutMsAtom } from './notebookSettings'
 
 export type KernelStatus = 'idle' | 'busy'
@@ -199,6 +200,11 @@ function mapStatus(
 
 export const runAll = action(async () => {
   if (runtimeStatusAtom() === 'busy') return
+  // TARDIS-167 (№18): leave edit mode FIRST. A text cell focused in edit mode
+  // would otherwise keep `cellModeAtom === 'edit'` and its textarea focused, so
+  // "Run All" skipped rendering it (it fell out of the flow). Dropping to command
+  // mode before the markdown→preview flip below makes every cell participate.
+  enterCommand()
   // "Run All" evaluates the whole notebook end to end. For a code cell that is
   // execution; for a text cell it is rendering — so flip every markdown cell to
   // its preview (a non-empty one renders, an empty one stays a blank box, which
