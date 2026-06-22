@@ -209,10 +209,11 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
     'inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[11.5px] font-medium text-foreground shadow-[var(--shadow-pop)] transition-colors hover:border-primary hover:text-primary'
 
   if (variant === 'empty') {
-    // The zero-cell empty state keeps TWO explicit full-width buttons (Code /
-    // Text): with no cells at all, a direct one-click choice is friendlier than
-    // a single button hiding a menu. (№11 only restyles the END-of-notebook
-    // inserter, not this empty-state affordance.)
+    // The zero-cell empty state keeps THREE explicit full-width buttons (Code /
+    // Text / Ask agent): with no cells at all, a direct one-click choice is
+    // friendlier than a single button hiding a menu. (№11 only restyles the
+    // END-of-notebook inserter, not this empty-state affordance.) "Ask agent"
+    // opens the same dialog as the between-cells inserter.
     return (
       <div className="flex items-center gap-2">
         <button
@@ -234,6 +235,16 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
           )}
         >
           <Type className="size-3.5" /> Text
+        </button>
+        <button
+          type="button"
+          onClick={wrap(() => openAgentChatAction(afterId))}
+          className={cn(
+            pill,
+            'h-[34px] flex-1 justify-center rounded-[var(--radius-cell)] border-dashed text-primary shadow-none hover:border-primary hover:text-primary',
+          )}
+        >
+          <Sparkles className="size-3.5" /> Ask agent
         </button>
       </div>
     )

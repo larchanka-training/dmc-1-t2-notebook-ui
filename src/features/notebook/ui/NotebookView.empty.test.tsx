@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { NotebookView } from './NotebookView'
 import { cellsAtom } from '../model/notebook'
+import { agentChatOpenAtom } from '../model/agentChat'
 
 // open-into-slot (#135) can load a 0-cell notebook (created via the sidebar "+"),
 // and `deleteCell` guards the last cell — so an empty notebook MUST offer a way
@@ -23,6 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  act(() => agentChatOpenAtom.set(false))
 })
 
 describe('NotebookView empty-state (zero cells)', () => {
@@ -32,7 +34,9 @@ describe('NotebookView empty-state (zero cells)', () => {
     expect(screen.getByText(/add your first cell to get started/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^code$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^text$/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /ask/i })).toBeNull()
+    // TARDIS-167: the empty state also offers the agent path (same dialog as the
+    // between-cells inserter).
+    expect(screen.getByRole('button', { name: /ask agent/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /usage examples/i })).toHaveAttribute('href', '/usage')
   })
 
@@ -53,5 +57,15 @@ describe('NotebookView empty-state (zero cells)', () => {
 
     expect(cellsAtom()).toHaveLength(1)
     expect(cellsAtom()[0].kind).toBe('markdown')
+  })
+
+  test('clicking "Ask agent" opens the agent dialog without adding a cell (TARDIS-167)', async () => {
+    const user = userEvent.setup()
+    renderView()
+    await user.click(screen.getByRole('button', { name: /ask agent/i }))
+
+    expect(agentChatOpenAtom()).toBe(true)
+    // No cell is inserted up front — the agent inserts one when it responds.
+    expect(cellsAtom()).toHaveLength(0)
   })
 })
