@@ -67,7 +67,7 @@ export const AgentChatDialog = reatomComponent(() => {
         <div className="flex flex-col gap-3">
           <Textarea
             ref={textareaRef}
-            placeholder="e.g. fetch a list of GitHub repos for a user and log the names…"
+            placeholder="e.g. generate the first 20 Fibonacci numbers and log them…"
             rows={4}
             className="resize-none"
             disabled={isSending}
