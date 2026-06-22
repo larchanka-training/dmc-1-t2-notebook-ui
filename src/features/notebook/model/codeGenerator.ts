@@ -14,9 +14,6 @@ export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | nu
   'notebook.codeGenerator',
 )
 
-// DI slot: set by the bridge when an engine is loaded; null means no model loaded.
-export const loadedModelAtom = atom<string | null>(null, 'notebook.loadedModel')
-
 export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const generator = codeGeneratorAtom()
   if (!generator) return

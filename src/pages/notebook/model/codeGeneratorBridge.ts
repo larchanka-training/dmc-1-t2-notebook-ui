@@ -1,5 +1,5 @@
-import { codeGeneratorAtom, loadedModelAtom } from '@/features/notebook'
-import { engineAtom, modelIdAtom } from '@/features/web-llm'
+import { codeGeneratorAtom } from '@/features/notebook'
+import { engineAtom } from '@/features/web-llm'
 
 function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>) {
   return async (prompt: string): Promise<string> => {
@@ -31,6 +31,5 @@ export function startCodeGeneratorBridge(): () => void {
     // that ignores prevValue and returns the generator — otherwise Reatom calls the
     // generator with prevValue as `prompt` and stores the resulting Promise.
     codeGeneratorAtom.set(() => (engine ? buildGenerator(engine) : null))
-    loadedModelAtom.set(engine ? modelIdAtom() : null)
   })
 }

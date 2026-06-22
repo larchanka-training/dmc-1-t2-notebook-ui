@@ -32,7 +32,7 @@ export const NotebookLlmBar = reatomComponent(() => {
   const actionHint = isSelectedLoaded
     ? 'Re-initialise the loaded model (clears its chat state)'
     : downloaded.has(modelId)
-      ? 'Load this model into the browser (already downloaded — no re-download)'
+      ? 'Load this model into the browser (previously downloaded)'
       : 'Download and load this model into the browser'
 
   // TARDIS-167 (№4): model download is OPT-IN. There is deliberately NO auto-load

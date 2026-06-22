@@ -5,6 +5,7 @@ import { Bot, Cloud, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import {
   agentChatOpenAtom,
   agentSendAction,
@@ -85,8 +86,9 @@ export const AgentChatDialog = reatomComponent(() => {
 
           {/* TARDIS-167 (№13): two explicit tiers, like the cell toolbar —
               in-browser (WebLLM) and cloud — so it is clear which agent runs.
-              Hints use the native `title` attribute (not a Tooltip wrapper):
-              the wrapper intercepted pointer events on the trigger button. */}
+              Hints use Tooltip (matching the cell toolbar), which surfaces the
+              "load a model first" reason even on the disabled in-browser button
+              — native `title` is unreliable on disabled controls (review PR #88). */}
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
@@ -95,37 +97,45 @@ export const AgentChatDialog = reatomComponent(() => {
             >
               Cancel
             </Button>
-            <Button
-              variant="outline"
-              onClick={doSendInBrowser}
-              disabled={isSending || !hasLocalModel}
-              className="gap-2"
-              title={
-                hasLocalModel
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    onClick={doSendInBrowser}
+                    disabled={isSending || !hasLocalModel}
+                    className="gap-2"
+                  >
+                    {isInBrowserSending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Bot className="size-4" />
+                    )}
+                    In-browser
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                {hasLocalModel
                   ? 'Generate with the in-browser model (WebLLM)'
-                  : 'Load an in-browser model first'
-              }
-            >
-              {isInBrowserSending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Bot className="size-4" />
-              )}
-              In-browser
-            </Button>
-            <Button
-              onClick={doSendCloud}
-              disabled={isSending}
-              className="gap-2"
-              title="Generate with the cloud agent"
-            >
-              {isCloudSending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Cloud className="size-4" />
-              )}
-              Cloud
-            </Button>
+                  : 'Load an in-browser model first'}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button onClick={doSendCloud} disabled={isSending} className="gap-2">
+                    {isCloudSending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Cloud className="size-4" />
+                    )}
+                    Cloud
+                  </Button>
+                }
+              />
+              <TooltipContent>Generate with the cloud agent</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </DialogContent>

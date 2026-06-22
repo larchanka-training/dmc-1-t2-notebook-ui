@@ -30,10 +30,14 @@ export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId').extend(
   withLocalStorage('webLlm.modelId'),
 )
 
-// TARDIS-167 (№5): ids of models already downloaded into the browser (WebLLM
-// caches the weights in the Cache Storage; this is the UI-visible record of it).
-// Persisted so the list can highlight — across reloads — which models are already
-// local and won't re-download. Appended after each successful `loadModelAction`.
+// TARDIS-167 (№5): ids of models that HAVE BEEN downloaded into the browser at
+// least once. WebLLM caches the real weights in Cache Storage; this is only a
+// localStorage hint for the UI highlight, NOT a guarantee the weights are still
+// cached — the user can clear site data or the browser can evict them, leaving
+// this list optimistic. Hence the tooltip says "previously downloaded", not
+// "no re-download" (review PR #88). A real Cache Storage cross-check
+// (`webllm.hasModelInCache`) is a possible follow-up. Appended after each
+// successful `loadModelAction`.
 export const downloadedModelIdsAtom = atom<string[]>([], 'webLlm.downloadedModelIds').extend(
   withLocalStorage('webLlm.downloadedModelIds'),
 )

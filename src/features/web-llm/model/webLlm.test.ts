@@ -1,32 +1,65 @@
-import { afterEach, describe, expect, test } from 'vitest'
-import { peek } from '@reatom/core'
-import { downloadedModelIdsAtom, modelIdAtom } from './webLlm'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { peek, wrap } from '@reatom/core'
 
-// `loadModelAction` itself drives the real `webllm.CreateMLCEngine` (a heavy WASM
-// download), so the unit-testable part of TARDIS-167 №5 is the persisted
-// bookkeeping: the selected model and the de-duped set of downloaded ids. The
-// "append id after a successful load" step is asserted via the same de-dupe rule
-// the action uses.
+// `loadModelAction` drives `webllm.CreateMLCEngine` (a heavy WASM download), so
+// mock it with a stub engine. This lets the test exercise the REAL action — not
+// a re-implementation of its append rule — and catch a regression in the action
+// itself (review PR #88).
+vi.mock('@mlc-ai/web-llm', () => ({
+  CreateMLCEngine: vi.fn(async () => ({ stub: 'engine' })),
+}))
+
+import * as webllm from '@mlc-ai/web-llm'
+import {
+  downloadedModelIdsAtom,
+  engineAtom,
+  loadModelAction,
+  loadedModelIdAtom,
+  modelIdAtom,
+} from './webLlm'
+
+beforeEach(() => {
+  downloadedModelIdsAtom.set([])
+  engineAtom.set(null)
+  loadedModelIdAtom.set(null)
+  vi.mocked(webllm.CreateMLCEngine).mockClear()
+})
+
 afterEach(() => {
   downloadedModelIdsAtom.set([])
 })
 
-describe('webLlm downloaded-models bookkeeping (TARDIS-167 №5)', () => {
+describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
   test('modelIdAtom is persisted (withLocalStorage) so the choice survives reloads', () => {
-    // The atom is wired with withLocalStorage; setting it must round-trip through
-    // peek without throwing and reflect the new value.
     modelIdAtom.set('Phi-3.5-mini-instruct-q4f16_1-MLC')
     expect(peek(modelIdAtom)).toBe('Phi-3.5-mini-instruct-q4f16_1-MLC')
   })
 
-  test('recording a downloaded model de-dupes by id (the loadModel append rule)', () => {
-    const record = (id: string) =>
-      downloadedModelIdsAtom.set((ids) => (ids.includes(id) ? ids : [...ids, id]))
+  test('loadModelAction records the loaded model and de-dupes on a re-load', async () => {
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
 
-    record('A')
-    record('B')
-    record('A') // re-loading the same model must not duplicate it
+    await wrap(loadModelAction())
+    // After a successful load: the engine is set, the loaded-id reflects it, and
+    // the model is recorded as downloaded.
+    expect(peek(loadedModelIdAtom)).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    expect(peek(downloadedModelIdsAtom)).toEqual(['Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'])
 
-    expect(peek(downloadedModelIdsAtom)).toEqual(['A', 'B'])
+    // Re-loading the SAME model must not duplicate it in the downloaded list.
+    await wrap(loadModelAction())
+    expect(peek(downloadedModelIdsAtom)).toEqual(['Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'])
+    expect(vi.mocked(webllm.CreateMLCEngine)).toHaveBeenCalledTimes(2)
+  })
+
+  test('loading a second model appends it (keeps both downloaded)', async () => {
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    await wrap(loadModelAction())
+    modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    await wrap(loadModelAction())
+
+    expect(peek(downloadedModelIdsAtom)).toEqual([
+      'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC',
+      'Llama-3.2-1B-Instruct-q4f32_1-MLC',
+    ])
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
   })
 })

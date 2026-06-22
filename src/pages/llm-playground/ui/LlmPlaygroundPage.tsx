@@ -73,7 +73,7 @@ const LocalPanel = reatomComponent(() => {
   const actionHint = isSelectedLoaded
     ? 'Re-initialise the loaded model (clears its chat state)'
     : downloaded.has(modelId)
-      ? 'Load this model into the browser (already downloaded — no re-download)'
+      ? 'Load this model into the browser (previously downloaded)'
       : 'Download and load this model into the browser'
 
   useEffect(() => {
@@ -110,7 +110,11 @@ const LocalPanel = reatomComponent(() => {
                   <SelectItem key={m.id} value={m.id} className="text-xs">
                     <span className="flex w-full items-center gap-4">
                       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                        {isDownloaded ? <Check className="size-3 shrink-0 text-primary" /> : null}
+                        {isDownloaded ? (
+                          <Check className="size-3 shrink-0 text-primary" />
+                        ) : (
+                          <span className="size-3 shrink-0" />
+                        )}
                         <span
                           className={cn('truncate', isDownloaded && 'font-medium text-primary')}
                         >
