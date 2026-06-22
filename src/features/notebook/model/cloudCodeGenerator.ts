@@ -29,6 +29,13 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
     return next
   })
   cloudGeneratingCellIdsAtom.set((ids) => new Set(ids).add(cellId))
+  const stopGenerating = wrap(() => {
+    cloudGeneratingCellIdsAtom.set((ids) => {
+      const next = new Set(ids)
+      next.delete(cellId)
+      return next
+    })
+  })
 
   const cells = cellsAtom()
   const idx = cells.findIndex((c) => c.id === cellId)
@@ -42,18 +49,8 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
     updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)
-    cloudGeneratingCellIdsAtom.set((ids) => {
-      const next = new Set(ids)
-      next.delete(cellId)
-      return next
-    })
   })
   const onError = wrap((err: Error) => {
-    cloudGeneratingCellIdsAtom.set((ids) => {
-      const next = new Set(ids)
-      next.delete(cellId)
-      return next
-    })
     cloudGenerateErrorsAtom.set((m) => {
       const next = new Map(m)
       next.set(cellId, err)
@@ -74,5 +71,7 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
   } catch (err) {
     onError(err as Error)
     throw err
+  } finally {
+    stopGenerating()
   }
 }, 'notebook.cells.cloudGenerate').extend(withAsync())
