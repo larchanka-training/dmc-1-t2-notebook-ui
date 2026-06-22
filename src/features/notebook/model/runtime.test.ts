@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { addCell, cellsAtom, changeCellKind, deleteCell, updateCellCode } from './notebook'
+import { activeCellIdAtom, cellModeAtom, enterEdit } from './cellMode'
 import {
   queueAtom,
   restartKernel,
@@ -145,6 +146,26 @@ describe('runAll', () => {
     // Code ran; the text cell was rendered (Run All evaluates the whole book).
     expect(a.status()).toBe('done')
     expect(md.viewMode()).toBe('preview')
+  }, 10_000)
+
+  test('a text cell focused in edit mode is taken out of edit and still rendered (TARDIS-167 №18)', async () => {
+    const [a] = cellsAtom()
+    const md = addCell(a.id, 'markdown')
+    md.code.set('# Heading')
+    md.viewMode.set('edit')
+    updateCellCode(a.id, 'console.log("a")')
+    // The user is actively editing the text cell when they hit Run All.
+    enterEdit(md.id)
+    expect(cellModeAtom()).toBe('edit')
+
+    await runAll()
+
+    // Run All dropped edit mode first, so the text cell was rendered (not skipped).
+    expect(cellModeAtom()).toBe('command')
+    expect(md.viewMode()).toBe('preview')
+    expect(a.status()).toBe('done')
+    // The cell stays the active one; only its modal state changed.
+    expect(activeCellIdAtom()).toBe(md.id)
   }, 10_000)
 
   test('a cell converted to markdown mid-queue is skipped, not run as JS', async () => {
