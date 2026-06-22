@@ -68,7 +68,10 @@ export const WebLlmChat = reatomComponent(() => {
           <SelectTrigger className="w-80">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          {/* TARDIS-167: plain dropdown below the trigger (see NotebookLlmBar) —
+              avoids the Base UI selected-item alignment that collapsed a long
+              list with a bottom selection. */}
+          <SelectContent alignItemWithTrigger={false}>
             {MODEL_CATALOG.map((m) => {
               const isDownloaded = downloaded.has(m.id)
               return (

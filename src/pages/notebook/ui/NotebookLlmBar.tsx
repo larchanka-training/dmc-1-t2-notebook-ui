@@ -42,28 +42,36 @@ export const NotebookLlmBar = reatomComponent(() => {
   // tooltip until a model is loaded (see NotebookCell / AgentChatDialog).
 
   return (
-    <div className="border-b border-border bg-muted/30 px-6 py-2.5">
+    <div className="border-b border-border bg-muted/30 px-6 py-2.5" data-test-id="llm-bar">
       <div className="flex items-center gap-3">
         <Cpu className="size-4 shrink-0 text-muted-foreground" />
         <Select
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
           disabled={isLoading}
+          data-test-id="llm-bar-select"
         >
-          <SelectTrigger className="h-8 w-80 text-xs">
+          <SelectTrigger className="h-8 w-100 text-xs">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          {/* TARDIS-167: open as a plain dropdown below the trigger
+              (alignItemWithTrigger={false}). The Base UI default aligns the
+              SELECTED item over the trigger, which for a long list with a
+              bottom selection collapsed the popup and added scroll-arrows that
+              expanded it on hover — confusing. A regular dropdown scrolls the
+              full list normally. */}
+          <SelectContent alignItemWithTrigger={false}>
             {MODEL_CATALOG.map((m) => {
               const isDownloaded = downloaded.has(m.id)
               return (
                 <SelectItem key={m.id} value={m.id} className="text-xs">
-                  {/* TARDIS-167 (№16): name takes the slack and truncates; the size
-                      is a fixed right-aligned column (shrink-0) so sizes line up in
-                      a clean column instead of a ragged left edge after each name. */}
-                  <span className="flex w-full items-center gap-4">
+                  <span className="flex w-full items-center gap-4 justify-between">
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                      {isDownloaded ? <Check className="size-3 shrink-0 text-primary" /> : null}
+                      {isDownloaded ? (
+                        <Check className="size-3 shrink-0 text-primary" />
+                      ) : (
+                        <span className="size-3 shrink-0 text-primary" />
+                      )}
                       <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}
                       </span>
