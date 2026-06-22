@@ -5,6 +5,7 @@
 // (production builds talking to a dev backend).
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { devOtpDataAtom, loginEmailAtom, loginStepAtom } from '../model/loginForm'
 import { LoginForm } from './LoginForm'
 
@@ -48,5 +49,17 @@ describe('LoginForm dev OTP banner', () => {
     // The address appears in the step-2 subtitle so the user can catch a typo.
     expect(screen.getByText(/we just sent to/i)).toBeInTheDocument()
     expect(screen.getByText('user@example.com')).toBeInTheDocument()
+  })
+
+  test('typing in the uncontrolled email field still updates loginEmailAtom (TARDIS-167 №21)', async () => {
+    const user = userEvent.setup()
+    render(<LoginForm />)
+
+    await user.type(screen.getByLabelText(/email/i), 'a@b.com')
+
+    // The field is uncontrolled (defaultValue + ref) to keep the caret stable,
+    // but onChange must still mirror into the atom so the handlers + step-2
+    // subtitle see the address.
+    expect(loginEmailAtom()).toBe('a@b.com')
   })
 })

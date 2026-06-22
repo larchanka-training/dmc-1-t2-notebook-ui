@@ -1,4 +1,4 @@
-import { useEffect, type FormEvent } from 'react'
+import { useEffect, useRef, type FormEvent } from 'react'
 import { Loader2 } from 'lucide-react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -22,6 +22,21 @@ export const LoginForm = reatomComponent(() => {
   const step = loginStepAtom()
   const email = loginEmailAtom()
   const otp = loginOtpAtom()
+  // TARDIS-167 (№21): the email field is UNCONTROLLED (defaultValue + this ref).
+  // A controlled `value={email}` re-set the input on every keystroke, because
+  // writing the atom re-renders this reatomComponent outside React's input-event
+  // batch — React then re-applied `value` and collapsed the caret to the end
+  // (even a bare Shift/Ctrl tap triggered a re-render). The atom is still written
+  // on change (handlers + the step-2 subtitle read it); we just don't bind it
+  // back into `value`. The step-1 form unmounts on step change, so returning via
+  // "← Use a different email" remounts the input with the seeded value — the
+  // previously typed address is preserved without a controlled binding.
+  const emailRef = useRef<HTMLInputElement>(null)
+  // Freeze the default value at mount: feeding the live atom into `defaultValue`
+  // makes Base UI warn ("changing the default value of an uncontrolled control")
+  // whenever a re-render carries a new atom value. The form remounts on step
+  // change, so this ref re-seeds correctly on each entry to step 1.
+  const initialEmailRef = useRef(loginEmailAtom())
   const devData = devOtpDataAtom()
   const countdown = resendCountdownAtom()
 
@@ -135,11 +150,12 @@ export const LoginForm = reatomComponent(() => {
             </label>
             <Input
               id="email"
+              ref={emailRef}
               type="email"
               placeholder="you@example.com"
               autoComplete="email"
               required
-              value={email}
+              defaultValue={initialEmailRef.current}
               onChange={wrap((e) => loginEmailAtom.set(e.target.value))}
               disabled={isSending}
               className="h-[38px]"
