@@ -54,12 +54,6 @@ export const NotebookLlmBar = reatomComponent(() => {
           <SelectTrigger className="h-8 w-100 text-xs">
             <SelectValue />
           </SelectTrigger>
-          {/* TARDIS-167: open as a plain dropdown below the trigger
-              (alignItemWithTrigger={false}). The Base UI default aligns the
-              SELECTED item over the trigger, which for a long list with a
-              bottom selection collapsed the popup and added scroll-arrows that
-              expanded it on hover — confusing. A regular dropdown scrolls the
-              full list normally. */}
           <SelectContent alignItemWithTrigger={false}>
             {MODEL_CATALOG.map((m) => {
               const isDownloaded = downloaded.has(m.id)

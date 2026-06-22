@@ -1,4 +1,3 @@
-export { WebLlmChat } from './ui/WebLlmChat'
 export {
   engineAtom,
   modelIdAtom,
