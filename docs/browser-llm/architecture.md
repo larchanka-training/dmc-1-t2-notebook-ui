@@ -24,54 +24,54 @@ src/
 │   ├── web-llm/
 │   │   ├── model/
 │   │   │   └── webLlm.ts               ← atoms, actions, AVAILABLE_MODELS
-│   │   ├── ui/
-│   │   │   └── WebLlmChat.tsx          ← full chat UI (used by LLM Playground)
 │   │   └── index.ts                    ← public API
 │   │
 │   └── notebook/
 │       ├── model/
-│       │   └── codeGenerator.ts        ← DI slots: codeGeneratorAtom, loadedModelAtom
+│       │   └── codeGenerator.ts        ← DI slot: codeGeneratorAtom
 │       └── ui/
 │           ├── NotebookView.tsx        ← reads codeGeneratorAtom, passes onInBrowserGenerate
 │           ├── NotebookCell.tsx        ← bot button (disabled state + tooltip)
-│           └── NotebookHeader.tsx      ← shows loadedModelAtom in breadcrumb
+│           └── NotebookHeader.tsx      ← shows the loaded model (loadedModelIdAtom) in breadcrumb
 │
 └── pages/
     ├── llm-playground/
     │   └── ui/
-    │       └── LlmPlaygroundPage.tsx   ← shows loaded model badge; renders WebLlmChat
+    │       └── LlmPlaygroundPage.tsx   ← local + cloud panels with their own model selector
     │
     └── notebook/
         ├── model/
-        │   └── codeGeneratorBridge.ts  ← subscribes engineAtom → sets DI slots
+        │   └── codeGeneratorBridge.ts  ← subscribes engineAtom → sets the DI slot
         └── ui/
             ├── NotebookPage.tsx        ← mounts NotebookLlmBar above NotebookView
-            └── NotebookLlmBar.tsx      ← model selector + progress bar + auto-load
+            └── NotebookLlmBar.tsx      ← model selector + progress bar + Load/Reload button
 ```
 
 ---
 
 ## DI slot pattern
 
-The notebook feature cannot call the LLM directly. Instead it exposes two **dependency injection slots** — plain atoms that start as `null` and are filled from outside:
+The notebook feature cannot call the LLM directly. Instead it exposes a **dependency injection slot** — a plain atom that starts as `null` and is filled from outside:
 
 ```ts
 // src/features/notebook/model/codeGenerator.ts
 
-// Slot 1: the generator function. null = no model loaded.
+// The generator function. null = no model loaded.
 export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | null>(
   null,
   'notebook.codeGenerator',
 )
-
-// Slot 2: the loaded model's display name. null = no model loaded.
-export const loadedModelAtom = atom<string | null>(null, 'notebook.loadedModel')
 ```
 
-The notebook UI reads these atoms:
+The notebook UI reads this atom:
 
 - `codeGeneratorAtom` — `NotebookView` uses `!!codeGeneratorAtom()` (`hasGenerator`) to enable/disable the bot button.
-- `loadedModelAtom` — `NotebookHeader` shows the model name in the breadcrumb row.
+
+The loaded model's **name** is NOT a separate notebook-side slot. There is one
+source of truth in `features/web-llm` — `loadedModelIdAtom` (the id of the model
+actually loaded into the engine) — which `NotebookHeader` reads directly for the
+breadcrumb (TARDIS-167 / review PR #88). A second notebook-side `loadedModelAtom`
+was removed to avoid two copies of the same fact drifting apart.
 
 Nothing inside `features/notebook` knows _how_ the generator works or which LLM is behind it.
 
@@ -79,21 +79,22 @@ Nothing inside `features/notebook` knows _how_ the generator works or which LLM 
 
 ## The bridge
 
-`pages/notebook/model/codeGeneratorBridge.ts` is the only place that imports from **both** features. It subscribes to `engineAtom` and keeps the DI slots in sync:
+`pages/notebook/model/codeGeneratorBridge.ts` is the only place that imports from **both** features. It subscribes to `engineAtom` and keeps the DI slot in sync:
 
 ```ts
-import { codeGeneratorAtom, loadedModelAtom } from '@/features/notebook'
-import { engineAtom, modelIdAtom } from '@/features/web-llm'
+import { codeGeneratorAtom } from '@/features/notebook'
+import { engineAtom } from '@/features/web-llm'
 
 export function startCodeGeneratorBridge(): () => void {
   return engineAtom.subscribe((engine) => {
     // Set the generator function (see "Storing functions in atoms" below)
     codeGeneratorAtom.set(() => (engine ? buildGenerator(engine) : null))
-    // Set the display name
-    loadedModelAtom.set(engine ? modelIdAtom() : null)
   })
 }
 ```
+
+The loaded model's name is owned by `features/web-llm` (`loadedModelIdAtom`, set
+inside `loadModelAction`), so the bridge no longer mirrors it.
 
 The bridge is started once at app boot from `src/app/model/setup.ts`:
 
@@ -187,27 +188,21 @@ for await (const chunk of stream) {
 
 ---
 
-## Auto-load on notebook mount
+## Opt-in model loading
 
-`NotebookLlmBar` auto-loads the default model when the Notebook page first mounts, using a pre-captured `wrap` created during the initial render:
+Model download is **opt-in** (TARDIS-167 №4). `NotebookLlmBar` does NOT auto-load a
+model on mount — pulling a multi-GB model into the browser without consent ate the
+memory of users who may not have it. The model loads ONLY when the user clicks
+**Load model**. While no model is loaded, the in-browser generate buttons (cell
+toolbar + "Ask agent") stay disabled with a "load a model first" tooltip, gated on
+`codeGeneratorAtom` being `null`.
 
-```ts
-// Inside reatomComponent — runs during render (in Reatom context)
-const autoLoad = wrap(() => {
-  if (!engineAtom() && !loadProgressAtom()) {
-    modelIdAtom.set(AVAILABLE_MODELS[0]) // 1.5B Qwen Coder
-    loadModelAction()
-  }
-})
-
-// useEffect fires after render, outside Reatom context —
-// safe because autoLoad captured context at creation time
-useEffect(() => {
-  autoLoad()
-}, [])
-```
-
-The guard (`!engineAtom() && !loadProgressAtom()`) prevents a re-load if the user already loaded a model from the Playground page before navigating to the Notebook.
+The selected model id and the set of already-downloaded model ids are persisted in
+`localStorage` (`modelIdAtom`, `downloadedModelIdsAtom`), so the choice and the
+"downloaded" highlight survive reloads. The downloaded list is reconciled against
+the real WebLLM Cache Storage on startup (`reconcileDownloadedModelsAction` →
+`webllm.hasModelInCache`), so an evicted/cleared model loses its highlight instead
+of showing a stale check.
 
 ---
 
