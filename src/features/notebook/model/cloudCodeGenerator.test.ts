@@ -3,7 +3,11 @@ import { act } from '@testing-library/react'
 import { llm } from '@/shared/api'
 import { ApiError, RateLimitedError } from '@/shared/api/errors'
 import { addCell, cellsAtom, updateCellCode } from './notebook'
-import { cloudGenerateAndInsertCodeAction } from './cloudCodeGenerator'
+import {
+  cloudGenerateAndInsertCodeAction,
+  cloudGenerateErrorsAtom,
+  cloudGeneratingCellIdsAtom,
+} from './cloudCodeGenerator'
 
 const fakeResponse = (
   content: string,
@@ -132,6 +136,86 @@ describe('cloudGenerateAndInsertCodeAction', () => {
     await promise
 
     expect(cloudGenerateAndInsertCodeAction.ready()).toBe(true)
+  })
+
+  test('keeps later cell marked as generating when an earlier request succeeds first', async () => {
+    const pending: Array<{
+      resolve: (v: llm.GenerateCodeResponse) => void
+      reject: (err: Error) => void
+    }> = []
+    vi.spyOn(llm, 'generateCode').mockImplementation(
+      () =>
+        new Promise<llm.GenerateCodeResponse>((resolve, reject) => {
+          pending.push({ resolve, reject })
+        }),
+    )
+
+    const firstCell = addMarkdownCell('first prompt')
+    const secondCell = addMarkdownCell('second prompt')
+    let firstRequest!: ReturnType<typeof cloudGenerateAndInsertCodeAction>
+    let secondRequest!: ReturnType<typeof cloudGenerateAndInsertCodeAction>
+
+    await act(async () => {
+      firstRequest = cloudGenerateAndInsertCodeAction(firstCell.id)
+      secondRequest = cloudGenerateAndInsertCodeAction(secondCell.id)
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set([firstCell.id, secondCell.id]))
+
+    pending[0].resolve(fakeResponse('first result'))
+    await act(async () => {
+      await firstRequest
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set([secondCell.id]))
+
+    pending[1].resolve(fakeResponse('second result'))
+    await act(async () => {
+      await secondRequest
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set())
+  })
+
+  test('keeps later cell marked as generating when an earlier request fails first', async () => {
+    const pending: Array<{
+      resolve: (v: llm.GenerateCodeResponse) => void
+      reject: (err: Error) => void
+    }> = []
+    vi.spyOn(llm, 'generateCode').mockImplementation(
+      () =>
+        new Promise<llm.GenerateCodeResponse>((resolve, reject) => {
+          pending.push({ resolve, reject })
+        }),
+    )
+
+    const firstCell = addMarkdownCell('first prompt')
+    const secondCell = addMarkdownCell('second prompt')
+    const firstError = new Error('first request failed')
+    let firstRequest!: ReturnType<typeof cloudGenerateAndInsertCodeAction>
+    let secondRequest!: ReturnType<typeof cloudGenerateAndInsertCodeAction>
+
+    await act(async () => {
+      firstRequest = cloudGenerateAndInsertCodeAction(firstCell.id)
+      secondRequest = cloudGenerateAndInsertCodeAction(secondCell.id)
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set([firstCell.id, secondCell.id]))
+
+    pending[0].reject(firstError)
+    await act(async () => {
+      await expect(firstRequest).rejects.toThrow('first request failed')
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set([secondCell.id]))
+    expect(cloudGenerateErrorsAtom().get(firstCell.id)).toBe(firstError)
+
+    pending[1].resolve(fakeResponse('second result'))
+    await act(async () => {
+      await secondRequest
+    })
+
+    expect(cloudGeneratingCellIdsAtom()).toEqual(new Set())
   })
 
   test('stores RateLimitedError with retryAfter in action.error()', async () => {

@@ -5,10 +5,10 @@ import { cellsAtom, addCell, updateCellCode, notebookTitleAtom } from './noteboo
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
 
-// Per-cell tracking so spinner/error appear only on the triggering cell.
-export const cloudGeneratingCellIdAtom = atom<string | null>(
-  null,
-  'notebook.cells.cloudGeneratingCellId',
+// Per-cell tracking so concurrent Cloud requests do not clear each other's spinner.
+export const cloudGeneratingCellIdsAtom = atom<Set<string>>(
+  new Set<string>(),
+  'notebook.cells.cloudGeneratingCellIds',
 )
 export const cloudGenerateErrorsAtom = atom<Map<string, Error>>(
   new Map(),
@@ -28,7 +28,14 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
     next.delete(cellId)
     return next
   })
-  cloudGeneratingCellIdAtom.set(cellId)
+  cloudGeneratingCellIdsAtom.set((ids) => new Set(ids).add(cellId))
+  const stopGenerating = wrap(() => {
+    cloudGeneratingCellIdsAtom.set((ids) => {
+      const next = new Set(ids)
+      next.delete(cellId)
+      return next
+    })
+  })
 
   const cells = cellsAtom()
   const idx = cells.findIndex((c) => c.id === cellId)
@@ -42,10 +49,8 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
     updateCellCode(newCell.id, response.content)
     focusCell(newCell.id)
     enterEdit(newCell.id)
-    cloudGeneratingCellIdAtom.set(null)
   })
   const onError = wrap((err: Error) => {
-    cloudGeneratingCellIdAtom.set(null)
     cloudGenerateErrorsAtom.set((m) => {
       const next = new Map(m)
       next.set(cellId, err)
@@ -66,5 +71,7 @@ export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) =>
   } catch (err) {
     onError(err as Error)
     throw err
+  } finally {
+    stopGenerating()
   }
 }, 'notebook.cells.cloudGenerate').extend(withAsync())
