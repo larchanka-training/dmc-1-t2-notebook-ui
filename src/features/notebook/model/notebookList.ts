@@ -55,36 +55,47 @@ notebookListResource.data.extend(withRollback())
 export function startNotebookListSync(): () => void {
   let primed = false
   let lastOwnerId: string | null = null
-  return userAtom.subscribe((user) => {
-    const ownerId = user?.id ?? null
-    if (!primed) {
-      primed = true
-      lastOwnerId = ownerId
-      return
-    }
-    if (ownerId === lastOwnerId) return
-    const prevOwnerId = lastOwnerId
-    lastOwnerId = ownerId
-    // Drop the previous account's cached rows synchronously, before any await, so
-    // a foreign list cannot flash while the slot reset is still draining.
-    notebookListResource.reset()
-    // Reset the editor slot away from the previous owner, THEN refetch the new
-    // account's list behind an owner fence so a stale owner never wins.
-    void (async () => {
-      await wrap(resetSlotToFloorForAccountChange())
-      // TARDIS-167 (№7): refetch here ONLY on a real account SWITCH (B after A).
-      // On the FIRST sign-in (null → user) the sidebar mounts after the post-login
-      // navigation and its own subscription fetches the list — an extra retry here
-      // produced the observed double `GET /notebooks` (one from this sync on
-      // /login, one from the sidebar on /). On a true account switch the sidebar is
-      // already hot (the computed does not read `userAtom`, so it won't refetch on
-      // its own), so this retry is what refreshes it. The owner fence guards a
-      // rapid second switch landing mid-await.
-      if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
-        await wrap(notebookListResource.retry())
+  // The subscribe callback is wrapped in `wrap(...)` so the async work it kicks
+  // off carries a Reatom frame. This listener fires from `notify`; a bare
+  // `void (async …)()` would detach the stack, and every deep `await wrap(...)`
+  // inside `resetSlotToFloorForAccountChange` → `loadNotebook` (storage reads,
+  // the boot reconcile, the legacy-seed migration) would then throw
+  // `ReatomError: missing async stack` under production `clearStack()` — which
+  // aborted the whole first-sign-in boot and left the in-memory seed showing
+  // (TARDIS-167 №23). Wrapping the callback (the same pattern remoteSync uses for
+  // its `userAtom.subscribe`) keeps the frame across the awaits.
+  return userAtom.subscribe(
+    wrap((user) => {
+      const ownerId = user?.id ?? null
+      if (!primed) {
+        primed = true
+        lastOwnerId = ownerId
+        return
       }
-    })()
-  })
+      if (ownerId === lastOwnerId) return
+      const prevOwnerId = lastOwnerId
+      lastOwnerId = ownerId
+      // Drop the previous account's cached rows synchronously, before any await, so
+      // a foreign list cannot flash while the slot reset is still draining.
+      notebookListResource.reset()
+      // Reset the editor slot away from the previous owner, THEN refetch the new
+      // account's list behind an owner fence so a stale owner never wins.
+      void (async () => {
+        await wrap(resetSlotToFloorForAccountChange())
+        // TARDIS-167 (№7): refetch here ONLY on a real account SWITCH (B after A).
+        // On the FIRST sign-in (null → user) the sidebar mounts after the post-login
+        // navigation and its own subscription fetches the list — an extra retry here
+        // produced the observed double `GET /notebooks` (one from this sync on
+        // /login, one from the sidebar on /). On a true account switch the sidebar is
+        // already hot (the computed does not read `userAtom`, so it won't refetch on
+        // its own), so this retry is what refreshes it. The owner fence guards a
+        // rapid second switch landing mid-await.
+        if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
+          await wrap(notebookListResource.retry())
+        }
+      })()
+    }),
+  )
 }
 
 /**
