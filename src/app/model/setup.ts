@@ -9,6 +9,7 @@ import { loadCurrentUserAction } from '@/features/auth'
 import {
   loadNotebook,
   markBootRestored,
+  reconcileBootFromServer,
   startNotebookListSync,
   startSlot,
 } from '@/features/notebook'
@@ -145,6 +146,12 @@ rootFrame.run(async () => {
     // the legacy floor id. The userAtom subscription in startNotebookListSync boots
     // the slot after sign-in.
     if (userAtom() === null) return
+    // Server-reconcile BEFORE loading the slot (TARDIS-167 №23 bootstrap step 4b):
+    // when local storage is empty (fresh device), pull the account's newest
+    // notebook into IndexedDB and tombstone the seed if it was deleted elsewhere,
+    // so `loadNotebook(true)` then opens the right notebook instead of reseeding.
+    // Best-effort and self-contained — never blocks boot.
+    await wrap(reconcileBootFromServer())
     // A real restore (existing stored notebook) surfaces "Saved · <time>" right
     // away, seeded from the stored timestamp — instead of a blank indicator
     // until the first edit. A fresh seed / newer-format / failure returns false
