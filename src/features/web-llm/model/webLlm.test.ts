@@ -17,21 +17,25 @@ import {
   engineAtom,
   loadModelAction,
   loadedModelIdAtom,
+  messagesAtom,
   modelIdAtom,
   normalizeWebLlmPersistedState,
   reconcileDownloadedModelsAction,
+  sendMessageAction,
 } from './webLlm'
 
 beforeEach(() => {
   downloadedModelIdsAtom.set([])
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
+  messagesAtom.set([])
   vi.mocked(webllm.CreateMLCEngine).mockClear()
   vi.mocked(webllm.hasModelInCache).mockReset().mockResolvedValue(true)
 })
 
 afterEach(() => {
   downloadedModelIdsAtom.set([])
+  messagesAtom.set([])
   modelIdAtom.set(AVAILABLE_MODELS[1])
 })
 
@@ -133,5 +137,18 @@ describe('normalizeWebLlmPersistedState (TARDIS-167, review PR #88 r3)', () => {
     normalizeWebLlmPersistedState()
 
     expect(peek(modelIdAtom)).toBe(AVAILABLE_MODELS[3])
+  })
+})
+
+describe('sendMessageAction placeholder branch', () => {
+  test('adds a local placeholder response when no in-browser model is loaded', async () => {
+    engineAtom.set(null)
+
+    await wrap(sendMessageAction('  explain maps  '))
+
+    expect(peek(messagesAtom)).toEqual([
+      { role: 'user', content: 'explain maps' },
+      { role: 'assistant', content: '— Load a model to see a local response —' },
+    ])
   })
 })
