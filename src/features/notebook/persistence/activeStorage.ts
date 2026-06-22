@@ -43,6 +43,9 @@ export const notebookStorage: NotebookStorageAdapter = {
   getSyncState: (id) => active.getSyncState(id),
   putSyncState: (state) => active.putSyncState(state),
   deleteSyncState: (id) => active.deleteSyncState(id),
+  getMeta: (key) => active.getMeta(key),
+  putMeta: (key, value) => active.putMeta(key, value),
+  deleteMeta: (key) => active.deleteMeta(key),
 }
 
 /**

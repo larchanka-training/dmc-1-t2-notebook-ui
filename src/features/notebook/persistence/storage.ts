@@ -24,9 +24,13 @@ const DB_NAME = 'js-notebook'
 // migration is additive and version-guarded (see `upgrade` below): the existing
 // `notebooks` store and its records are never re-created or cleared, so a user's
 // local-only notebook survives the bump untouched.
-const DB_VERSION = 2
+// v3 (TARDIS-167 №23) adds the `meta` store for per-account durable markers —
+// currently the deleted-seed tombstone, so a deleted welcome notebook is NOT
+// resurrected on the next boot. Additive + version-guarded like the v2 step.
+const DB_VERSION = 3
 const STORE = 'notebooks'
 const SYNC_STORE = 'sync'
+const META_STORE = 'meta'
 
 interface NotebookDB extends DBSchema {
   [STORE]: {
@@ -37,6 +41,10 @@ interface NotebookDB extends DBSchema {
   [SYNC_STORE]: {
     key: string
     value: NotebookSyncState
+  }
+  [META_STORE]: {
+    key: string
+    value: unknown
   }
 }
 
@@ -55,6 +63,11 @@ function getDB(): Promise<IDBPDatabase<NotebookDB>> {
         }
         if (oldVersion < 2) {
           db.createObjectStore(SYNC_STORE, { keyPath: 'notebookId' })
+        }
+        if (oldVersion < 3) {
+          // Out-of-line keys: callers pass an explicit string key (e.g. the
+          // seed-tombstone key). Notebooks/sync are untouched (INV-1).
+          db.createObjectStore(META_STORE)
         }
       },
       // This tab is holding an OLD-version connection open while ANOTHER tab tries
@@ -171,8 +184,33 @@ export async function remove(id: string): Promise<void> {
  */
 export async function clear(): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction([STORE, SYNC_STORE], 'readwrite')
-  await Promise.all([tx.objectStore(STORE).clear(), tx.objectStore(SYNC_STORE).clear(), tx.done])
+  const tx = db.transaction([STORE, SYNC_STORE, META_STORE], 'readwrite')
+  await Promise.all([
+    tx.objectStore(STORE).clear(),
+    tx.objectStore(SYNC_STORE).clear(),
+    tx.objectStore(META_STORE).clear(),
+    tx.done,
+  ])
+}
+
+// ---------------------------------------------------------------------------
+// Meta partition (TARDIS-167 №23): per-account durable markers, keyed by an
+// explicit string. Values are opaque to this layer; callers validate on read.
+// ---------------------------------------------------------------------------
+
+/** Read a raw meta value by key. `undefined` if absent. */
+export async function getMeta(key: string): Promise<unknown> {
+  return (await getDB()).get(META_STORE, key)
+}
+
+/** Insert or replace a meta value at `key`. */
+export async function putMeta(key: string, value: unknown): Promise<void> {
+  await (await getDB()).put(META_STORE, value, key)
+}
+
+/** Delete a meta value by key. No-op if absent. */
+export async function deleteMeta(key: string): Promise<void> {
+  await (await getDB()).delete(META_STORE, key)
 }
 
 /** Read one notebook's sync state, validated. `undefined` if absent or corrupt. */
