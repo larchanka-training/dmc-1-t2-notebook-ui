@@ -3,11 +3,13 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DEMO_NOTEBOOK_ID } from '@/features/notebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
+import { userAtom } from '@/entities/session'
 import UsagePage from './UsagePage'
 
 describe('UsagePage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    userAtom.set(null)
   })
 
   test('renders the actual output contract and sandbox guidance', () => {
@@ -57,5 +59,19 @@ describe('UsagePage', () => {
     render(<UsagePage />)
 
     expect(screen.queryByRole('button', { name: /restore demo/i })).not.toBeInTheDocument()
+  })
+
+  test('public (signed-out) view shows examples but never the seed-restore block (TARDIS-167 №22)', async () => {
+    userAtom.set(null)
+    // Even if a local demo were somehow absent, a signed-out visitor must not see
+    // the per-account restore block — and the per-owner demo id resolver must not
+    // be called.
+    const getSpy = vi.spyOn(notebookStorage, 'get')
+
+    render(<UsagePage />)
+
+    expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /restore demo/i })).not.toBeInTheDocument()
+    expect(getSpy).not.toHaveBeenCalled()
   })
 })
