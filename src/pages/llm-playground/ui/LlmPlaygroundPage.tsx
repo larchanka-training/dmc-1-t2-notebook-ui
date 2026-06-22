@@ -1,22 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Bot, Cloud, Cpu, Send } from 'lucide-react'
+import { Bot, Check, Cloud, Cpu, Send } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { RateLimitedError } from '@/shared/api/errors'
 import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import {
   MODEL_CATALOG,
+  downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
+  loadedModelIdAtom,
   loadProgressAtom,
   messagesAtom,
   modelIdAtom,
   sendMessageAction,
   streamingResponseAtom,
 } from '@/features/web-llm'
+import { cn } from '@/shared/lib/cn'
 import { cloudMessagesAtom, cloudSendAction } from '../model/cloudPlayground'
 
 function formatCloudSendError(err: Error): string {
@@ -56,11 +60,21 @@ function formatCloudSendError(err: Error): string {
 const LocalPanel = reatomComponent(() => {
   const engine = engineAtom()
   const modelId = modelIdAtom()
+  const loadedModelId = loadedModelIdAtom()
   const progress = loadProgressAtom()
   const messages = messagesAtom()
   const streaming = streamingResponseAtom()
   const isLoading = !loadModelAction.ready()
   const bottomRef = useRef<HTMLDivElement>(null)
+  // TARDIS-167 (№5/№15/№16): same model-select treatment as the notebook LLM bar.
+  const downloaded = new Set(downloadedModelIdsAtom())
+  const isSelectedLoaded = !!engine && loadedModelId === modelId
+  const actionLabel = isSelectedLoaded ? 'Reload' : 'Load'
+  const actionHint = isSelectedLoaded
+    ? 'Re-initialise the loaded model (clears its chat state)'
+    : downloaded.has(modelId)
+      ? 'Load this model into the browser (already downloaded — no re-download)'
+      : 'Download and load this model into the browser'
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -89,26 +103,45 @@ const LocalPanel = reatomComponent(() => {
             <SelectTrigger className="h-8 flex-1 text-xs">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              {MODEL_CATALOG.map((m) => (
-                <SelectItem key={m.id} value={m.id} className="text-xs">
-                  <span className="flex w-full items-center justify-between gap-4">
-                    <span>{m.id}</span>
-                    <span className="text-xs text-muted-foreground">{m.size}</span>
-                  </span>
-                </SelectItem>
-              ))}
+            <SelectContent alignItemWithTrigger={false}>
+              {MODEL_CATALOG.map((m) => {
+                const isDownloaded = downloaded.has(m.id)
+                return (
+                  <SelectItem key={m.id} value={m.id} className="text-xs">
+                    <span className="flex w-full items-center gap-4">
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                        {isDownloaded ? <Check className="size-3 shrink-0 text-primary" /> : null}
+                        <span
+                          className={cn('truncate', isDownloaded && 'font-medium text-primary')}
+                        >
+                          {m.id}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                        {m.size}
+                      </span>
+                    </span>
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
-          <Button
-            size="sm"
-            variant={engine ? 'outline' : 'default'}
-            disabled={isLoading}
-            onClick={wrap(() => loadModelAction())}
-            className="shrink-0 text-xs"
-          >
-            {isLoading ? 'Loading…' : engine ? 'Reload' : 'Load'}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant={isSelectedLoaded ? 'outline' : 'default'}
+                  disabled={isLoading}
+                  onClick={wrap(() => loadModelAction())}
+                  className="shrink-0 text-xs"
+                >
+                  {isLoading ? 'Loading…' : actionLabel}
+                </Button>
+              }
+            />
+            <TooltipContent>{actionHint}</TooltipContent>
+          </Tooltip>
         </div>
         {progress && (
           <div className="mt-2 flex flex-col gap-1">
