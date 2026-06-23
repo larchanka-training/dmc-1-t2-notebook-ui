@@ -24,6 +24,7 @@ import {
 // autosave/remote-sync/AI bindings the controller starts.
 const slotMock = vi.hoisted(() => ({
   bumpSlotGeneration: vi.fn(),
+  openNotebookInSlot: vi.fn(),
   quiesceActiveSlot: vi.fn(),
   resetSlotToFloorForAccountChange: vi.fn(),
   restoreActiveSlotBindings: vi.fn(),
@@ -31,6 +32,7 @@ const slotMock = vi.hoisted(() => ({
 }))
 vi.mock('./slot', () => ({
   bumpSlotGeneration: slotMock.bumpSlotGeneration,
+  openNotebookInSlot: slotMock.openNotebookInSlot,
   quiesceActiveSlot: slotMock.quiesceActiveSlot,
   resetSlotToFloorForAccountChange: slotMock.resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,
@@ -303,6 +305,7 @@ describe('deleteNotebookAction', () => {
     slotMock.quiesceActiveSlot.mockReset().mockResolvedValue(undefined)
     slotMock.restoreActiveSlotBindings.mockReset()
     slotMock.settleDeletedSlotToFloor.mockReset().mockResolvedValue(undefined)
+    slotMock.openNotebookInSlot.mockReset().mockResolvedValue('opened')
     vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
     vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
@@ -344,7 +347,7 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([other, listItem(NB_ID, 'Doomed')])
   })
 
-  test('quiesces the slot BEFORE the server DELETE, then settles to the floor AFTER (H1)', async () => {
+  test('quiesces the slot BEFORE the server DELETE, then opens the top remaining AFTER (H1 + B-2)', async () => {
     activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
     // Two rows so the B-1 "keep at least one notebook" guard does not short-circuit.
     notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Doomed')])
@@ -353,14 +356,17 @@ describe('deleteNotebookAction', () => {
     await deleteNotebookAction(NB_ID)
 
     // H1: id-bound work is stopped BEFORE the destructive request (so an in-flight
-    // push can't recreate the id), and the slot only degrades AFTER the commit.
+    // push can't recreate the id). B-2: after the commit the slot opens the top
+    // remaining row ('keep'), NOT the resurrected seed floor.
     expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
-    expect(slotMock.settleDeletedSlotToFloor).toHaveBeenCalledTimes(1)
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith('keep')
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
     const quiesceOrder = slotMock.quiesceActiveSlot.mock.invocationCallOrder[0]
     const removeOrder = removeSpy.mock.invocationCallOrder[0]
-    const settleOrder = slotMock.settleDeletedSlotToFloor.mock.invocationCallOrder[0]
+    const openOrder = slotMock.openNotebookInSlot.mock.invocationCallOrder[0]
     expect(quiesceOrder).toBeLessThan(removeOrder)
-    expect(removeOrder).toBeLessThan(settleOrder)
+    expect(removeOrder).toBeLessThan(openOrder)
   })
 
   test('re-arms the slot and rolls the row back when the active-notebook DELETE fails (H1)', async () => {

@@ -13,6 +13,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 // throw `TypeError` before `notebookApi.remove` and fails the whole suite.
 vi.mock('../model/slot', () => ({
   bumpSlotGeneration: vi.fn(),
+  openNotebookInSlot: vi.fn().mockResolvedValue('opened'),
   quiesceActiveSlot: vi.fn().mockResolvedValue(undefined),
   resetSlotToFloorForAccountChange: vi.fn().mockResolvedValue(undefined),
   restoreActiveSlotBindings: vi.fn(),

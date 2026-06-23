@@ -17,6 +17,7 @@ import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, resolveDemoNotebookId } from '
 import { setSeedTombstone } from './seedTombstone'
 import {
   bumpSlotGeneration,
+  openNotebookInSlot,
   quiesceActiveSlot,
   resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings,
@@ -383,14 +384,21 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
   // withTransaction would roll back a delete that already succeeded server-side
   // (H2). Both remaining steps are best-effort.
   if (wasActive) {
-    // Degrade the slot to the welcome floor. `settleDeletedSlotToFloor` is itself
-    // best-effort, but wrap it here too (defence in depth, H2): NOTHING after the
-    // committed DELETE may reject out of this `withTransaction` action, or it
-    // would roll back a delete that already succeeded server-side.
+    // B-2 (TARDIS-167 №23): the open notebook was deleted, so move the slot to the
+    // FIRST remaining row (newest by createdAt — the row was already removed above,
+    // so `data()[0]` is the top survivor), instead of resurrecting the welcome
+    // seed. Fall back to the seed floor only if nothing remains (B-1 normally
+    // prevents deleting the last notebook, but stay defensive). All best-effort
+    // (H2): nothing here may reject out of the committed-DELETE transaction.
+    const topRemaining = notebookListResource.data().at(0)
     try {
-      await wrap(settleDeletedSlotToFloor())
+      if (topRemaining) {
+        await wrap(openNotebookInSlot(topRemaining.id))
+      } else {
+        await wrap(settleDeletedSlotToFloor())
+      }
     } catch (error) {
-      console.error('notebook.delete: settling the slot to the floor failed', error)
+      console.error('notebook.delete: settling the slot after delete failed', error)
     }
   }
   // Drop the local copy + its sync queue. Best-effort: a storage hiccup must not
