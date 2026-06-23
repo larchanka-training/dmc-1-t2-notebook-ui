@@ -171,14 +171,47 @@ notebook from the sidebar (#135 open-into-slot) switches the slot to its id, and
 the slot controller (`model/slot.ts`) re-arms autosave / remote-sync / AI-context
 on the new id after draining the outgoing notebook's in-flight save.
 
-**Shared-floor caveat (still open).** Until #67 derives a per-user demo id
-(`uuidv5(DEMO_NAMESPACE, user.id)`), the boot floor is the same `LOCAL_NOTEBOOK_ID`
-for every user, so the first-user-to-POST / cross-owner-403 limitation still
-applies to that floor notebook specifically. The 403 stays handled fail-safe
-(terminal status, queue kept, no infinite loop, no false `synced`). The owner-gate
-also refuses to push a queue whose `ownerId` differs from the current user. A real
-per-user id for the floor is #67's job, built on the switchable slot delivered
-here.
+**Per-user demo id.** The boot seed id is now per-user —
+`resolveDemoNotebookId() = uuidv5(DEMO_NAMESPACE, user.id)` — so two accounts on
+one device get distinct seed ids and never collide on the floor notebook. The
+owner-gate still refuses to push a queue whose `ownerId` differs from the current
+user, and the legacy shared `LOCAL_NOTEBOOK_ID` is migrated to the per-user id on
+boot (`migrateLegacySeedIfNeeded`).
+
+## Boot, deletion and the seed tombstone (TARDIS-167 №23)
+
+The boot/delete/seed rules form one contract; the slot id alone does not capture
+it.
+
+**Boot — which notebook opens.** Boot (`loadNotebook(pickNewest=true)`, called
+from `setup.ts` on reload and from `resetSlotToFloorForAccountChange` on first
+sign-in) opens the **newest notebook owned by the current user** by `createdAt`
+desc — not always the seed. "Owned" = the per-user seed, or a notebook whose
+`sync` partition records `ownerId === user.id` (a notebook without provable
+ownership is skipped, so a shared device never opens another account's local
+notebook). `pickNewest` is boot-only; `degrade`/`reset` slot transitions keep
+going to the seed floor (`loadNotebook()` without the flag).
+
+**Empty local → server reconcile.** When local storage has no notebooks,
+`reconcileBootFromServer()` (`model/bootReconcile.ts`) runs BEFORE the slot loads:
+offline/empty list → seed path; non-empty list → pull the newest server notebook
+into storage (stamping `ownerId` + `remoteCreated` so the owner-scoped picker
+accepts it), and if the per-user seed id is **absent** from the server list, the
+seed was deleted on another device → set the tombstone locally.
+
+**Seed tombstone (contract A).** Deleting the seed writes a durable per-account
+marker in the storage `meta` partition (`seedTombstone.ts`, key
+`seed-tombstone:<ownerId>`). `loadNotebook` does not resurrect a tombstoned seed;
+`clearAll()` wipes the marker. **Restore** (usage page) lifts the tombstone,
+recreates the seed server-side, stamps owner sync-state, surfaces the row in the
+sidebar immediately (`upsertListItem`, no refetch) and opens it.
+
+**Deletion contracts.** B-1: the user always keeps at least one notebook — the
+Delete affordance is hidden and `deleteNotebookAction` refuses when only one slot
+exists. B-2: deleting the **active** notebook opens the top remaining row (newest
+by `createdAt`) via `openNotebookInSlot`, instead of resurrecting the seed. A
+delete that 404s (already deleted server-side) is treated as an idempotent success
+(tombstone the seed, drop the local copy, no "Delete failed").
 
 ## Scaling note
 
@@ -259,11 +292,10 @@ same pattern autosave uses.
 
 ## Known follow-ups
 
-- **Per-user server id (#67).** #135 made the slot id switchable
-  (`activeNotebookIdAtom`); the boot floor is still the shared `LOCAL_NOTEBOOK_ID`,
-  which only the first user can POST. A real per-account id for the floor
-  (`uuidv5(DEMO_NAMESPACE, user.id)`) is #67's job, built on the switchable slot
-  (see "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
+- **Per-user server id (#67) — done.** The boot floor now uses a per-account id
+  (`resolveDemoNotebookId() = uuidv5(DEMO_NAMESPACE, user.id)`), with the legacy
+  shared `LOCAL_NOTEBOOK_ID` migrated on boot. See "Boot, deletion and the seed
+  tombstone" above. A cross-owner `403`/`404` is still handled fail-safe.
 - **#136 (untrusted device).** Once `clearLocalNotebookData` is wired to sign-out,
   the sync-metadata persist already skips a write for a torn-down/paused engine and
   `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /
