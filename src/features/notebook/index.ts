@@ -87,6 +87,7 @@ export {
   startNotebookListSync,
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
+export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'
 export {
   openNotebookInSlot,
   resetSlotToFloorForAccountChange,

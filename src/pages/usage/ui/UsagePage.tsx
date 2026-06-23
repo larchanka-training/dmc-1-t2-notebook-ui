@@ -3,7 +3,12 @@ import { action, atom, computed, withAsync, withAsyncData, wrap } from '@reatom/
 import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
-import { resolveDemoNotebookId } from '@/features/notebook'
+import {
+  clearSeedTombstone,
+  isSeedTombstoned,
+  openNotebookInSlot,
+  resolveDemoNotebookId,
+} from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
 import { Button } from '@/shared/ui/button'
@@ -223,14 +228,39 @@ const demoPresenceResource = computed(async () => {
   // per-account seed is meaningless when signed out — so without a user report
   // "present" (true) to keep the restore block hidden and never call the resolver.
   if (!userAtom()) return true
+  // The seed counts as "present" only when NOT tombstoned: a deleted seed has a
+  // durable tombstone (№23), and after a delete a stale local copy may still sit
+  // in storage — so a tombstone means "deleted", and the restore block must show.
+  if (await wrap(isSeedTombstoned())) return false
   const demoId = await wrap(resolveDemoNotebookId())
   return Boolean(await wrap(notebookStorage.get(demoId)))
 }, 'usage.demoPresence').extend(withAsyncData({ initState: true }))
 
 const restoreDemo = action(async () => {
+  // Recreate the per-account seed server-side, then make it the real current
+  // notebook locally (TARDIS-167 №23 / #61 #67):
+  //   1. lift the deleted-seed tombstone so boot stops suppressing it;
+  //   2. write the returned document to storage;
+  //   3. stamp owner + remoteCreated sync-state so the owner-scoped boot picker
+  //      and the sidebar treat it as this user's notebook (it already exists
+  //      server-side — we just created it);
+  //   4. open it in the editor slot so the user sees the result immediately.
   const restored = await wrap(notebookApi.restoreFeaturesDemo())
+  await wrap(clearSeedTombstone())
   await wrap(notebookStorage.put(restored))
+  const ownerId = userAtom()?.id
+  await wrap(
+    notebookStorage.putSyncState({
+      notebookId: restored.id,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+      ...(ownerId !== undefined ? { ownerId } : {}),
+      lastSyncedUpdatedAt: restored.updatedAt,
+    }),
+  )
   demoPresenceResource.data.set(true)
+  await wrap(openNotebookInSlot(restored.id))
 }, 'usage.restoreDemo').extend(withAsync())
 
 export default UsagePage

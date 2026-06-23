@@ -1,7 +1,24 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { DEMO_NOTEBOOK_ID } from '@/features/notebook'
+
+// `restoreDemo` opens the restored notebook into the editor slot via
+// `openNotebookInSlot`, imported as a NAMED binding from the notebook barrel
+// (a runtime spy would not be seen at the call site). Mock the barrel, replacing
+// ONLY that action with a spy and keeping every other export real.
+vi.mock('@/features/notebook', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/notebook')>()
+  return { ...actual, openNotebookInSlot: vi.fn().mockResolvedValue('opened') }
+})
+
+import {
+  DEMO_NOTEBOOK_ID,
+  isSeedTombstoned,
+  openNotebookInSlot,
+  resolveDemoNotebookId,
+  setSeedTombstone,
+} from '@/features/notebook'
+import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
 import { userAtom } from '@/entities/session'
 import UsagePage from './UsagePage'
@@ -73,5 +90,33 @@ describe('UsagePage', () => {
     expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /restore demo/i })).not.toBeInTheDocument()
     expect(getSpy).not.toHaveBeenCalled()
+  })
+
+  test('restoring lifts the tombstone, stamps ownership and opens the notebook (TARDIS-167 №23 / #61 #67)', async () => {
+    const user = userEvent.setup()
+    await notebookStorage.clearAll()
+    userAtom.set({ id: 'restore-owner', email: 'a@b.com', roles: [] } as never)
+    // Seed was deleted earlier → tombstoned, so the restore block is visible.
+    await setSeedTombstone()
+    const demoId = await resolveDemoNotebookId()
+    vi.spyOn(notebookApi, 'restoreFeaturesDemo').mockResolvedValue({
+      id: demoId,
+      title: 'Welcome',
+      formatVersion: 1,
+      createdAt: 1,
+      updatedAt: 9,
+      cells: [],
+    } as Awaited<ReturnType<typeof notebookApi.restoreFeaturesDemo>>)
+
+    render(<UsagePage />)
+    await user.click(await screen.findByRole('button', { name: /restore demo/i }))
+
+    await waitFor(() => expect(notebookApi.restoreFeaturesDemo).toHaveBeenCalled())
+    // Tombstone lifted, document written with owner sync-state, slot opened.
+    expect(await isSeedTombstoned()).toBe(false)
+    expect(await notebookStorage.get(demoId)).toBeDefined()
+    expect((await notebookStorage.getSyncState(demoId))?.ownerId).toBe('restore-owner')
+    expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(demoId)
+    await notebookStorage.clearAll()
   })
 })
