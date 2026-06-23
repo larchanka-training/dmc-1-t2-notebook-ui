@@ -4,8 +4,10 @@ import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
 import {
+  activeNotebookIdAtom,
   clearSeedTombstone,
   isSeedTombstoned,
+  notebookListResource,
   openNotebookInSlot,
   resolveDemoNotebookId,
 } from '@/features/notebook'
@@ -223,6 +225,14 @@ const UsagePage = reatomComponent(() => {
 }, 'UsagePage')
 
 const demoPresenceResource = computed(async () => {
+  // Reactive triggers, read SYNCHRONOUSLY before the first await (a computed only
+  // tracks dependencies up to its first await; the tombstone/storage reads below
+  // are async and don't register). Deleting or restoring the seed mutates the
+  // notebook list and the active slot id, so touching them here invalidates this
+  // resource — the restore button then appears/disappears on the next navigation
+  // to Usage, without a full page reload (TARDIS-167 №23).
+  notebookListResource.data()
+  activeNotebookIdAtom()
   // TARDIS-167 (№22): Usage is now public. The demo id is per-owner
   // (`resolveDemoNotebookId` throws before user hydration), and restoring a
   // per-account seed is meaningless when signed out — so without a user report

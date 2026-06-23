@@ -102,6 +102,7 @@ describe('UsagePage', () => {
     vi.spyOn(notebookApi, 'restoreFeaturesDemo').mockResolvedValue({
       id: demoId,
       title: 'Welcome',
+      ownerId: 'restore-owner',
       formatVersion: 1,
       createdAt: 1,
       updatedAt: 9,
