@@ -14,6 +14,7 @@ vi.mock('@/features/notebook', async (importOriginal) => {
 import {
   DEMO_NOTEBOOK_ID,
   isSeedTombstoned,
+  notebookListResource,
   openNotebookInSlot,
   resolveDemoNotebookId,
   setSeedTombstone,
@@ -95,6 +96,7 @@ describe('UsagePage', () => {
   test('restoring lifts the tombstone, stamps ownership and opens the notebook (TARDIS-167 №23 / #61 #67)', async () => {
     const user = userEvent.setup()
     await notebookStorage.clearAll()
+    notebookListResource.data.set([])
     userAtom.set({ id: 'restore-owner', email: 'a@b.com', roles: [] } as never)
     // Seed was deleted earlier → tombstoned, so the restore block is visible.
     await setSeedTombstone()
@@ -118,6 +120,9 @@ describe('UsagePage', () => {
     expect(await notebookStorage.get(demoId)).toBeDefined()
     expect((await notebookStorage.getSyncState(demoId))?.ownerId).toBe('restore-owner')
     expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(demoId)
+    // The restored seed is surfaced in the sidebar list immediately (no refetch).
+    expect(notebookListResource.data().some((it) => it.id === demoId)).toBe(true)
     await notebookStorage.clearAll()
+    notebookListResource.data.set([])
   })
 })

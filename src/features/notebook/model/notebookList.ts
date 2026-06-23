@@ -150,6 +150,18 @@ export function renameListItem(id: string, title: string): void {
   )
 }
 
+/**
+ * TARDIS-167 (№23): add a notebook to the cached sidebar list immediately,
+ * WITHOUT waiting for a `GET /notebooks` refetch. Used by the demo Restore flow,
+ * which recreates the seed server-side and must surface its row right away —
+ * otherwise the seed shows only as the synthetic floor row and vanishes the
+ * moment another notebook is opened (until the next list refetch). Ordered by
+ * `createdAt desc` to match the fetch order; a no-op if the row already exists.
+ */
+export function upsertListItem(notebook: notebookApi.Notebook): void {
+  notebookListResource.data.set((items) => insertByCreatedAtDesc(items, toListItem(notebook)))
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a

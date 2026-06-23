@@ -10,6 +10,7 @@ import {
   notebookListResource,
   openNotebookInSlot,
   resolveDemoNotebookId,
+  upsertListItem,
 } from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
@@ -269,6 +270,10 @@ const restoreDemo = action(async () => {
       lastSyncedUpdatedAt: restored.updatedAt,
     }),
   )
+  // Surface the restored seed in the sidebar list immediately (no GET refetch), so
+  // it does not show only as the synthetic floor row and vanish the moment another
+  // notebook is opened before the next list fetch.
+  upsertListItem(restored)
   demoPresenceResource.data.set(true)
   await wrap(openNotebookInSlot(restored.id))
 }, 'usage.restoreDemo').extend(withAsync())
