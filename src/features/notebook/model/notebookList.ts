@@ -311,6 +311,15 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
     return
   }
 
+  // B-1 guard (TARDIS-167 №23): never delete the user's only notebook — that would
+  // leave the workspace with nothing open. The sidebar also hides/disables the
+  // Delete affordance in this case; this is the model-level backstop so a direct
+  // call (or a stray listed row) cannot empty the workspace.
+  if (notebookListResource.data().length <= 1) {
+    console.warn('notebook.delete: refusing to delete the only notebook')
+    return
+  }
+
   const wasActive = id === activeNotebookIdAtom()
 
   // Invalidate any in-flight open BEFORE the delete touches the slot/server (H2):

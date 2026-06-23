@@ -198,6 +198,20 @@ describe('AppSidebar — UI contract (M7)', () => {
     expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
   })
+
+  test('offers no Delete when only one notebook exists (B-1, TARDIS-167 №23)', async () => {
+    const user = userEvent.setup()
+    // Exactly one notebook, open in the slot: no floor row, one listed row → the
+    // single-notebook guard hides Delete so the workspace can't be emptied.
+    act(() => activeNotebookIdAtom.set(BACKEND_ID))
+    renderSidebar()
+
+    const menus = screen.getAllByRole('button', { name: /notebook actions/i })
+    await user.click(menus[menus.length - 1])
+
+    expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
+  })
 })
 
 describe('AppSidebar — no notebooks fetch before auth (TARDIS-167 №8)', () => {

@@ -346,7 +346,8 @@ describe('deleteNotebookAction', () => {
 
   test('quiesces the slot BEFORE the server DELETE, then settles to the floor AFTER (H1)', async () => {
     activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    // Two rows so the B-1 "keep at least one notebook" guard does not short-circuit.
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Doomed')])
     const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
 
     await deleteNotebookAction(NB_ID)
@@ -364,7 +365,8 @@ describe('deleteNotebookAction', () => {
 
   test('re-arms the slot and rolls the row back when the active-notebook DELETE fails (H1)', async () => {
     activeNotebookIdAtom.set(NB_ID) // open in the slot
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    const keep = listItem('keep', 'Keep me')
+    notebookListResource.data.set([keep, listItem(NB_ID, 'Doomed')])
     vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
 
     await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
@@ -374,12 +376,13 @@ describe('deleteNotebookAction', () => {
     expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
     expect(slotMock.restoreActiveSlotBindings).toHaveBeenCalledTimes(1)
     expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
-    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Doomed')])
+    expect(peek(notebookListResource.data)).toEqual([keep, listItem(NB_ID, 'Doomed')])
   })
 
   test('does not roll back a committed DELETE even if settling the slot fails (H2)', async () => {
     activeNotebookIdAtom.set(NB_ID)
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    const keep = listItem('keep', 'Keep me')
+    notebookListResource.data.set([keep, listItem(NB_ID, 'Doomed')])
     vi.spyOn(notebookApi, 'remove').mockResolvedValue()
     // settle is best-effort: even if it rejected, the action must NOT reject (which
     // would roll back the committed server delete). The real settle never throws;
@@ -388,7 +391,7 @@ describe('deleteNotebookAction', () => {
 
     await expect(deleteNotebookAction(NB_ID)).resolves.toBeUndefined()
     // Row stays removed (delete committed), not resurrected by a rollback.
-    expect(peek(notebookListResource.data)).toEqual([])
+    expect(peek(notebookListResource.data)).toEqual([keep])
   })
 
   test('refuses to delete the local welcome floor (M5)', async () => {
@@ -403,25 +406,39 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
   })
 
+  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook.
+  test('refuses to delete the only notebook (B-1)', async () => {
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(NB_ID, 'Only one')])
+
+    await deleteNotebookAction(NB_ID)
+
+    // Guarded no-op: no server call, the single row stays.
+    expect(removeSpy).not.toHaveBeenCalled()
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Only one')])
+  })
+
   // TARDIS-167 №23 contract A: deleting the seed leaves a durable tombstone so
   // boot never resurrects it.
   test('tombstones the seed when the seed notebook is deleted', async () => {
     const SEED_ID = '99999999-9999-4999-8999-999999999999'
     vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
     vi.spyOn(notebookApi, 'remove').mockResolvedValue()
-    notebookListResource.data.set([listItem(SEED_ID, 'Welcome')])
+    // A second row so the B-1 guard allows deleting the seed.
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(SEED_ID, 'Welcome')])
 
     await deleteNotebookAction(SEED_ID)
 
     expect(await isSeedTombstoned()).toBe(true)
-    expect(peek(notebookListResource.data)).toEqual([])
+    expect(peek(notebookListResource.data)).toEqual([listItem('keep', 'Keep me')])
   })
 
   test('does not tombstone when a non-seed notebook is deleted', async () => {
     const SEED_ID = '99999999-9999-4999-8999-999999999999'
     vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
     vi.spyOn(notebookApi, 'remove').mockResolvedValue()
-    notebookListResource.data.set([listItem(NB_ID, 'Regular')])
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Regular')])
 
     await deleteNotebookAction(NB_ID)
 
@@ -436,12 +453,12 @@ describe('deleteNotebookAction', () => {
     vi.spyOn(notebookApi, 'remove').mockRejectedValue(
       new NotFoundError('NOTEBOOK_NOT_FOUND', 'Notebook not found'),
     )
-    notebookListResource.data.set([listItem(SEED_ID, 'Welcome')])
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(SEED_ID, 'Welcome')])
 
     // Resolves (no throw) — the dialog must NOT show a failure.
     await expect(deleteNotebookAction(SEED_ID)).resolves.toBeUndefined()
     // Row stays removed and the seed is tombstoned.
-    expect(peek(notebookListResource.data)).toEqual([])
+    expect(peek(notebookListResource.data)).toEqual([listItem('keep', 'Keep me')])
     expect(await isSeedTombstoned()).toBe(true)
   })
 })

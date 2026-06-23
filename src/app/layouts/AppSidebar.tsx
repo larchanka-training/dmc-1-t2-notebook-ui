@@ -334,6 +334,11 @@ const NotebooksGroup = reatomComponent(() => {
   const showFloorRow =
     !activeInList &&
     (!filterText || (currentTitle || NEW_NOTEBOOK_TITLE).toLowerCase().includes(filterText))
+  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook, so the
+  // Delete affordance is hidden when only one slot exists. Count the real backend
+  // rows plus the synthetic floor row (the welcome seed before its first sync).
+  // `deleteNotebookAction` enforces the same rule at the model level.
+  const canDelete = items.length + (showFloorRow ? 1 : 0) > 1
 
   return (
     <SidebarGroup className="min-h-0 flex-1">
@@ -389,7 +394,7 @@ const NotebooksGroup = reatomComponent(() => {
                   // The local-only welcome-seed floor cannot be deleted; only an
                   // open backend notebook gets a Delete item (#135).
                   onDelete={
-                    activeId === LOCAL_NOTEBOOK_ID
+                    activeId === LOCAL_NOTEBOOK_ID || !canDelete
                       ? undefined
                       : wrap(() =>
                           deleteTargetAtom.set({
@@ -439,7 +444,7 @@ const NotebooksGroup = reatomComponent(() => {
                     // Defence-in-depth (M5): never offer Delete for the local
                     // welcome floor, even if it ever appears as a list row.
                     onDelete={
-                      nb.id === LOCAL_NOTEBOOK_ID
+                      nb.id === LOCAL_NOTEBOOK_ID || !canDelete
                         ? undefined
                         : wrap(() => deleteTargetAtom.set({ id: nb.id, title }))
                     }
