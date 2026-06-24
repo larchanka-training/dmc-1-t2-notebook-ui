@@ -86,6 +86,7 @@ export {
   deleteNotebookAction,
   startNotebookListSync,
   upsertListItem,
+  canDeleteNotebooks,
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
 export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'

@@ -162,6 +162,24 @@ export function upsertListItem(notebook: notebookApi.Notebook): void {
   notebookListResource.data.set((items) => insertByCreatedAtDesc(items, toListItem(notebook)))
 }
 
+/**
+ * Number of notebooks the user effectively has (TARDIS-167 №23, B-1). The sidebar
+ * and the `deleteNotebookAction` guard MUST agree, or the UI offers a Delete that
+ * the model then silently refuses. The synthetic welcome-floor row (the active
+ * notebook is not in the backend list — the unsynced seed) counts as one slot.
+ */
+export function effectiveNotebookCount(): number {
+  const items = notebookListResource.data()
+  const activeId = activeNotebookIdAtom()
+  const floorShown = activeId !== undefined && !items.some((it) => it.id === activeId)
+  return items.length + (floorShown ? 1 : 0)
+}
+
+/** B-1: deletion is allowed only while the user keeps at least one other notebook. */
+export function canDeleteNotebooks(): boolean {
+  return effectiveNotebookCount() > 1
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a
@@ -328,7 +346,7 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
   // leave the workspace with nothing open. The sidebar also hides/disables the
   // Delete affordance in this case; this is the model-level backstop so a direct
   // call (or a stray listed row) cannot empty the workspace.
-  if (notebookListResource.data().length <= 1) {
+  if (!canDeleteNotebooks()) {
     console.warn('notebook.delete: refusing to delete the only notebook')
     return
   }

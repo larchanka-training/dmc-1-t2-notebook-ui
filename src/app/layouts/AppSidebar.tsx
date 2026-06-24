@@ -25,6 +25,7 @@ import { themeModeAtom, type ThemeMode } from '@/entities/theme'
 import {
   createNotebookAction,
   promoteSeedFloorIfUnsynced,
+  canDeleteNotebooks,
   notebookListResource,
   notebookTitleAtom,
   openNotebookInSlot,
@@ -335,10 +336,11 @@ const NotebooksGroup = reatomComponent(() => {
     !activeInList &&
     (!filterText || (currentTitle || NEW_NOTEBOOK_TITLE).toLowerCase().includes(filterText))
   // B-1 (TARDIS-167 №23): the user must always keep at least one notebook, so the
-  // Delete affordance is hidden when only one slot exists. Count the real backend
-  // rows plus the synthetic floor row (the welcome seed before its first sync).
-  // `deleteNotebookAction` enforces the same rule at the model level.
-  const canDelete = items.length + (showFloorRow ? 1 : 0) > 1
+  // Delete affordance is hidden when only one slot exists. Uses the shared
+  // `canDeleteNotebooks()` helper so the affordance and the model-level guard in
+  // `deleteNotebookAction` count slots identically (no UI Delete that the model
+  // then silently refuses).
+  const canDelete = canDeleteNotebooks()
 
   return (
     <SidebarGroup className="min-h-0 flex-1">

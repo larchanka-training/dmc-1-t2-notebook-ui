@@ -412,8 +412,10 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
   })
 
-  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook.
+  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook. A
+  // "true single notebook" is the active row itself with nothing else — no floor.
   test('refuses to delete the only notebook (B-1)', async () => {
+    activeNotebookIdAtom.set(NB_ID) // the single row IS the open notebook (no floor)
     const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
     notebookListResource.data.set([listItem(NB_ID, 'Only one')])
 
@@ -423,6 +425,24 @@ describe('deleteNotebookAction', () => {
     expect(removeSpy).not.toHaveBeenCalled()
     expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
     expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Only one')])
+  })
+
+  // B-1 review fix: the sidebar affordance and the model guard must count slots
+  // identically (shared `canDeleteNotebooks()`). When an unsynced welcome-seed
+  // floor is open AND one backend row exists, the user effectively has TWO slots,
+  // so deleting the backend row is allowed — the floor seed remains. The old model
+  // counted only `data().length` (== 1) and wrongly refused (a UI Delete the model
+  // then silently no-op'd).
+  test('allows deleting a backend row while an unsynced seed floor is open (B-1)', async () => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID) // floor seed open, not in the list
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(NB_ID, 'One backend row')])
+
+    await deleteNotebookAction(NB_ID)
+
+    // The floor seed is the kept slot, so the backend row is deletable.
+    expect(removeSpy).toHaveBeenCalledWith(NB_ID)
+    expect(peek(notebookListResource.data)).toEqual([])
   })
 
   // TARDIS-167 №23 contract A: deleting the seed leaves a durable tombstone so
