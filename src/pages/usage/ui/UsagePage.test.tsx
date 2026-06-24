@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { urlAtom } from '@reatom/core'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
@@ -122,6 +123,8 @@ describe('UsagePage', () => {
     expect(vi.mocked(openNotebookInSlot)).toHaveBeenCalledWith(demoId)
     // The restored seed is surfaced in the sidebar list immediately (no refetch).
     expect(notebookListResource.data().some((it) => it.id === demoId)).toBe(true)
+    // Review #4: restore navigates away from /usage to the editor (notebook route).
+    expect(urlAtom().pathname).toBe('/')
     await notebookStorage.clearAll()
     notebookListResource.data.set([])
   })

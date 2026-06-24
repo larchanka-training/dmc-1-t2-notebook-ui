@@ -40,12 +40,45 @@ describe('reconcileBootFromServer (TARDIS-167 №23, step 4b)', () => {
     vi.restoreAllMocks()
   })
 
-  test('skips entirely when local storage already has notebooks', async () => {
-    await notebookStorage.put(localDoc('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+  test('skips entirely when the user already has an OWNED local notebook', async () => {
+    const mine = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    await notebookStorage.put(localDoc(mine))
+    // Ownership lives only in the sync-state (NotebookJSON carries none); stamp it
+    // so the owner-aware "local present" test recognises this notebook as ours.
+    await notebookStorage.putSyncState({
+      notebookId: mine,
+      remoteCreated: true,
+      dirty: false,
+      ownerId: USER.id,
+      deletedCells: [],
+    })
     const listSpy = vi.spyOn(notebookApi, 'list')
 
     expect(await reconcileBootFromServer()).toBe('skipped-local-present')
     expect(listSpy).not.toHaveBeenCalled()
+  })
+
+  // Review #2 (cross-account): another account's local notebook on a shared device
+  // must NOT make the reconcile skip for the current user, or B would land on a
+  // fresh seed instead of their own server notebook.
+  test('does NOT skip when only ANOTHER account local notebooks are present', async () => {
+    const theirs = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    await notebookStorage.put(localDoc(theirs))
+    await notebookStorage.putSyncState({
+      notebookId: theirs,
+      remoteCreated: true,
+      dirty: false,
+      ownerId: 'someone-else',
+      deletedCells: [],
+    })
+    const newest = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([listItem(newest, 300)])
+    vi.spyOn(notebookApi, 'get').mockResolvedValue(serverDoc(newest))
+
+    // The current user owns nothing locally, so the reconcile runs and pulls their
+    // server notebook instead of skipping on the other account's leftovers.
+    expect(await reconcileBootFromServer()).toBe('reconciled-seed-deleted')
+    expect(await notebookStorage.get(newest)).toBeDefined()
   })
 
   test('returns "unavailable" when the server list cannot be fetched', async () => {

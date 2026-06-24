@@ -19,6 +19,7 @@ export {
   notebookTitleAtom,
   loadNotebook,
   notebookLoadedAtom,
+  bootSeedSuppressedAtom,
   notebookBaseUpdatedAtAtom,
   storageCompatibilityAtom,
   restoreNotebook,

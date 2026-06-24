@@ -1,12 +1,13 @@
-import { connectLogger, log, wrap } from '@reatom/core'
+import { connectLogger, log, urlAtom, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
-import { LOGIN_PATH } from '@/shared/lib/paths'
+import { appPath, LOGIN_PATH } from '@/shared/lib/paths'
 import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
 import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
+  bootSeedSuppressedAtom,
   loadNotebook,
   markBootRestored,
   reconcileBootFromServer,
@@ -161,12 +162,23 @@ rootFrame.run(async () => {
     const restored = await wrap(loadNotebook(true))
     bootedNotebook = true
     if (restored) markBootRestored()
+    // Review #3 (TARDIS-167 №23): the user deleted their seed and has no other
+    // notebook, so `loadNotebook` opened nothing real and left the slot on the
+    // inert legacy floor (autosave/remote-sync stay unbound). Send them to the
+    // Usage page's Restore affordance instead of an unbacked, unsaveable seed
+    // whose first edit would resurrect the deleted seed. SPA navigation (no
+    // reload), so boot does not re-run and loop.
+    if (bootSeedSuppressedAtom()) {
+      urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
+    }
   } finally {
     if (bootedNotebook) {
       // Start the editor slot for the boot notebook: autosave + background
       // remote-sync (#134, self-guards on auth) + optional persisted AI context
       // (Mode B), all bound to the active slot id (#135). The slot controller owns
       // these bindings so open-into-slot can safely switch them to another id.
+      // When the seed was suppressed (review #3) the active id is the legacy
+      // floor, so `startBindings` self-refuses to arm — harmless, kept for symmetry.
       startSlot()
     }
   }

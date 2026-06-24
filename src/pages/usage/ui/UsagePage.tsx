@@ -1,5 +1,5 @@
 import { Check, Copy, RefreshCcw } from 'lucide-react'
-import { action, atom, computed, withAsync, withAsyncData, wrap } from '@reatom/core'
+import { action, atom, computed, urlAtom, withAsync, withAsyncData, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
@@ -14,6 +14,7 @@ import {
 } from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
+import { appPath } from '@/shared/lib/paths'
 import { Button } from '@/shared/ui/button'
 
 const examples = [
@@ -276,6 +277,10 @@ const restoreDemo = action(async () => {
   upsertListItem(restored)
   demoPresenceResource.data.set(true)
   await wrap(openNotebookInSlot(restored.id))
+  // TARDIS-167 №23 (review #4): leave the Usage page for the editor so the user
+  // lands on the just-restored notebook instead of staying on /usage with no
+  // visible result. SPA navigation via the router base (notebook route is '/').
+  urlAtom.set((url) => new URL(appPath(''), url.origin), true)
 }, 'usage.restoreDemo').extend(withAsync())
 
 export default UsagePage

@@ -25,7 +25,7 @@ import { wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
-import { resolveDemoNotebookId } from './notebook'
+import { hasOwnedLocalNotebooks, resolveDemoNotebookId } from './notebook'
 import { pullServerNotebook } from './pull'
 import { setSeedTombstone } from './seedTombstone'
 
@@ -48,10 +48,16 @@ export type BootReconcileOutcome =
  * back to the seed path. Returns the outcome for observability/tests.
  */
 export async function reconcileBootFromServer(): Promise<BootReconcileOutcome> {
-  // Only act on an empty local store; a present local notebook is authoritative
-  // for the slot choice (bootstrap step 3) and must not trigger a network pull.
-  const local = await wrap(notebookStorage.list())
-  if (local.length > 0) return 'skipped-local-present'
+  // Only act when this user has NO local notebook of their own; a present OWNED
+  // notebook is authoritative for the slot choice (bootstrap step 3) and must not
+  // trigger a network pull.
+  //
+  // Review #2 (cross-account): a bare `notebookStorage.list()` counts notebooks
+  // of EVERY account on the shared device, so account A's leftovers would make
+  // this skip the reconcile for account B — leaving B with a fresh seed instead
+  // of their own server notebook. Scope the "local present" test to the current
+  // owner (same ownership rule the boot slot picker uses).
+  if (await wrap(hasOwnedLocalNotebooks())) return 'skipped-local-present'
 
   let items: notebookApi.NotebookListItem[]
   try {

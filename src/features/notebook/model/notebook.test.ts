@@ -9,6 +9,7 @@ import {
   cellsAtom,
   changeCellKind,
   deleteCell,
+  bootSeedSuppressedAtom,
   loadNotebook,
   LOCAL_NOTEBOOK_ID,
   moveCell,
@@ -324,6 +325,26 @@ describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
     // The deleted seed stays gone — boot must not resurrect it.
     expect(await notebookStorage.get(demoId)).toBeUndefined()
     expect(notebookLoadedAtom()).toBe(true)
+  })
+
+  // Review #3: a tombstoned seed with no surviving local notebook must leave the
+  // slot on the inert legacy floor id and flag the suppression, so `startBindings`
+  // refuses to arm and the first edit cannot resurrect the seed. The boot caller
+  // reads the flag to route the user to the Usage Restore affordance.
+  test('demotes the slot to the legacy floor and flags suppression when the seed is tombstoned with no survivor', async () => {
+    await setSeedTombstone()
+
+    await loadNotebook(true)
+
+    expect(bootSeedSuppressedAtom()).toBe(true)
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+    const demoId = await resolveDemoNotebookId()
+    expect(await notebookStorage.get(demoId)).toBeUndefined()
+  })
+
+  test('does NOT flag suppression when a fresh seed is written (not tombstoned)', async () => {
+    await loadNotebook(true)
+    expect(bootSeedSuppressedAtom()).toBe(false)
   })
 
   // Bootstrap step 3: open the NEWEST locally-stored notebook OWNED by this user.
