@@ -276,9 +276,13 @@ export const createNotebookAction = action(async (title: string) => {
  *     not remoteCreated, no tombstones) is exactly the #9 case ("did not edit the
  *     seed") and the engine never pushes it, so there is no race.
  *
- * Best-effort: a failed promote (offline / rejected) is logged and swallowed so
- * it never blocks creating the new notebook — the seed stays a local floor row
- * and syncs on its next edit.
+ * Best-effort here is a local liveness boundary, not a weaker server invariant.
+ * In the normal signed-in UI flow this promotion runs before the first non-demo
+ * create, so an account with server notebooks is expected to have had its
+ * per-user seed created at least once. If promotion fails and a later create
+ * still succeeds (for example, a squatted id or corrupt local storage), that is
+ * exceptional drift: fresh-device reconcile will treat the missing seed as
+ * deleted, and `features-demo/restore` remains resurrect-only.
  */
 export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
   const id = activeNotebookIdAtom()

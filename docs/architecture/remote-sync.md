@@ -199,6 +199,12 @@ into storage (stamping `ownerId` + `remoteCreated` so the owner-scoped picker
 accepts it), and if the per-user seed id is **absent** from the server list, the
 seed was deleted on another device → set the tombstone locally.
 
+**Server-side seed invariant.** In the normal signed-in UI flow, an account that has any server notebooks has had its per-user demo notebook persisted on the server at least once.
+The create button preserves this invariant: when the clean, never-synced per-user seed floor is open, `promoteSeedFloorIfUnsynced()` posts that seed first, and only then does `createNotebookAction()` create the new non-demo notebook.
+Dirty or already-created seeds are owned by the remote-sync engine; by the time a non-demo server notebook exists through the healthy UI path, the demo either already exists server-side or has been soft-deleted later.
+Fresh-device reconcile therefore treats a non-empty server list without the per-user seed id as “the seed was deleted elsewhere”, not as “the seed never existed”.
+The `promoteSeedFloorIfUnsynced()` best-effort boundary is local liveness: a transient promotion failure is swallowed so notebook creation is not bricked by a local seed problem, but such a path is exceptional drift from the server invariant and must not make `features-demo/restore` mint arbitrary seed content.
+
 **Seed tombstone (contract A).** Deleting the seed writes a durable per-account
 marker in the storage `meta` partition (`seedTombstone.ts`, key
 `seed-tombstone:<ownerId>`). `loadNotebook` does not resurrect a tombstoned seed;
