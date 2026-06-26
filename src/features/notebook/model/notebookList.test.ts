@@ -16,6 +16,8 @@ import {
   notebookListResource,
   renameListItem,
   startNotebookListSync,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
 } from './notebookList'
 
 // Delete drives the slot controller's two-phase active-delete API (quiesce before
@@ -181,6 +183,54 @@ describe('createNotebookAction', () => {
 
     gate.resolve(created)
     expect(await first).toEqual(created)
+  })
+})
+
+describe('notebook cap (TARDIS-173)', () => {
+  beforeEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+  afterEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  // Build N listed rows, with one of them active so no synthetic floor row is
+  // added on top (effectiveNotebookCount would otherwise be N + 1).
+  const fillList = (n: number) => {
+    const rows = Array.from({ length: n }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    if (rows.length > 0) activeNotebookIdAtom.set(rows[0].id)
+  }
+
+  test('canCreateNotebook() is true below the cap and false at it', () => {
+    fillList(MAX_NOTEBOOKS - 1)
+    expect(canCreateNotebook()).toBe(true)
+
+    fillList(MAX_NOTEBOOKS)
+    expect(canCreateNotebook()).toBe(false)
+  })
+
+  test('createNotebookAction is a no-op at the cap (no API call)', async () => {
+    fillList(MAX_NOTEBOOKS)
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    const result = await createNotebookAction('over the limit')
+
+    expect(result).toBeNull()
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+
+  test('the unsynced seed floor counts toward the cap', () => {
+    // MAX-1 listed rows + an active floor (active id not in the list) = MAX slots.
+    const rows = Array.from({ length: MAX_NOTEBOOKS - 1 }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID) // floor row, not in the list
+
+    expect(canCreateNotebook()).toBe(false)
   })
 })
 

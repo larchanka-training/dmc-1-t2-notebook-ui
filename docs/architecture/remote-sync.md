@@ -219,6 +219,28 @@ by `createdAt`) via `openNotebookInSlot`, instead of resurrecting the seed. A
 delete that 404s (already deleted server-side) is treated as an idempotent success
 (tombstone the seed, drop the local copy, no "Delete failed").
 
+**Creation cap (TARDIS-173).** The backend enforces no maximum number of
+notebooks per user; the `200` on `GET /notebooks` is the page-size ceiling
+(`limit`, `le=200`). The client reads only that single first page
+(`notebook.ts` `LIST_PAGE_LIMIT`), so a notebook created beyond it would be
+invisible in the sidebar and never synced. The UI therefore caps creation at the
+page size: `MAX_NOTEBOOKS = LIST_PAGE_LIMIT`. `canCreateNotebook()` is
+`effectiveNotebookCount() < MAX_NOTEBOOKS` — the **same** count the B-1 delete
+guard uses, so the create "+" and the delete guard never disagree. The sidebar
+marks the "+" `aria-disabled` at the cap (kept hoverable, not native `disabled`,
+so its "limit reached" tooltip still shows) and `createNotebookAction` is the
+model-level backstop for other entry points. Deleting any notebook drops the
+count and re-enables creation. The welcome seed counts as one slot (it occupies a
+listed/floor row), so the practical ceiling is **199 user-created notebooks plus
+the restorable seed**. Known minor: a user near the cap who has deleted their
+seed (tombstoned, slot freed) can reach 200 user notebooks — still within the
+page the client can load/sync, so nothing is hidden. IndexedDB is shared across
+accounts on a device and stores more rows than one account's cap; the cap is a
+per-account _active list_ limit, not a local-storage limit.
+
+> See also: the same cap is recorded in the monorepo docs
+> (`docs/System_Architecture.md`, `docs/requirements.md`).
+
 ## Scaling note
 
 Every POST/PATCH sends the **whole** document (full cell list + the entire

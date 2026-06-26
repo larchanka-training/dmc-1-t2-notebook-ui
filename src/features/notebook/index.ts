@@ -88,6 +88,8 @@ export {
   startNotebookListSync,
   upsertListItem,
   canDeleteNotebooks,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
 export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'

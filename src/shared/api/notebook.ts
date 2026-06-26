@@ -52,7 +52,13 @@ export interface UpdateNotebookInput {
 // reads a single page at the server maximum of 200. With more than 200
 // notebooks the tail is not returned; list() logs a warning when it detects
 // this truncation. TODO(#135): real pagination / bootstrap.
-const LIST_PAGE_LIMIT = 200
+//
+// Exported because it is also the EFFECTIVE notebook cap the UI enforces: the
+// client only ever loads/syncs this first page, so a notebook beyond it would be
+// invisible and unsynced. The create affordance and the model-level create guard
+// (`MAX_NOTEBOOKS` in features/notebook) derive their limit from this single
+// source so the page size and the cap can never drift apart.
+export const LIST_PAGE_LIMIT = 200
 
 /**
  * Unwrap an openapi-fetch result into the success payload or throw a typed

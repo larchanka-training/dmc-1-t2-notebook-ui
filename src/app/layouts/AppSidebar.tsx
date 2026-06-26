@@ -26,6 +26,8 @@ import {
   createNotebookAction,
   promoteSeedFloorIfUnsynced,
   canDeleteNotebooks,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
   notebookListResource,
   notebookTitleAtom,
   openNotebookInSlot,
@@ -39,6 +41,7 @@ import {
 import { logoutAction } from '@/features/auth'
 import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -341,21 +344,46 @@ const NotebooksGroup = reatomComponent(() => {
   // `deleteNotebookAction` count slots identically (no UI Delete that the model
   // then silently refuses).
   const canDelete = canDeleteNotebooks()
+  // Cap guard (TARDIS-173): the client only loads/syncs the first page of
+  // notebooks, so creation is capped at that page size. Disable the "+" at the
+  // ceiling and explain why in a tooltip; deleting a notebook re-enables it. The
+  // model-level guard in `createNotebookAction` is the backstop for other entry
+  // points.
+  const atNotebookCap = !canCreateNotebook()
 
   return (
     <SidebarGroup className="min-h-0 flex-1">
       <div className="flex shrink-0 items-center justify-between gap-1 pr-1">
         <SidebarGroupLabel className={GROUP_LABEL}>Notebooks</SidebarGroupLabel>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 text-muted-foreground hover:text-primary"
-          aria-label="New notebook"
-          onClick={onCreate}
-          disabled={creating}
-        >
-          <Plus className="size-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn(
+                  'size-6 shrink-0 text-muted-foreground hover:text-primary',
+                  // Cap: keep the button hoverable (so its tooltip shows) but look
+                  // and behave disabled. A native `disabled` button suppresses
+                  // hover events, which would hide the very tooltip that explains
+                  // why creation is blocked.
+                  atNotebookCap && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
+                )}
+                aria-label="New notebook"
+                aria-disabled={atNotebookCap}
+                onClick={atNotebookCap ? undefined : onCreate}
+                disabled={creating}
+              >
+                <Plus className="size-4" />
+              </Button>
+            }
+          />
+          {atNotebookCap && (
+            <TooltipContent>
+              {`Notebook limit reached (${MAX_NOTEBOOKS}). Delete a notebook to create a new one.`}
+            </TooltipContent>
+          )}
+        </Tooltip>
       </div>
       <SidebarGroupContent className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="relative shrink-0 px-1">

@@ -180,6 +180,31 @@ export function canDeleteNotebooks(): boolean {
   return effectiveNotebookCount() > 1
 }
 
+/**
+ * Effective maximum number of notebooks the UI allows (TARDIS-167, review on
+ * PR #91 / TARDIS-173). This is NOT a backend create limit — the API has none.
+ * The client only ever loads and syncs the first `LIST_PAGE_LIMIT` (200) rows of
+ * `GET /notebooks`, so any notebook beyond that page would be invisible in the
+ * sidebar and never synced. Capping creation at the page size keeps every
+ * notebook the user can make reachable. Derived from the single source
+ * (`notebookApi.LIST_PAGE_LIMIT`) so the page size and the cap cannot drift.
+ *
+ * The welcome seed is counted as one slot (it occupies a listed/floor row like
+ * any other), so the practical ceiling is 199 user-created notebooks plus the
+ * restorable seed.
+ */
+export const MAX_NOTEBOOKS = notebookApi.LIST_PAGE_LIMIT
+
+/**
+ * Whether the user is below the notebook cap and may create another one. Shares
+ * `effectiveNotebookCount()` with the delete guard so the create affordance and
+ * the model never disagree (a UI "+" that the model would then refuse). Deleting
+ * any notebook drops the count and re-enables creation.
+ */
+export function canCreateNotebook(): boolean {
+  return effectiveNotebookCount() < MAX_NOTEBOOKS
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a
@@ -191,6 +216,16 @@ export const createNotebookAction = action(async (title: string) => {
   const trimmed = title.trim()
   if (!trimmed) return null
   if (createInFlight) return null
+  // Cap guard (TARDIS-173): never create past the page-size ceiling the client can
+  // load/sync. The sidebar also disables the "+" and shows a tooltip; this is the
+  // model-level backstop so a second entry point (shortcut / command palette /
+  // direct call) cannot push the user over the limit. Deleting a notebook
+  // re-enables creation. No-op rather than throw — the affordance already explains
+  // why, and callers treat `null` as "not created".
+  if (!canCreateNotebook()) {
+    console.warn(`notebook.create: refusing to create past the cap of ${MAX_NOTEBOOKS}`)
+    return null
+  }
   createInFlight = true
 
   // Client-chosen UUID (FU1): the same id is both the optimistic row id AND the
