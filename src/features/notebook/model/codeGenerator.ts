@@ -6,13 +6,39 @@ import { enterEdit, focusCell } from './cellMode'
 import { buildNotebookContext, contextToPromptBlock } from './context-ai/contextBuilder'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { assembleGenerationContext, whenContextReady } from './context-ai/aiContext'
+import {
+  startThinkingAction,
+  updateThinkingAction,
+  finishThinkingAction,
+  failThinkingAction,
+} from './inBrowserThinking'
+
+// Result of one in-browser generation. Reasoning models (DeepSeek-R1-Distill)
+// emit a `<think>…</think>` stream before the code; the bridge splits it so the
+// notebook only ever inserts `code`, surfaces `thinking` live, and can refuse to
+// insert when the model never produced runnable code (TARDIS-168).
+export interface InBrowserGenerateResult {
+  /** The final code after reasoning, ready to insert (empty when none). */
+  code: string
+  /** The chain-of-thought text, for the live "thinking" UI. */
+  thinking: string
+  /** True when no usable code was produced (still-thinking / degenerate / empty). */
+  incomplete: boolean
+}
+
+/**
+ * In-browser generator contract. `onThink` (when provided) is called with the
+ * cumulative reasoning text as it streams — the caller MUST pass a Reatom-`wrap`ped
+ * callback, since it fires across async (`for await`) boundaries.
+ */
+export type InBrowserGenerator = (
+  prompt: string,
+  onThink?: (thinking: string) => void,
+) => Promise<InBrowserGenerateResult>
 
 // Dependency-injection slot: set by external code (pages/notebook) when a
 // local LLM engine is available. null means no in-browser generator is loaded.
-export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | null>(
-  null,
-  'notebook.codeGenerator',
-)
+export const codeGeneratorAtom = atom<InBrowserGenerator | null>(null, 'notebook.codeGenerator')
 
 // Display-only mirror of the loaded model's id (TARDIS-167, review PR #88 r2).
 // The SINGLE SOURCE OF TRUTH lives in `features/web-llm` (`loadedModelIdAtom`,
@@ -60,7 +86,19 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
     focusCell(newCell.id)
     enterEdit(newCell.id)
   })
+  // Live reasoning block anchored right after the prompt cell (TARDIS-168).
+  startThinkingAction(cellId)
+  const onThink = wrap((thinking: string) => updateThinkingAction(thinking))
+  const finish = wrap(() => finishThinkingAction())
+  const fail = wrap(() => failThinkingAction())
 
-  const code = await wrap(generator(fullPrompt))
-  insertResult(code)
+  const result = await wrap(generator(fullPrompt, onThink))
+  if (result.incomplete) {
+    // Reasoning loop / empty answer: keep the "couldn't generate" notice, insert
+    // nothing (a half-baked or empty cell is worse than an explicit failure).
+    fail()
+    return
+  }
+  finish()
+  insertResult(result.code)
 }, 'notebook.cells.generateAndInsert').extend(withAsync())

@@ -12,6 +12,7 @@ import {
   openAgentChatAction,
 } from '../model/agentChat'
 import { codeGeneratorAtom } from '../model/codeGenerator'
+import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
 
 // Minimal GenerateResponse so mocks satisfy the return type.
@@ -208,7 +209,11 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
   // button being disabled without a model — is covered by the gate test above.
   test('the in-browser action generates via the injected local generator and inserts a cell (not cloud)', async () => {
     const cloudSpy = vi.spyOn(llm, 'generateCode')
-    const generator = vi.fn().mockResolvedValue('const local = 1')
+    // The in-browser generator now returns the split reasoning result
+    // (TARDIS-168): { code, thinking, incomplete }, not a bare string.
+    const generator = vi
+      .fn()
+      .mockResolvedValue({ code: 'const local = 1', thinking: '', incomplete: false })
     const cellsBefore = cellsAtom().length
 
     await act(async () => {
@@ -218,10 +223,29 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
       await agentSendInBrowserAction('make a local var')
     })
 
-    expect(generator).toHaveBeenCalledWith('make a local var')
+    // Called with the prompt plus the live-thinking callback (second arg).
+    expect(generator).toHaveBeenCalledWith('make a local var', expect.any(Function))
     expect(cloudSpy).not.toHaveBeenCalled()
     expect(cellsAtom().length).toBe(cellsBefore + 1)
     expect(cellsAtom().at(-1)?.code()).toBe('const local = 1')
+  })
+
+  test('inserts NO cell and marks the thinking block failed when generation is incomplete', async () => {
+    // TARDIS-168: a reasoning loop / empty answer must not pollute the notebook
+    // with a half-baked cell — the action surfaces a failure instead.
+    const generator = vi
+      .fn()
+      .mockResolvedValue({ code: '', thinking: 'looping…', incomplete: true })
+    const cellsBefore = cellsAtom().length
+
+    await act(async () => {
+      codeGeneratorAtom.set(() => generator)
+      agentInsertAfterIdAtom.set(undefined)
+      await agentSendInBrowserAction('do something impossible')
+    })
+
+    expect(cellsAtom().length).toBe(cellsBefore)
+    expect(thinkingSessionAtom()?.phase).toBe('failed')
   })
 })
 

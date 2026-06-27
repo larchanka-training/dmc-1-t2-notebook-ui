@@ -5,6 +5,12 @@ import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
 import { codeGeneratorAtom } from './codeGenerator'
+import {
+  startThinkingAction,
+  updateThinkingAction,
+  finishThinkingAction,
+  failThinkingAction,
+} from './inBrowserThinking'
 
 // The cell id after which to insert when the agent responds.
 // undefined means append at the end of the notebook.
@@ -66,7 +72,20 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
     enterEdit(newCell.id)
     agentChatOpenAtom.set(false)
   })
+  // Live reasoning block (TARDIS-168): anchored after the insert target, or at
+  // the notebook end when the dialog was opened below all cells (afterId null).
+  startThinkingAction(afterId ?? null)
+  const onThink = wrap((thinking: string) => updateThinkingAction(thinking))
+  const finish = wrap(() => finishThinkingAction())
+  const fail = wrap(() => failThinkingAction())
 
-  const code = await wrap(generator(prompt))
-  insertAndClose(code)
+  const result = await wrap(generator(prompt, onThink))
+  if (result.incomplete) {
+    // The model never produced runnable code — surface the failure, insert
+    // nothing, and keep the dialog open so the user can rephrase or retry.
+    fail()
+    return
+  }
+  finish()
+  insertAndClose(result.code)
 }, 'notebook.agentChat.sendInBrowser').extend(withAsync())
