@@ -95,25 +95,45 @@ export const loadModelAction = action(async () => {
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
 
-  const engine = await wrap(
-    webllm.CreateMLCEngine(modelId, {
-      // initProgressCallback is called by WebLLM outside Reatom context — must wrap
-      initProgressCallback: wrap((report: webllm.InitProgressReport) => {
-        loadProgressAtom.set({ progress: report.progress, text: report.text })
-      }),
+  // Build the engine ourselves (instead of CreateMLCEngine) so we keep a handle
+  // to it even when `reload()` throws. A failed load (a flaky weights download,
+  // or a transient WebGPU hiccup) otherwise LEAVES a half-initialised engine
+  // holding the WebGPU device; the next attempt then can't acquire an adapter and
+  // reports a misleading "Unable to find a compatible GPU" — which a full page
+  // reload "fixes" only because it drops the leaked device. We release it in
+  // `catch` so a retry starts clean, and always clear the loader in `finally`
+  // (TARDIS-168).
+  const engine = new webllm.MLCEngine({
+    // initProgressCallback is called by WebLLM outside Reatom context — must wrap
+    initProgressCallback: wrap((report: webllm.InitProgressReport) => {
+      loadProgressAtom.set({ progress: report.progress, text: report.text })
     }),
-  )
+  })
 
-  // Set the loaded id BEFORE the engine (review PR #88 r3): the code-generator
-  // bridge subscribes to `engineAtom` and reads `loadedModelIdAtom()` inside the
-  // callback. If the engine were set first, that subscriber would fire while the
-  // id still held the PREVIOUS model, mirroring a stale name into the notebook
-  // header. Writing the id first means the engine-triggered read sees the fresh one.
-  loadedModelIdAtom.set(modelId)
-  engineAtom.set(engine)
-  loadProgressAtom.set(null)
-  // Record this model as downloaded (de-duped) so the list can mark it local.
-  downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))
+  try {
+    await wrap(engine.reload(modelId))
+
+    // Set the loaded id BEFORE the engine (review PR #88 r3): the code-generator
+    // bridge subscribes to `engineAtom` and reads `loadedModelIdAtom()` inside the
+    // callback. If the engine were set first, that subscriber would fire while the
+    // id still held the PREVIOUS model, mirroring a stale name into the notebook
+    // header. Writing the id first means the engine-triggered read sees the fresh one.
+    loadedModelIdAtom.set(modelId)
+    engineAtom.set(engine)
+    // Record this model as downloaded (de-duped) so the list can mark it local.
+    downloadedModelIdsAtom.set((ids) => (ids.includes(modelId) ? ids : [...ids, modelId]))
+  } catch (err) {
+    // Free the leaked WebGPU device so a retry isn't poisoned. Best-effort:
+    // unload() may itself reject on a broken engine — swallow that and rethrow
+    // the ORIGINAL load error for the UI (`loadModelAction.error()`).
+    await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
+    engineAtom.set(null)
+    loadedModelIdAtom.set(null)
+    throw err
+  } finally {
+    // Always stop the spinner, on success and on failure alike.
+    loadProgressAtom.set(null)
+  }
 }, 'webLlm.loadModel').extend(withAsync())
 
 // TARDIS-167 (№5, review PR #88): reconcile the persisted downloaded-list with

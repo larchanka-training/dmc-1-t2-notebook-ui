@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { peek, wrap } from '@reatom/core'
 
-// `loadModelAction` drives `webllm.CreateMLCEngine` (a heavy WASM download), so
-// mock it with a stub engine. This lets the test exercise the REAL action — not
-// a re-implementation of its append rule — and catch a regression in the action
-// itself (review PR #88).
+// `loadModelAction` builds a `webllm.MLCEngine` and calls `reload()` (a heavy
+// WASM download), so mock the class with a stub whose `reload`/`unload` are
+// spies. This exercises the REAL action — not a re-implementation — and lets us
+// assert the failure path frees the engine (TARDIS-168).
+const reloadMock = vi.fn(async () => undefined)
+const unloadMock = vi.fn(async () => undefined)
 vi.mock('@mlc-ai/web-llm', () => ({
-  CreateMLCEngine: vi.fn(async () => ({ stub: 'engine' })),
+  // `new MLCEngine(cfg)` is called with `new`, so the mock must be constructable:
+  // a `function` (not an arrow) returning the stub instance.
+  MLCEngine: vi.fn(function () {
+    return { reload: reloadMock, unload: unloadMock }
+  }),
   hasModelInCache: vi.fn(async () => true),
 }))
 
@@ -29,7 +35,9 @@ beforeEach(() => {
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
   messagesAtom.set([])
-  vi.mocked(webllm.CreateMLCEngine).mockClear()
+  vi.mocked(webllm.MLCEngine).mockClear()
+  reloadMock.mockClear().mockResolvedValue(undefined)
+  unloadMock.mockClear().mockResolvedValue(undefined)
   vi.mocked(webllm.hasModelInCache).mockReset().mockResolvedValue(true)
 })
 
@@ -57,7 +65,7 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
     // Re-loading the SAME model must not duplicate it in the downloaded list.
     await wrap(loadModelAction())
     expect(peek(downloadedModelIdsAtom)).toEqual(['Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'])
-    expect(vi.mocked(webllm.CreateMLCEngine)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(webllm.MLCEngine)).toHaveBeenCalledTimes(2)
   })
 
   test('loading a second model appends it (keeps both downloaded)', async () => {
@@ -71,6 +79,26 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
       'Llama-3.2-1B-Instruct-q4f32_1-MLC',
     ])
     expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+  })
+
+  test('a failed load frees the engine and clears state so a retry starts clean (TARDIS-168)', async () => {
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    // First attempt: reload rejects (a flaky download / transient WebGPU error).
+    reloadMock.mockRejectedValueOnce(new Error('network blip'))
+
+    await expect(wrap(loadModelAction())).rejects.toThrow('network blip')
+
+    // The leaked WebGPU device is released and no half-loaded engine lingers.
+    expect(unloadMock).toHaveBeenCalledTimes(1)
+    expect(peek(engineAtom)).toBeNull()
+    expect(peek(loadedModelIdAtom)).toBeNull()
+    // A failed model is NOT recorded as downloaded.
+    expect(peek(downloadedModelIdsAtom)).toEqual([])
+
+    // Second attempt succeeds — the earlier failure didn't poison it.
+    await wrap(loadModelAction())
+    expect(peek(engineAtom)).not.toBeNull()
+    expect(peek(loadedModelIdAtom)).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
   })
 })
 
