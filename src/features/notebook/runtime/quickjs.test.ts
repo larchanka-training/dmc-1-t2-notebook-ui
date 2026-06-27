@@ -807,6 +807,26 @@ describe('kernel.run — base64 globals (btoa / atob)', () => {
     expect(r.status).toBe('error')
     expect(r.items.some((it) => it.type === 'error')).toBe(true)
   })
+
+  test('atob rejects a "=" in the middle instead of silently truncating', async () => {
+    // Forgiving-base64: a padding char mid-string is not in the alphabet — throw,
+    // do not decode just the prefix before it.
+    const r = await runFresh('atob("YQ==YQ==")')
+    expect(r.status).toBe('error')
+    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+
+  test('atob accepts forgiving trailing padding (length multiple of 4)', async () => {
+    // "aGk=" decodes to "hi"; the single trailing "=" is stripped, not rejected.
+    const r = await runFresh('console.log(atob("aGk="))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'hi' })
+  })
+
+  test('atob/btoa errors carry the platform error name (InvalidCharacterError)', async () => {
+    const r = await runFresh('try { atob("=") } catch (e) { console.log(e.name) }')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'InvalidCharacterError' })
+  })
 })
 
 describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
@@ -878,5 +898,19 @@ describe('kernel.run — structuredClone', () => {
     const r = await runFresh('structuredClone({ fn: () => 1 })')
     expect(r.status).toBe('error')
     expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+
+  test('an uncloneable value throws with the platform error name (DataCloneError)', async () => {
+    const r = await runFresh('try { structuredClone(() => 1) } catch (e) { console.log(e.name) }')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'DataCloneError' })
+  })
+
+  test('clones an Error, preserving name and message (not flattened to {})', async () => {
+    const r = await runFresh(
+      'const c = structuredClone(new TypeError("boom"));' +
+        ' console.log(c instanceof TypeError, c.name, c.message)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true TypeError boom' })
   })
 })

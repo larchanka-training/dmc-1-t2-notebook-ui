@@ -432,6 +432,14 @@ const BASE64_BOOTSTRAP = `(() => {
   const LATIN1_RANGE_ERROR =
     "Failed to execute 'btoa': The string to be encoded contains characters outside of the Latin1 range."
   const DECODE_ERROR = "Failed to execute 'atob': The string to be decoded is not correctly encoded."
+  // The platform throws a DOMException named 'InvalidCharacterError'. QuickJS has
+  // no DOMException, so we approximate it with the same \`.name\` — enough for a
+  // cell branching on \`e.name\`; \`instanceof DOMException\` cannot be reproduced.
+  const invalidChar = (message) => {
+    const e = new Error(message)
+    e.name = 'InvalidCharacterError'
+    return e
+  }
 
   globalThis.btoa = function btoa(data) {
     const str = String(data)
@@ -442,7 +450,7 @@ const BASE64_BOOTSTRAP = `(() => {
       const c1 = str.charCodeAt(i)
       const c2 = hasC2 ? str.charCodeAt(i + 1) : 0
       const c3 = hasC3 ? str.charCodeAt(i + 2) : 0
-      if (c1 > 0xff || c2 > 0xff || c3 > 0xff) throw new Error(LATIN1_RANGE_ERROR)
+      if (c1 > 0xff || c2 > 0xff || c3 > 0xff) throw invalidChar(LATIN1_RANGE_ERROR)
       const triple = (c1 << 16) | (c2 << 8) | c3
       out += ALPHABET[(triple >> 18) & 63]
       out += ALPHABET[(triple >> 12) & 63]
@@ -453,16 +461,19 @@ const BASE64_BOOTSTRAP = `(() => {
   }
 
   globalThis.atob = function atob(data) {
-    const str = String(data).replace(/[ \\t\\n\\f\\r]/g, '')
-    if (str.length % 4 === 1) throw new Error(DECODE_ERROR)
+    // WHATWG forgiving-base64 decode: strip ASCII whitespace, remove up to two
+    // trailing '=' ONLY when the length is a multiple of 4, then reject a
+    // remainder of 1 and any remaining non-alphabet character (so a '=' in the
+    // middle fails, instead of silently truncating the result).
+    let str = String(data).replace(/[ \\t\\n\\f\\r]/g, '')
+    if (str.length % 4 === 0) str = str.replace(/={1,2}$/, '')
+    if (str.length % 4 === 1) throw invalidChar(DECODE_ERROR)
     let out = ''
     let buffer = 0
     let bits = 0
     for (let i = 0; i < str.length; i++) {
-      const ch = str[i]
-      if (ch === '=') break
-      const idx = ALPHABET.indexOf(ch)
-      if (idx === -1) throw new Error(DECODE_ERROR)
+      const idx = ALPHABET.indexOf(str[i])
+      if (idx === -1) throw invalidChar(DECODE_ERROR)
       buffer = (buffer << 6) | idx
       bits += 6
       if (bits >= 8) {
@@ -588,15 +599,27 @@ const TEXT_CODECS_BOOTSTRAP = `(() => {
 
 /**
  * Defines `globalThis.structuredClone` in cell scope. Kept as a string so the
- * clone runs in-VM (see `installStructuredClone`). Handles cycles plus the
- * common cloneable types; throws on functions / symbols like the platform does.
+ * clone runs in-VM (see `installStructuredClone`). Handles cycles, the common
+ * cloneable types (Array / Map / Set / Date / RegExp / ArrayBuffer + views) and
+ * Error objects; throws on functions / symbols.
+ *
+ * Two deliberate deviations from the platform: the thrown value is a plain Error
+ * whose `.name` is set to 'DataCloneError' (QuickJS has no DOMException, so a
+ * cell can match on `e.name` but not `instanceof DOMException`); and host-only
+ * types absent from the VM (Blob / File / ImageData) do not exist here, so any
+ * unrecognised object is cloned as a plain `{}` of its OWN ENUMERABLE keys.
  */
 const STRUCTURED_CLONE_BOOTSTRAP = `(() => {
   const UNCLONEABLE = "Failed to execute 'structuredClone': value could not be cloned."
+  const ERROR_CTORS = { Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError }
   globalThis.structuredClone = function structuredClone(value) {
     const seen = new Map()
     function clone(v) {
-      if (typeof v === 'function' || typeof v === 'symbol') throw new Error(UNCLONEABLE)
+      if (typeof v === 'function' || typeof v === 'symbol') {
+        const e = new Error(UNCLONEABLE)
+        e.name = 'DataCloneError'
+        throw e
+      }
       if (v === null || typeof v !== 'object') return v
       if (seen.has(v)) return seen.get(v)
       if (v instanceof Date) return new Date(v.getTime())
@@ -606,6 +629,18 @@ const STRUCTURED_CLONE_BOOTSTRAP = `(() => {
         const buf = v.buffer.slice(0)
         if (v instanceof DataView) return new DataView(buf, v.byteOffset, v.byteLength)
         return new v.constructor(buf, v.byteOffset, v.length)
+      }
+      if (v instanceof Error) {
+        // The platform preserves name/message/stack/cause (all non-enumerable,
+        // so Object.keys would drop them); copy them explicitly, then any extra
+        // own enumerable props the loop below adds.
+        const Ctor = ERROR_CTORS[v.name] || Error
+        const out = new Ctor(v.message)
+        seen.set(v, out)
+        if (v.stack !== undefined) out.stack = v.stack
+        if ('cause' in v) out.cause = clone(v.cause)
+        for (const key of Object.keys(v)) out[key] = clone(v[key])
+        return out
       }
       let out
       if (Array.isArray(v)) {
