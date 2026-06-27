@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Bot, Cloud, Loader2, Sparkles, Square } from 'lucide-react'
+import { Bot, Cloud, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
@@ -13,7 +13,6 @@ import {
   closeAgentChatAction,
 } from '../model/agentChat'
 import { codeGeneratorAtom } from '../model/codeGenerator'
-import { requestStopAction } from '../model/inBrowserThinking'
 
 export const AgentChatDialog = reatomComponent(() => {
   const open = agentChatOpenAtom()
@@ -41,8 +40,6 @@ export const AgentChatDialog = reatomComponent(() => {
     agentSendAction.error.set(undefined)
     agentSendInBrowserAction(val)
   })
-
-  const doStopInBrowser = wrap(() => requestStopAction())
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -107,38 +104,28 @@ export const AgentChatDialog = reatomComponent(() => {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  isInBrowserSending ? (
-                    // While generating, this button stops the run (TARDIS-168):
-                    // spinner at rest, Square on hover.
-                    <Button
-                      variant="outline"
-                      onClick={doStopInBrowser}
-                      className="group/stop gap-2"
-                      aria-label="Stop generating"
-                    >
-                      <Loader2 className="size-4 animate-spin group-hover/stop:hidden" />
-                      <Square className="hidden size-4 fill-current group-hover/stop:block" />
-                      Stop
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      onClick={doSendInBrowser}
-                      disabled={isSending || !hasLocalModel}
-                      className="gap-2"
-                    >
+                  // The in-browser run closes this dialog up front and streams
+                  // into the notebook's ThinkingBlock, which owns the Stop
+                  // control (TARDIS-168) — so this button never needs a Stop state.
+                  <Button
+                    variant="outline"
+                    onClick={doSendInBrowser}
+                    disabled={isSending || !hasLocalModel}
+                    className="gap-2"
+                  >
+                    {isInBrowserSending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
                       <Bot className="size-4" />
-                      In-browser
-                    </Button>
-                  )
+                    )}
+                    In-browser
+                  </Button>
                 }
               />
               <TooltipContent>
-                {isInBrowserSending
-                  ? 'Stop generating'
-                  : hasLocalModel
-                    ? 'Generate with the in-browser model (WebLLM)'
-                    : 'Load an in-browser model first'}
+                {hasLocalModel
+                  ? 'Generate with the in-browser model (WebLLM)'
+                  : 'Load an in-browser model first'}
               </TooltipContent>
             </Tooltip>
             <Tooltip>

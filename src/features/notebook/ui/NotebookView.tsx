@@ -65,7 +65,7 @@ import {
   cloudGenerateErrorsAtom,
 } from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
-import { thinkingSessionAtom, requestStopAction } from '../model/inBrowserThinking'
+import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
 import { ThinkingBlock } from './ThinkingBlock'
 import { RateLimitedError } from '@/shared/api/errors'
@@ -177,7 +177,6 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         onInBrowserGenerate={
           cell.kind === 'markdown' ? wrap(() => generateAndInsertCodeAction(cell.id)) : undefined
         }
-        onStopInBrowser={wrap(() => requestStopAction())}
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
         onCloudGenerate={
