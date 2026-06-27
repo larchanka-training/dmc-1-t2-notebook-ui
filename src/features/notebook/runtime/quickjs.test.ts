@@ -770,3 +770,41 @@ describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
     }
   })
 })
+
+describe('kernel.run — base64 globals (btoa / atob)', () => {
+  test('btoa encodes ASCII to base64', async () => {
+    const r = await runFresh('console.log(btoa("hello"))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'aGVsbG8=' })
+  })
+
+  test('atob decodes base64 back to the original string', async () => {
+    const r = await runFresh('console.log(atob("aGVsbG8="))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'hello' })
+  })
+
+  test('btoa/atob round-trip is byte-exact for binary strings (incl. NUL)', async () => {
+    // The codec runs IN-VM, so binary strings with embedded \x00 (e.g. decoded
+    // PNG bytes) survive the round-trip — they never cross the host boundary.
+    // Compare in-cell and log the boolean plus the recovered byte values.
+    const r = await runFresh(
+      'const s = "\\x00\\xff\\x10ABC"; const back = atob(btoa(s));' +
+        ' console.log(back === s, [...back].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true 0,255,16,65,66,67' })
+  })
+
+  test('btoa coerces non-string arguments via ToString (browser semantics)', async () => {
+    // btoa(42) encodes "42" → "NDI=", matching the native global.
+    const r = await runFresh('console.log(btoa(42))')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'NDI=' })
+  })
+
+  test('btoa on a code point > 0xFF throws INSIDE the cell, not the host', async () => {
+    const r = await runFresh('btoa("\u2603")') // snowman — outside Latin-1
+    expect(r.status).toBe('error')
+    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+})

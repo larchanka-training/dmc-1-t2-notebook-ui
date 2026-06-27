@@ -90,12 +90,6 @@ describe('feature-demo notebook content', () => {
     }
   })
 
-  test('no code cell relies on btoa (it does not exist in the sandbox)', () => {
-    for (const cell of codeCells) {
-      expect(cell.content.includes('btoa'), `cell ${cell.id} must not call btoa`).toBe(false)
-    }
-  })
-
   test('shared scope survives across cells (a const from one cell is read in the next)', async () => {
     const items = await runDemoCells()
     // The 3rd code cell prints "This notebook = JS Notebook with code + text cells"

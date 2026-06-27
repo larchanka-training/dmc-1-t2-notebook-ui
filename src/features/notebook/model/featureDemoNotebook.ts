@@ -10,12 +10,11 @@
 //   - error            (a thrown error rendered as a structured item)
 //
 // Every code cell must run AS-IS in a real cell. The QuickJS sandbox injects
-// only `console` and `display` — there is NO `btoa`, `fetch`, `window` or
-// `document` in cell scope (see runtime/quickjs.ts). So, per the issue's own
-// guidance:
-//   - SVG goes through `display({ type: 'html' })` (no base64 / btoa needed),
+// `console`, `display` and the base64 codecs `btoa` / `atob`; there is still NO
+// `fetch`, `window` or `document` in cell scope (see runtime/quickjs.ts). So:
+//   - SVG goes through `display({ type: 'html' })`,
 //   - canvas is drawn inside an HTML output iframe, where the DOM exists,
-//   - the `image` channel ships RAW base64 (no `data:` prefix, no btoa call).
+//   - the `image` channel ships RAW base64 (no `data:` prefix).
 //
 // Kept in its own module (imported by ./notebook) so the editor model stays
 // free of large literal content.
@@ -26,8 +25,9 @@ export const SEED_TITLE = '📗 My first notebook, full of features'
 
 // A small, pre-encoded PNG (80×80, indigo square with a pink dot) shown via the
 // `image` output channel. Raw base64, no `data:` prefix — the renderer adds it.
-// Pre-encoded on purpose: the sandbox has no `btoa`, so cells cannot build
-// base64 at runtime; the `image` channel is for assets you already have encoded.
+// Pre-encoded on purpose: keeps the demo cell readable and the `image` channel
+// is for assets you already have encoded. (`btoa` does exist in the sandbox now,
+// so a cell *could* build base64 at runtime — it just shouldn't inline a blob.)
 // Exported so the Usage page can reuse the SAME runnable bytes in its example.
 export const DEMO_IMAGE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAMKSURBVHhe7Zq/a1RBFIXz5/kbjRgNGjGGaGNhI1jYWFjYWNiIKAoqBEFQRBGRgAoGCYhFEIUgIgFJEQT/gpGzsBLusLqbc+/MFU7xNcuye+ab9+7Mu/OmFs78KmLnTNkPxGRIIIkEkkggiQSSSCCJBJJIIIkEkkggiQSSSCCJBJJIIIkEkkggiQSSSCCJBJKkFXhp/nu5cnL9D5dPfa2+k4EUAs8u/izXT6yVl4dflW9775WtXTdHsrn7dlmeflFuHP9Yzi9sVr/Vmq4CL5z+MZBmJU3CyqGng6vV/nYrugg8t7hVnsy8HlxNVshOwUT0uCKbC0Qt29hzpxLgASbk2tyn6j8jaSoQdcvzqhvF/WPvq/+OopnApaPvqoFGglvaZoigicBbsx+qAbbg0czbKos34QKxh2tx244C2yObyZNQgVgVoxaMccHkRW5zQgViq2IH1IM308+rbF6ECbw4v9H11rWglNiMHoQJxKzbQfRk7cDDKqMHIQLxpGEHkIGIhkSIQGyYbfgMYC9qs7KECES3xIbPwOf9S1VWlhCBvbcufwMdIJuXwV0g9n42dCa8V2N3gSjUNnQmUJ9tZgZ3gWgn2dCZ8O7UuAvs1TgYF++V2F0gHt5t6EykF4gibUNnIn0NxDbBhs7E1bkvVWYGd4HAhs6E9+NciMDVg4+r4BnAmbPNyhIiEFsFGz4DEeckIQLRC7ThM+Bd/0CIQID+mx1AT3D74hUSm5MlTGC2J5K7s6tVRg/CBAK8t2IH0oOobjQIFYjTMDuYHkS+7hEqEODWsQNqCU4GbSZPwgWCZ0eWq4G1ACXEZvGmiUCsfq3rIeoeDrdsFm+aCASQyL5MOS6YrBbyQDOBQ6JrYnTNszQXCNDy8t5or+97ELrajqKLwCFovmLgVsYk4AQwapM8Dl0FDsGVg5X6X2/ob5eGs2dMQMTj2SSkELgd9Ovw0I/WuwWivY8lWdIJ/N+QQBIJJJFAEgkkkUASCSSRQBIJJJFAEgkkkUASCSSRQBIJJJFAEgkkkUASCST5Dby6ca16hS3TAAAAAElFTkSuQmCC'

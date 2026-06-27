@@ -180,6 +180,7 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false, trailingWasPromise: false }
   installConsole(vm, sink)
   installDisplay(vm, sink)
+  installBase64(vm)
   installTrailingMarker(vm, sink)
 
   return {
@@ -379,6 +380,87 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
   }
   return null
 }
+
+/**
+ * Inject the browser base64 helpers `btoa` / `atob` into cell scope.
+ *
+ * QuickJS is a bare ECMAScript engine — it ships none of the Web platform
+ * globals, so a cell sees `typeof btoa === 'undefined'`. Yet these are pure,
+ * side-effect-free string⇄base64 codecs: no network, no DOM, no filesystem, so
+ * nothing about the sandbox boundary justifies withholding them. Their absence
+ * was a missing polyfill, not a security decision.
+ *
+ * Implemented as a pure-JS polyfill EVALUATED INSIDE the VM, deliberately NOT
+ * as a host function delegating to the worker's native `btoa`/`atob`. `atob`
+ * returns a *binary string* whose bytes routinely include NUL (`\x00`) — e.g.
+ * decoding a PNG — and such strings are corrupted when marshalled across the
+ * quickjs-emscripten string boundary (`newString`/`dump`). Keeping the codec
+ * in-VM means the strings never cross that boundary, so the round-trip stays
+ * byte-exact. The polyfill preserves the browser error contract: `btoa` throws
+ * on any code point > 0xFF, `atob` on an invalid-length / out-of-alphabet input.
+ */
+function installBase64(vm: QuickJSContext): void {
+  const result = vm.evalCode(BASE64_BOOTSTRAP)
+  if (result.error) {
+    const message = vm.dump(result.error) as unknown
+    result.error.dispose()
+    throw new Error(`failed to install base64 polyfill: ${String(message)}`)
+  }
+  result.value.dispose()
+}
+
+/**
+ * Defines `globalThis.btoa` / `globalThis.atob` with WHATWG semantics, entirely
+ * in cell scope. Kept as a string so the codec executes in-VM (see
+ * `installBase64` for why crossing the host boundary would corrupt binary
+ * strings). Plain writable globals — like the browser's, a cell may shadow them.
+ */
+const BASE64_BOOTSTRAP = `(() => {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const LATIN1_RANGE_ERROR =
+    "Failed to execute 'btoa': The string to be encoded contains characters outside of the Latin1 range."
+  const DECODE_ERROR = "Failed to execute 'atob': The string to be decoded is not correctly encoded."
+
+  globalThis.btoa = function btoa(data) {
+    const str = String(data)
+    let out = ''
+    for (let i = 0; i < str.length; i += 3) {
+      const hasC2 = i + 1 < str.length
+      const hasC3 = i + 2 < str.length
+      const c1 = str.charCodeAt(i)
+      const c2 = hasC2 ? str.charCodeAt(i + 1) : 0
+      const c3 = hasC3 ? str.charCodeAt(i + 2) : 0
+      if (c1 > 0xff || c2 > 0xff || c3 > 0xff) throw new Error(LATIN1_RANGE_ERROR)
+      const triple = (c1 << 16) | (c2 << 8) | c3
+      out += ALPHABET[(triple >> 18) & 63]
+      out += ALPHABET[(triple >> 12) & 63]
+      out += hasC2 ? ALPHABET[(triple >> 6) & 63] : '='
+      out += hasC3 ? ALPHABET[triple & 63] : '='
+    }
+    return out
+  }
+
+  globalThis.atob = function atob(data) {
+    const str = String(data).replace(/[ \\t\\n\\f\\r]/g, '')
+    if (str.length % 4 === 1) throw new Error(DECODE_ERROR)
+    let out = ''
+    let buffer = 0
+    let bits = 0
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i]
+      if (ch === '=') break
+      const idx = ALPHABET.indexOf(ch)
+      if (idx === -1) throw new Error(DECODE_ERROR)
+      buffer = (buffer << 6) | idx
+      bits += 6
+      if (bits >= 8) {
+        bits -= 8
+        out += String.fromCharCode((buffer >> bits) & 0xff)
+      }
+    }
+    return out
+  }
+})()`
 
 /**
  * Inject `__nbTrailing(v)` — an identity function the transform wraps around a
