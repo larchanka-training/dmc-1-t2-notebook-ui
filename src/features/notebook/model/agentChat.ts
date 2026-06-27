@@ -65,15 +65,20 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
   if (!generator) return
   const afterId = agentInsertAfterIdAtom()
 
-  const insertAndClose = wrap((code: string) => {
+  const insertCell = wrap((code: string) => {
     const newCell = addCell(afterId, 'code')
     updateCellCode(newCell.id, code)
     focusCell(newCell.id)
     enterEdit(newCell.id)
-    agentChatOpenAtom.set(false)
   })
-  // Live reasoning block (TARDIS-168): anchored after the insert target, or at
-  // the notebook end when the dialog was opened below all cells (afterId null).
+  // Close the dialog (and its blurred overlay) up front — unlike the Cloud tier,
+  // the in-browser run streams a live reasoning block into the NOTEBOOK flow, so
+  // the modal would otherwise sit on top of it (TARDIS-168). Both the live
+  // thinking and a failure are surfaced by the in-notebook ThinkingBlock, not
+  // the dialog, so there is nothing left for the modal to show.
+  agentChatOpenAtom.set(false)
+  // Live reasoning block: anchored after the insert target, or at the notebook
+  // end when the dialog was opened below all cells (afterId null).
   startThinkingAction(afterId ?? null)
   const onProgress = wrap((p: { thinking: string; tokens: number }) =>
     updateThinkingAction(p.thinking, p.tokens),
@@ -83,11 +88,11 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
 
   const result = await wrap(generator(prompt, onProgress))
   if (result.incomplete) {
-    // The model never produced runnable code — surface the failure, insert
-    // nothing, and keep the dialog open so the user can rephrase or retry.
+    // The model never produced runnable code — surface the failure in the
+    // ThinkingBlock (with its Dismiss action) and insert nothing.
     fail()
     return
   }
   finish()
-  insertAndClose(result.code)
+  insertCell(result.code)
 }, 'notebook.agentChat.sendInBrowser').extend(withAsync())

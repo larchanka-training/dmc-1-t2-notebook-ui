@@ -247,6 +247,23 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
     expect(cellsAtom().length).toBe(cellsBefore)
     expect(thinkingSessionAtom()?.phase).toBe('failed')
   })
+
+  test('closes the dialog up front so the thinking block is not hidden by the overlay', async () => {
+    // TARDIS-168: the in-browser run streams into the notebook flow, so the
+    // modal must close immediately rather than waiting for the result.
+    const generator = vi
+      .fn()
+      .mockResolvedValue({ code: 'const a = 1', thinking: '', incomplete: false })
+
+    await act(async () => {
+      codeGeneratorAtom.set(() => generator)
+      agentChatOpenAtom.set(true)
+      agentInsertAfterIdAtom.set(undefined)
+      await agentSendInBrowserAction('anything')
+    })
+
+    expect(agentChatOpenAtom()).toBe(false)
+  })
 })
 
 describe('AgentChatDialog — cloud generate action (model level)', () => {
