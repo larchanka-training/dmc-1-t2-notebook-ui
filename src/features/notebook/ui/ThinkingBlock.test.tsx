@@ -8,7 +8,7 @@ import {
   updateThinkingAction,
   failThinkingAction,
 } from '../model/inBrowserThinking'
-import { interruptInBrowserAtom } from '../model/codeGenerator'
+import { interruptInBrowserAtom, IN_BROWSER_MAX_TOKENS } from '../model/codeGenerator'
 import { ThinkingBlock } from './ThinkingBlock'
 
 afterEach(() => {
@@ -32,8 +32,9 @@ describe('ThinkingBlock', () => {
     render(<ThinkingBlock />)
     expect(screen.getByText('Thinking…')).toBeInTheDocument()
     expect(screen.getByText(/plan the pie chart/)).toBeInTheDocument()
-    // Counter shows generated / max tokens, secondary styling.
-    expect(screen.getByText(/42 \/ 2048 tokens/)).toBeInTheDocument()
+    // Counter shows generated / max tokens, secondary styling. Assert against
+    // the live cap (IN_BROWSER_MAX_TOKENS) so a budget change doesn't break this.
+    expect(screen.getByText(`42 / ${IN_BROWSER_MAX_TOKENS} tokens`)).toBeInTheDocument()
   })
 
   test('Stop asks the engine to interrupt and marks the session stopping', async () => {

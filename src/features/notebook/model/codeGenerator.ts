@@ -19,8 +19,8 @@ import {
 // tokens. `IN_BROWSER_MAX_TOKENS` is the hard backstop; once a reasoning model's
 // chain-of-thought passes `IN_BROWSER_THINK_TOKEN_BUDGET` without emitting any
 // code, the run is a degenerate loop and is aborted.
-export const IN_BROWSER_MAX_TOKENS = 2048
-export const IN_BROWSER_THINK_TOKEN_BUDGET = 1024
+export const IN_BROWSER_MAX_TOKENS = 4096
+export const IN_BROWSER_THINK_TOKEN_BUDGET = 2048
 
 // Result of one in-browser generation. Reasoning models (DeepSeek-R1-Distill)
 // emit a `<think>…</think>` stream before the code; the bridge splits it so the
