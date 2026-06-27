@@ -1,0 +1,83 @@
+import { useEffect, useRef } from 'react'
+import { reatomComponent } from '@reatom/react'
+import { wrap } from '@reatom/core'
+import { Brain, Loader2, TriangleAlert } from 'lucide-react'
+import { cn } from '@/shared/lib/cn'
+import { Button } from '@/shared/ui/button'
+import { thinkingSessionAtom, dismissThinkingAction } from '../model/inBrowserThinking'
+
+/**
+ * Live "thinking" block for the In-browser reasoning models (TARDIS-168).
+ *
+ * Reasoning models (DeepSeek-R1-Distill) stream a `<think>…</think>` monologue
+ * before the code. This block surfaces that stream in the notebook flow while
+ * the model runs, then disappears once code is inserted. When the model never
+ * produces runnable code (degenerate loop / empty), it switches to a `failed`
+ * notice the user can dismiss.
+ *
+ * Rendering position is decided by the caller (NotebookView), which mounts this
+ * only at the matching anchor; this component is purely presentational over the
+ * single active session.
+ */
+export const ThinkingBlock = reatomComponent(() => {
+  const session = thinkingSessionAtom()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll the reasoning to the bottom as it streams, like a chat console.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [session?.thinking])
+
+  if (!session) return null
+  const isFailed = session.phase === 'failed'
+
+  return (
+    <div
+      className={cn(
+        'rounded-[var(--radius-cell)] border bg-[color-mix(in_oklch,var(--muted)_36%,var(--card))] px-3 py-2.5 text-sm shadow-[var(--shadow-pop)]',
+        isFailed ? 'border-destructive/40' : 'border-primary/30',
+      )}
+    >
+      <div className="mb-1.5 flex items-center gap-2 font-medium">
+        {isFailed ? (
+          <>
+            <TriangleAlert className="size-4 text-destructive" />
+            <span className="text-destructive">The model couldn’t generate runnable code</span>
+          </>
+        ) : (
+          <>
+            <Brain className="size-4 text-primary" />
+            <span className="text-primary">Thinking…</span>
+            <Loader2 className="size-3.5 animate-spin text-primary/70" />
+          </>
+        )}
+      </div>
+
+      {session.thinking && (
+        <div
+          ref={scrollRef}
+          className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-muted-foreground"
+        >
+          {session.thinking}
+        </div>
+      )}
+
+      {isFailed && (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            Try rephrasing, simplifying the request, or switching to another model.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0"
+            onClick={wrap(() => dismissThinkingAction())}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}, 'ThinkingBlock')
