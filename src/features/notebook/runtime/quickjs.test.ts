@@ -808,3 +808,75 @@ describe('kernel.run — base64 globals (btoa / atob)', () => {
     expect(r.items.some((it) => it.type === 'error')).toBe(true)
   })
 })
+
+describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
+  test('TextEncoder.encode produces UTF-8 bytes (multi-byte char)', async () => {
+    // '€' (U+20AC) encodes to E2 82 AC; 'A' to 41.
+    const r = await runFresh('console.log(Array.from(new TextEncoder().encode("A€")).join(","))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65,226,130,172' })
+  })
+
+  test('TextEncoder().encoding is "utf-8" and result is a Uint8Array', async () => {
+    const r = await runFresh(
+      'const e = new TextEncoder(); console.log(e.encoding, e.encode("x") instanceof Uint8Array)',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'utf-8 true' })
+  })
+
+  test('TextDecoder.decode reverses the encoding (incl. surrogate pair)', async () => {
+    // U+1F600 (😀) is a 4-byte sequence — exercises astral round-trip.
+    const r = await runFresh(
+      'const s = "a€b😀"; const back = new TextDecoder().decode(new TextEncoder().encode(s)); console.log(back === s)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true' })
+  })
+
+  test('TextDecoder decodes a raw Uint8Array of UTF-8 bytes', async () => {
+    const r = await runFresh(
+      'console.log(new TextDecoder().decode(new Uint8Array([72, 105, 226, 130, 172])))',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'Hi€' })
+  })
+
+  test('TextDecoder rejects an unsupported encoding label', async () => {
+    const r = await runFresh('new TextDecoder("utf-16")')
+    expect(r.status).toBe('error')
+    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+})
+
+describe('kernel.run — structuredClone', () => {
+  test('deep-clones nested objects (mutating the clone does not touch the source)', async () => {
+    const r = await runFresh(
+      'const src = { a: { b: 1 } }; const c = structuredClone(src); c.a.b = 99;' +
+        ' console.log(src.a.b, c.a.b, c.a !== src.a)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '1 99 true' })
+  })
+
+  test('clones Map, Set and Date by value', async () => {
+    const r = await runFresh(
+      'const m = new Map([["k", 1]]); const s = new Set([1, 2]); const d = new Date(0);' +
+        ' const c = structuredClone({ m, s, d });' +
+        ' console.log(c.m.get("k"), c.s.has(2), c.d.getTime(), c.m !== m)',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: '1 true 0 true' })
+  })
+
+  test('preserves cycles', async () => {
+    const r = await runFresh(
+      'const o = {}; o.self = o; const c = structuredClone(o); console.log(c.self === c, c !== o)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true true' })
+  })
+
+  test('throws on a value that cannot be cloned (a function)', async () => {
+    const r = await runFresh('structuredClone({ fn: () => 1 })')
+    expect(r.status).toBe('error')
+    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+  })
+})

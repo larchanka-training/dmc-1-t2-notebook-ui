@@ -10,7 +10,8 @@
 //   - error            (a thrown error rendered as a structured item)
 //
 // Every code cell must run AS-IS in a real cell. The QuickJS sandbox injects
-// `console`, `display` and the base64 codecs `btoa` / `atob`; there is still NO
+// `console`, `display`, the base64 codecs `btoa` / `atob`, the UTF-8
+// `TextEncoder` / `TextDecoder` and `structuredClone`; there is still NO
 // `fetch`, `window` or `document` in cell scope (see runtime/quickjs.ts). So:
 //   - SVG goes through `display({ type: 'html' })`,
 //   - canvas is drawn inside an HTML output iframe, where the DOM exists,

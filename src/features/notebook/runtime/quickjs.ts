@@ -181,6 +181,8 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   installConsole(vm, sink)
   installDisplay(vm, sink)
   installBase64(vm)
+  installTextCodecs(vm)
+  installStructuredClone(vm)
   installTrailingMarker(vm, sink)
 
   return {
@@ -400,11 +402,21 @@ function displayPayloadToItem(payload: unknown): OutputItem | null {
  * on any code point > 0xFF, `atob` on an invalid-length / out-of-alphabet input.
  */
 function installBase64(vm: QuickJSContext): void {
-  const result = vm.evalCode(BASE64_BOOTSTRAP)
+  evalBootstrap(vm, 'base64', BASE64_BOOTSTRAP)
+}
+
+/**
+ * Evaluate a trusted bootstrap snippet in cell scope, disposing the handles and
+ * turning any (host-authored) error into a thrown Error. Used to install the
+ * pure-JS Web platform polyfills (`btoa`/`atob`, text codecs, structuredClone)
+ * once per kernel — see each `*_BOOTSTRAP` for why they live in-VM.
+ */
+function evalBootstrap(vm: QuickJSContext, label: string, code: string): void {
+  const result = vm.evalCode(code)
   if (result.error) {
     const message = vm.dump(result.error) as unknown
     result.error.dispose()
-    throw new Error(`failed to install base64 polyfill: ${String(message)}`)
+    throw new Error(`failed to install ${label} polyfill: ${String(message)}`)
   }
   result.value.dispose()
 }
@@ -459,6 +471,167 @@ const BASE64_BOOTSTRAP = `(() => {
       }
     }
     return out
+  }
+})()`
+
+/**
+ * Inject the UTF-8 `TextEncoder` / `TextDecoder` into cell scope.
+ *
+ * Same rationale as `installBase64`: pure, side-effect-free codecs that QuickJS
+ * (a bare ECMAScript engine) doesn't ship. Evaluated in-VM rather than bridged
+ * to the worker's native classes — a host bridge would have to marshal raw bytes
+ * AND binary strings across the quickjs-emscripten boundary (lossy for NUL), and
+ * would expose host object identities. The polyfill builds real in-VM
+ * `Uint8Array`s and covers the surrogate-pair / replacement-char edge cases.
+ */
+function installTextCodecs(vm: QuickJSContext): void {
+  evalBootstrap(vm, 'TextEncoder/TextDecoder', TEXT_CODECS_BOOTSTRAP)
+}
+
+/**
+ * Inject a `structuredClone` deep-copy into cell scope.
+ *
+ * Pure and side-effect-free, so it belongs in the sandbox. Done in-VM so clones
+ * are genuine in-VM objects (a host bridge would round-trip through `dump`, which
+ * can't preserve cycles, Map/Set, typed arrays or ArrayBuffers). Covers the
+ * common structured-clone types and throws on values that can't be cloned
+ * (functions / symbols), mirroring the platform's DataCloneError.
+ */
+function installStructuredClone(vm: QuickJSContext): void {
+  evalBootstrap(vm, 'structuredClone', STRUCTURED_CLONE_BOOTSTRAP)
+}
+
+/**
+ * Defines `globalThis.TextEncoder` / `globalThis.TextDecoder` (UTF-8 only) in
+ * cell scope. Kept as a string so the codec runs in-VM (see `installTextCodecs`).
+ * Unpaired surrogates encode as U+FFFD and malformed byte sequences decode to
+ * U+FFFD, matching the WHATWG Encoding standard's replacement behavior.
+ */
+const TEXT_CODECS_BOOTSTRAP = `(() => {
+  globalThis.TextEncoder = class TextEncoder {
+    get encoding() { return 'utf-8' }
+    encode(input) {
+      const str = input === undefined ? '' : String(input)
+      const bytes = []
+      for (let i = 0; i < str.length; i++) {
+        let cp = str.charCodeAt(i)
+        if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < str.length) {
+          const lo = str.charCodeAt(i + 1)
+          if (lo >= 0xdc00 && lo <= 0xdfff) {
+            cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00)
+            i++
+          }
+        }
+        if (cp >= 0xd800 && cp <= 0xdfff) cp = 0xfffd
+        if (cp < 0x80) {
+          bytes.push(cp)
+        } else if (cp < 0x800) {
+          bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f))
+        } else if (cp < 0x10000) {
+          bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f))
+        } else {
+          bytes.push(
+            0xf0 | (cp >> 18),
+            0x80 | ((cp >> 12) & 0x3f),
+            0x80 | ((cp >> 6) & 0x3f),
+            0x80 | (cp & 0x3f),
+          )
+        }
+      }
+      return new Uint8Array(bytes)
+    }
+  }
+
+  globalThis.TextDecoder = class TextDecoder {
+    constructor(label) {
+      const enc = label === undefined ? 'utf-8' : String(label).toLowerCase()
+      if (enc !== 'utf-8' && enc !== 'utf8' && enc !== 'unicode-1-1-utf-8') {
+        throw new RangeError("Failed to construct 'TextDecoder': unsupported encoding " + enc)
+      }
+    }
+    get encoding() { return 'utf-8' }
+    decode(input) {
+      if (input === undefined) return ''
+      let bytes
+      if (input instanceof Uint8Array) bytes = input
+      else if (input instanceof ArrayBuffer) bytes = new Uint8Array(input)
+      else if (ArrayBuffer.isView(input)) bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+      else throw new TypeError("Failed to execute 'decode' on 'TextDecoder': argument is not a BufferSource")
+      let out = ''
+      let i = 0
+      while (i < bytes.length) {
+        const b0 = bytes[i++]
+        let cp, extra
+        if (b0 < 0x80) { out += String.fromCharCode(b0); continue }
+        else if ((b0 & 0xe0) === 0xc0) { cp = b0 & 0x1f; extra = 1 }
+        else if ((b0 & 0xf0) === 0xe0) { cp = b0 & 0x0f; extra = 2 }
+        else if ((b0 & 0xf8) === 0xf0) { cp = b0 & 0x07; extra = 3 }
+        else { out += '\ufffd'; continue }
+        let ok = true
+        for (let k = 0; k < extra; k++) {
+          if (i >= bytes.length || (bytes[i] & 0xc0) !== 0x80) { ok = false; break }
+          cp = (cp << 6) | (bytes[i] & 0x3f)
+          i++
+        }
+        if (!ok || cp > 0x10ffff) { out += '\ufffd'; continue }
+        if (cp >= 0x10000) {
+          cp -= 0x10000
+          out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+        } else {
+          out += String.fromCharCode(cp)
+        }
+      }
+      return out
+    }
+  }
+})()`
+
+/**
+ * Defines `globalThis.structuredClone` in cell scope. Kept as a string so the
+ * clone runs in-VM (see `installStructuredClone`). Handles cycles plus the
+ * common cloneable types; throws on functions / symbols like the platform does.
+ */
+const STRUCTURED_CLONE_BOOTSTRAP = `(() => {
+  const UNCLONEABLE = "Failed to execute 'structuredClone': value could not be cloned."
+  globalThis.structuredClone = function structuredClone(value) {
+    const seen = new Map()
+    function clone(v) {
+      if (typeof v === 'function' || typeof v === 'symbol') throw new Error(UNCLONEABLE)
+      if (v === null || typeof v !== 'object') return v
+      if (seen.has(v)) return seen.get(v)
+      if (v instanceof Date) return new Date(v.getTime())
+      if (v instanceof RegExp) return new RegExp(v.source, v.flags)
+      if (v instanceof ArrayBuffer) return v.slice(0)
+      if (ArrayBuffer.isView(v)) {
+        const buf = v.buffer.slice(0)
+        if (v instanceof DataView) return new DataView(buf, v.byteOffset, v.byteLength)
+        return new v.constructor(buf, v.byteOffset, v.length)
+      }
+      let out
+      if (Array.isArray(v)) {
+        out = []
+        seen.set(v, out)
+        for (let i = 0; i < v.length; i++) out[i] = clone(v[i])
+        return out
+      }
+      if (v instanceof Map) {
+        out = new Map()
+        seen.set(v, out)
+        v.forEach((val, key) => out.set(clone(key), clone(val)))
+        return out
+      }
+      if (v instanceof Set) {
+        out = new Set()
+        seen.set(v, out)
+        v.forEach((val) => out.add(clone(val)))
+        return out
+      }
+      out = {}
+      seen.set(v, out)
+      for (const key of Object.keys(v)) out[key] = clone(v[key])
+      return out
+    }
+    return clone(value)
   }
 })()`
 
