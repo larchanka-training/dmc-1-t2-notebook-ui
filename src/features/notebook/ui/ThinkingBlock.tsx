@@ -89,8 +89,10 @@ export const ThinkingBlock = reatomComponent(() => {
       )}
 
       {isFailed && (
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
+        // A distinct destructive-tinted callout, set off from the grey reasoning
+        // above so the recovery hint reads as guidance, not more model thinking.
+        <div className="mt-2.5 flex items-center justify-between gap-3 rounded-[calc(var(--radius-cell)-4px)] border border-destructive/30 bg-destructive/10 px-2.5 py-2">
+          <p className="text-[13px] font-medium text-foreground">
             Try rephrasing, simplifying the request, or switching to another model.
           </p>
           <Button
