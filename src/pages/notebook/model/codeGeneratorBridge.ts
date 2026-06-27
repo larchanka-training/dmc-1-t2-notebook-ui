@@ -1,4 +1,8 @@
-import { codeGeneratorAtom, loadedModelDisplayAtom } from '@/features/notebook'
+import {
+  codeGeneratorAtom,
+  loadedModelDisplayAtom,
+  interruptInBrowserAtom,
+} from '@/features/notebook'
 import {
   type InBrowserGenerator,
   IN_BROWSER_MAX_TOKENS,
@@ -6,6 +10,7 @@ import {
 } from '@/features/notebook'
 import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
 import { splitThinkAndCode } from './reasoningParser'
+import { isParseableJs } from './codeValidation'
 
 // System prompt for the In-browser agent (T1). It must describe the REAL
 // runtime so the model stops emitting unrunnable code (TARDIS-168): cells run in
@@ -49,7 +54,6 @@ function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InB
     // WebLLM streams one decode-step per chunk, so the chunk count IS the number
     // of generated tokens — an exact live counter without a separate tokenizer.
     let tokens = 0
-    let aborted = false
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta.content ?? ''
       if (delta) tokens += 1
@@ -61,16 +65,20 @@ function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InB
         onProgress?.({ thinking: partial.thinking, tokens })
       }
       // Kill a runaway reasoning loop: still thinking, no code, over budget.
+      // (A user-requested Stop also ends this loop — it calls interruptGenerate
+      // via interruptInBrowserAtom, which makes the stream finish.)
       if (partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
-        aborted = true
         await engine.interruptGenerate()
         break
       }
     }
 
     const { thinking, code, thinkOpen } = splitThinkAndCode(raw)
-    // No runnable code: an aborted loop, an unclosed think, or an empty answer.
-    const incomplete = aborted || thinkOpen || code.length === 0
+    // "Usable" code = the model finished the answer (closed think, produced code)
+    // OR the user stopped mid-answer but the partial code still parses. A
+    // budget-aborted reasoning loop never produced code, so it stays incomplete.
+    // Insert only parseable code; anything cut off mid-statement is dropped.
+    const incomplete = thinkOpen || code.length === 0 || !isParseableJs(code)
     return { code, thinking, incomplete }
   }
 }
@@ -84,6 +92,10 @@ export function startCodeGeneratorBridge(): () => void {
     // that ignores prevValue and returns the generator — otherwise Reatom calls the
     // generator with prevValue as `prompt` and stores the resulting Promise.
     codeGeneratorAtom.set(() => (engine ? buildGenerator(engine) : null))
+    // Cancel slot (TARDIS-168): bind the engine's interrupt so the notebook
+    // feature's Stop button can end a long run. Bound under an updater for the
+    // same Reatom reason as the generator above.
+    interruptInBrowserAtom.set(() => (engine ? () => engine.interruptGenerate() : null))
     // Mirror the loaded model's id into the notebook display slot. The source of
     // truth stays `web-llm.loadedModelIdAtom`; this is the legitimate place to
     // cross the feature boundary (the bridge lives in `pages/`), so NotebookHeader

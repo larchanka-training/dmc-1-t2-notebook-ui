@@ -126,6 +126,7 @@ export { runInWorker, restartWorker } from './runtime/workerHost'
 export type { OutputItem, RuntimeStatus, SerializedValue } from './runtime/types'
 export {
   codeGeneratorAtom,
+  interruptInBrowserAtom,
   loadedModelDisplayAtom,
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
@@ -143,6 +144,7 @@ export {
   finishThinkingAction,
   failThinkingAction,
   dismissThinkingAction,
+  requestStopAction,
 } from './model/inBrowserThinking'
 export type { ThinkingSession, ThinkingPhase } from './model/inBrowserThinking'
 export { aiContextModeAtom } from './model/context-ai/aiContextMode'

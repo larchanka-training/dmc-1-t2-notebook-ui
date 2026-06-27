@@ -76,6 +76,7 @@ export interface NotebookCellProps {
   onMoveUp?: () => void
   onMoveDown?: () => void
   onInBrowserGenerate?: () => void
+  onStopInBrowser?: () => void
   isGenerating?: boolean
   generatorLoaded?: boolean
   onCloudGenerate?: () => void
@@ -110,6 +111,7 @@ export function NotebookCell({
   onMoveUp,
   onMoveDown,
   onInBrowserGenerate,
+  onStopInBrowser,
   isGenerating,
   generatorLoaded,
   onCloudGenerate,
@@ -278,27 +280,42 @@ export function NotebookCell({
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <button
-                      type="button"
-                      aria-label={agentInBrowserLabel}
-                      className={cn(
-                        AGENT_BTN,
-                        !generatorLoaded &&
-                          'text-muted-foreground hover:bg-transparent hover:text-muted-foreground',
-                      )}
-                      disabled={!generatorLoaded || isGenerating}
-                      onClick={onInBrowserGenerate}
-                    >
-                      {isGenerating ? (
-                        <Loader2 className="size-4.5 animate-spin" />
-                      ) : (
+                    isGenerating ? (
+                      // While generating, the spinner doubles as a Stop button:
+                      // it shows the spinner at rest and a Square on hover, so a
+                      // long in-browser run can be cancelled (TARDIS-168).
+                      <button
+                        type="button"
+                        aria-label="Stop generating"
+                        className={cn(AGENT_BTN, 'group/stop')}
+                        onClick={onStopInBrowser}
+                      >
+                        <Loader2 className="size-4.5 animate-spin group-hover/stop:hidden" />
+                        <Square className="hidden size-4.5 fill-current group-hover/stop:block" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={agentInBrowserLabel}
+                        className={cn(
+                          AGENT_BTN,
+                          !generatorLoaded &&
+                            'text-muted-foreground hover:bg-transparent hover:text-muted-foreground',
+                        )}
+                        disabled={!generatorLoaded}
+                        onClick={onInBrowserGenerate}
+                      >
                         <Bot className="size-4.5" />
-                      )}
-                    </button>
+                      </button>
+                    )
                   }
                 />
                 <TooltipContent>
-                  {generatorLoaded ? agentInBrowserLabel : 'Load LLM model first'}
+                  {isGenerating
+                    ? 'Stop generating'
+                    : generatorLoaded
+                      ? agentInBrowserLabel
+                      : 'Load LLM model first'}
                 </TooltipContent>
               </Tooltip>
             )}

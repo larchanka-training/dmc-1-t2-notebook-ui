@@ -58,6 +58,17 @@ export type InBrowserGenerator = (
 // local LLM engine is available. null means no in-browser generator is loaded.
 export const codeGeneratorAtom = atom<InBrowserGenerator | null>(null, 'notebook.codeGenerator')
 
+// DI slot for cancelling the active in-browser generation (TARDIS-168). Filled
+// by the same bridge as `codeGeneratorAtom` with `engine.interruptGenerate`, so
+// the notebook feature can stop a long run WITHOUT a forbidden import of the
+// web-llm feature. Calling it makes the generator's `for await` loop end; the
+// generator then returns whatever it produced so far (the caller decides whether
+// the partial code is usable). null when no engine is loaded.
+export const interruptInBrowserAtom = atom<(() => Promise<void>) | null>(
+  null,
+  'notebook.interruptInBrowser',
+)
+
 // Display-only mirror of the loaded model's id (TARDIS-167, review PR #88 r2).
 // The SINGLE SOURCE OF TRUTH lives in `features/web-llm` (`loadedModelIdAtom`,
 // set inside `loadModelAction`). This notebook-side slot is filled ONLY by the

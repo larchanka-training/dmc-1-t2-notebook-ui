@@ -1,10 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { reatomComponent } from '@reatom/react'
 import { wrap } from '@reatom/core'
-import { Brain, Loader2, TriangleAlert } from 'lucide-react'
+import { Brain, Loader2, Square, TriangleAlert } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Button } from '@/shared/ui/button'
-import { thinkingSessionAtom, dismissThinkingAction } from '../model/inBrowserThinking'
+import {
+  thinkingSessionAtom,
+  dismissThinkingAction,
+  requestStopAction,
+} from '../model/inBrowserThinking'
 
 /**
  * Live "thinking" block for the In-browser reasoning models (TARDIS-168).
@@ -63,11 +67,24 @@ export const ThinkingBlock = reatomComponent(() => {
         </div>
       )}
 
-      {/* Token counter, bottom-right, secondary colour — like a textarea's char
-          limit. One stream chunk == one generated token (TARDIS-168). */}
+      {/* Footer: Stop button (left) + token counter (right). The counter is
+          secondary-coloured like a textarea's char limit; one stream chunk ==
+          one generated token (TARDIS-168). */}
       {!isFailed && (
-        <div className="mt-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
-          {session.tokens} / {session.maxTokens} tokens
+        <div className="mt-1.5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5"
+            disabled={session.stopRequested}
+            onClick={wrap(() => requestStopAction())}
+          >
+            <Square className="size-3 fill-current" />
+            {session.stopRequested ? 'Stopping…' : 'Stop'}
+          </Button>
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            {session.tokens} / {session.maxTokens} tokens
+          </span>
         </div>
       )}
 

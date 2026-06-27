@@ -1,5 +1,5 @@
 import { atom, action } from '@reatom/core'
-import { IN_BROWSER_MAX_TOKENS } from './codeGenerator'
+import { IN_BROWSER_MAX_TOKENS, interruptInBrowserAtom } from './codeGenerator'
 
 // Live "thinking" session for the In-browser reasoning models (TARDIS-168).
 //
@@ -24,6 +24,8 @@ export interface ThinkingSession {
   tokens: number
   /** Hard token cap for this run — the counter's denominator. */
   maxTokens: number
+  /** True once the user clicked Stop — the run is winding down. */
+  stopRequested: boolean
   /** `thinking` while the model runs; `failed` when it produced no usable code. */
   phase: ThinkingPhase
 }
@@ -39,9 +41,23 @@ export const startThinkingAction = action((afterCellId: string | null) => {
     thinking: '',
     tokens: 0,
     maxTokens: IN_BROWSER_MAX_TOKENS,
+    stopRequested: false,
     phase: 'thinking',
   })
 }, 'notebook.inBrowserThinking.start')
+
+/**
+ * User-requested stop (TARDIS-168). Marks the session as stopping and asks the
+ * engine to interrupt; the generator's loop then ends and returns whatever code
+ * it produced so far (the caller inserts it only if it parses). Idempotent: a
+ * second click while already stopping is a no-op.
+ */
+export const requestStopAction = action(() => {
+  const session = thinkingSessionAtom()
+  if (!session || session.phase !== 'thinking' || session.stopRequested) return
+  thinkingSessionAtom.set({ ...session, stopRequested: true })
+  void interruptInBrowserAtom()?.()
+}, 'notebook.inBrowserThinking.requestStop')
 
 /** Replace the streamed reasoning text + token count (cumulative values). */
 export const updateThinkingAction = action((thinking: string, tokens: number) => {
