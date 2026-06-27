@@ -33,6 +33,13 @@ function logListFetch(event: string, source: string, reason: string): void {
   log(`📒 notebook.list ${event} ← ${source} :: ${reason}`)
 }
 
+// GUARDRAIL (reatom.md "Lazy resources"): this is a LAZY computed. Reading
+// `notebookListResource.data()` SUBSCRIBES, which makes the resource hot and runs
+// the body below — i.e. reading data() fires `GET /notebooks`. So an auth-gate is
+// mandatory BEFORE any `data()` read (G1: check userAtom()/authStatusAtom first,
+// or a guest read fetches the protected list without a token → 401). Keep the
+// fetch to a single source per path (G2): the sidebar's own subscription is the
+// one fetcher on sign-in; don't add a manual `.retry()` on top of it.
 export const notebookListResource = computed(async () => {
   // This body is the ONE place the network GET /notebooks actually fires for the
   // resource. Whoever made the resource recompute (a first subscriber connecting,

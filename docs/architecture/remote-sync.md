@@ -332,6 +332,12 @@ save-committed subscriber) is `wrap`-captured, and every await is
 `await wrap(promise)`, so atom reads/writes in continuations keep a stack — the
 same pattern autosave uses.
 
+The notebook list is a lazy `computed + withAsyncData` resource: reading
+`notebookListResource.data()` subscribes to it, which makes it hot and fires
+`GET /notebooks`. Reading the list can perform a network request. The guardrails
+for that (auth-gate before the read, one fetch source, `peek`/hooks instead of a
+read for side-effects) live in `reatom.md` under "Lazy resources".
+
 ## Known follow-ups
 
 - **Per-user server id (#67) — done.** The boot floor now uses a per-account id
