@@ -1,9 +1,16 @@
 import { connectLogger, log, urlAtom, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
-import { appPath, LOGIN_PATH } from '@/shared/lib/paths'
-import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
-import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
+import { appPath } from '@/shared/lib/paths'
+import { readPersistRecord } from '@/shared/lib/persist'
+import {
+  accessTokenAtom,
+  refreshTokenAtom,
+  userAtom,
+  SESSION_STORAGE_KEYS,
+  type SessionUser,
+} from '@/entities/session'
+import { startSessionCrossTabSync } from '@/entities/session/model/crossTabSync'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
@@ -45,15 +52,11 @@ globalThis.LOG = log
 // as a withMiddleware hook, which only runs during a reactive computation, not
 // during a plain action-body read at startup. We therefore seed atoms directly
 // from localStorage (via the shared persist helpers) before any action runs.
-const ACCESS_TOKEN_KEY = 'session.accessToken'
-const REFRESH_TOKEN_KEY = 'session.refreshToken'
-
-type SessionUser = NonNullable<ReturnType<typeof userAtom>>
-
+// Keys come from the single source in `entities/session` so they cannot drift.
 rootFrame.run(() => {
-  const token = readPersistRecord<string>(ACCESS_TOKEN_KEY)
-  const refresh = readPersistRecord<string>(REFRESH_TOKEN_KEY)
-  const user = readPersistRecord<SessionUser>('session.user')
+  const token = readPersistRecord<string>(SESSION_STORAGE_KEYS.accessToken)
+  const refresh = readPersistRecord<string>(SESSION_STORAGE_KEYS.refreshToken)
+  const user = readPersistRecord<SessionUser>(SESSION_STORAGE_KEYS.user)
   if (token !== null) accessTokenAtom.set(token)
   if (refresh !== null) refreshTokenAtom.set(refresh)
   if (user !== null) userAtom.set(user)
@@ -73,7 +76,7 @@ rootFrame.run(() => {
 // `onTokensRefreshed` writes the fresh token through `rootFrame.run` with
 // withLocalStorage(subscribe:false), so localStorage holds the rotated token
 // before the retry reads it here (TARDIS-167 №19/№23 follow-up).
-setAuthTokenGetter(() => readPersistRecord<string>(ACCESS_TOKEN_KEY))
+setAuthTokenGetter(() => readPersistRecord<string>(SESSION_STORAGE_KEYS.accessToken))
 
 // Wire the refresh token handlers so the 401 middleware can silently rotate
 // tokens and retry failed requests without involving UI code.
@@ -85,7 +88,7 @@ setRefreshHandlers({
   // storage would be missed and the user spuriously logged out. The token is
   // opaque (no reactivity needed), so the atom is not the source of truth here.
   // See .agents/issues/TARDIS-74/login-flow-issue.md.
-  getRefreshToken: () => readPersistRecord<string>(REFRESH_TOKEN_KEY),
+  getRefreshToken: () => readPersistRecord<string>(SESSION_STORAGE_KEYS.refreshToken),
   onTokensRefreshed: (accessToken, refreshToken) => {
     // Persist + update atoms in a guaranteed Reatom frame so the rotated
     // refresh token is in localStorage before the retried request reads it.
@@ -189,21 +192,11 @@ rootFrame.run(async () => {
 // ---------------------------------------------------------------------------
 
 // withLocalStorage(subscribe:false) does not register storage event listeners,
-// so we sync atoms manually here for cross-tab consistency.
-window.addEventListener('storage', (e: StorageEvent) => {
-  if (e.key === 'session.accessToken') {
-    const newToken = parsePersistRecord<string>(e.newValue)
-    rootFrame.run(() => accessTokenAtom.set(newToken))
-    if (!newToken && window.location.pathname !== LOGIN_PATH) {
-      window.location.replace(LOGIN_PATH)
-    }
-  }
-  if (e.key === 'session.refreshToken') {
-    const newRefresh = parsePersistRecord<string>(e.newValue)
-    rootFrame.run(() => refreshTokenAtom.set(newRefresh))
-  }
-  if (e.key === 'session.user') {
-    const newUser = parsePersistRecord<SessionUser>(e.newValue)
-    rootFrame.run(() => userAtom.set(newUser))
-  }
-})
+// so cross-tab session propagation is wired in ONE echo-safe place (see
+// `entities/session/model/crossTabSync.ts`). The previous inline handler here
+// re-`set` persisted atoms on every event, which re-wrote localStorage with a
+// fresh record id/timestamp and bounced the event back to the other tab — an
+// infinite ping-pong that flickered the UI between login and the signed-in view
+// in both tabs on logout. `startSessionCrossTabSync` applies an incoming value
+// only when it differs by value, so the echo dies after one hop.
+startSessionCrossTabSync()

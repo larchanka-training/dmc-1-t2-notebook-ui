@@ -566,16 +566,18 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set(null)
   })
 
-  test('resets and refetches the list when the account changes within a session', async () => {
+  test('resets and refetches the list on a true account SWITCH (B after A)', async () => {
     userAtom.set(ALICE)
     stop = startNotebookListSync()
     resetSpy.mockClear()
     retrySpy.mockClear()
 
-    userAtom.set(BOB) // switch account
+    userAtom.set(BOB) // switch account (A → B, no null between)
     await new Promise((resolve) => setTimeout(resolve))
 
-    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched.
+    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched
+    // (the sidebar never unmounted across the switch, so its hot resource keeps
+    // Alice's rows and won't refetch on its own — this retry refreshes it).
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).toHaveBeenCalledTimes(1)
@@ -589,7 +591,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     )
   })
 
-  test('does not refetch on the first sign-in null → user (sidebar fetches on its own) — №7', async () => {
+  test('does NOT refetch on the first sign-in null → user (sidebar re-subscribes and fetches) — №7', async () => {
     userAtom.set(null)
     stop = startNotebookListSync()
     resetSpy.mockClear()
@@ -599,8 +601,9 @@ describe('startNotebookListSync (refresh on account change)', () => {
     await new Promise((resolve) => setTimeout(resolve))
 
     // The slot is reset for the new owner and stale rows dropped, but the explicit
-    // retry is skipped: the sidebar's own subscription fetches after navigation,
-    // so an extra retry here would double-fetch GET /notebooks (TARDIS-167 №7).
+    // retry is skipped: NotebooksGroup unmounted while signed out, so on sign-in it
+    // re-subscribes and the resource's own lazy fetch is the SINGLE source.
+    // Retrying here too is the post-login double GET /notebooks (TARDIS-167 №7).
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).not.toHaveBeenCalled()

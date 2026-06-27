@@ -1,8 +1,10 @@
 import {
   action,
   computed,
+  log,
   withAsync,
   withAsyncData,
+  withConnectHook,
   withRollback,
   withTransaction,
   wrap,
@@ -24,10 +26,29 @@ import {
   settleDeletedSlotToFloor,
 } from './slot'
 
-export const notebookListResource = computed(
-  async () => await wrap(notebookApi.list()),
-  'notebook.list',
-).extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
+// Trace every actual GET /notebooks and every caller that triggers a (re)fetch.
+// `source` = which file/owner asked, `reason` = why. Routed through the Reatom
+// `log` so it lines up with the rest of the dev trace under `connectLogger`.
+function logListFetch(event: string, source: string, reason: string): void {
+  log(`📒 notebook.list ${event} ← ${source} :: ${reason}`)
+}
+
+export const notebookListResource = computed(async () => {
+  // This body is the ONE place the network GET /notebooks actually fires for the
+  // resource. Whoever made the resource recompute (a first subscriber connecting,
+  // or an explicit `.retry()`) shows up in the preceding logs.
+  logListFetch('FETCH (resource compute → GET /notebooks)', 'notebookListResource', 'recompute')
+  return await wrap(notebookApi.list())
+}, 'notebook.list').extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
+
+// Log when the resource gains its FIRST subscriber (becomes hot) — in production
+// that is the sidebar mounting and reading `data()`. This is the implicit
+// trigger that is easy to miss when chasing "who fetched the list".
+notebookListResource.extend(
+  withConnectHook(() => {
+    logListFetch('CONNECT (first subscriber → resource hot)', 'notebookListResource', 'subscribed')
+  }),
+)
 
 notebookListResource.data.extend(withRollback())
 
@@ -48,10 +69,21 @@ notebookListResource.data.extend(withRollback())
  * across the await, so a rapid second account switch cannot fetch for a stale
  * owner. The initial synchronous emit is skipped — boot loads the list lazily
  * through the sidebar's own subscription, so there is no redundant fetch on
- * startup. The explicit retry is also skipped on the FIRST sign-in
- * (null → user): the sidebar's own subscription already fetches after the
- * post-login navigation, so retrying here too would double-fetch (TARDIS-167
- * №7). Returns an unsubscribe handle.
+ * startup.
+ *
+ * The explicit retry runs ONLY on a true account SWITCH (B after A, both
+ * non-null — e.g. a cross-tab login as another account, which arrives as
+ * userAtom A→B with NO null in between). In that case `NotebooksGroup` never
+ * unmounts (the user stays truthy), so the list resource stays HOT with the
+ * previous account's rows, and the `computed` does not read `userAtom` — so it
+ * would not refetch on its own and Bob would see Alice's list. The retry is what
+ * refreshes it.
+ *
+ * It is deliberately SKIPPED on the FIRST sign-in (null → user, i.e. login after
+ * logout/boot): there `NotebooksGroup` unmounted while signed out (it returns
+ * null without a user), so on sign-in it re-subscribes and the resource's own
+ * lazy fetch is the SINGLE source. Retrying here too is the double `GET
+ * /notebooks` after login (TARDIS-167 №7). Returns an unsubscribe handle.
  */
 export function startNotebookListSync(): () => void {
   let primed = false
@@ -83,15 +115,20 @@ export function startNotebookListSync(): () => void {
       // account's list behind an owner fence so a stale owner never wins.
       void (async () => {
         await wrap(resetSlotToFloorForAccountChange())
-        // TARDIS-167 (№7): refetch here ONLY on a real account SWITCH (B after A).
-        // On the FIRST sign-in (null → user) the sidebar mounts after the post-login
-        // navigation and its own subscription fetches the list — an extra retry here
-        // produced the observed double `GET /notebooks` (one from this sync on
-        // /login, one from the sidebar on /). On a true account switch the sidebar is
-        // already hot (the computed does not read `userAtom`, so it won't refetch on
-        // its own), so this retry is what refreshes it. The owner fence guards a
-        // rapid second switch landing mid-await.
+        // Refetch ONLY on a true account SWITCH (both owners non-null — e.g. a
+        // cross-tab login as another account, A→B with no null between). There the
+        // sidebar never unmounted, so the hot resource keeps the previous account's
+        // rows and the `computed` won't refetch on its own. On the FIRST sign-in
+        // (null→user) this is skipped: the sidebar re-subscribed on sign-in and its
+        // own lazy fetch is the single source — retrying here too is the post-login
+        // double GET /notebooks (TARDIS-167 №7). The owner fence guards a rapid
+        // second switch landing mid-await.
         if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
+          logListFetch(
+            'RETRY',
+            'startNotebookListSync (owner-change subscription)',
+            `account switch ${prevOwnerId} → ${ownerId}`,
+          )
           await wrap(notebookListResource.retry())
         }
       })()
@@ -281,6 +318,7 @@ export const createNotebookAction = action(async (title: string) => {
       items.map((it) => (it.id === id ? toListItem(nb) : it)),
     )
     try {
+      logListFetch('RETRY', 'createNotebookAction', 'post-create list reconcile')
       await wrap(notebookListResource.retry())
     } catch {
       // Best-effort refetch: the list invalidation is advisory. The reconciled

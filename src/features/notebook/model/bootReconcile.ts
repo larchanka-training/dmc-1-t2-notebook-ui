@@ -21,7 +21,7 @@
 // local notebook via `pickNewest`). Keeping the network here also avoids a
 // notebook ↔ pull import cycle.
 
-import { wrap } from '@reatom/core'
+import { log, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
@@ -61,6 +61,12 @@ export async function reconcileBootFromServer(): Promise<BootReconcileOutcome> {
 
   let items: notebookApi.NotebookListItem[]
   try {
+    // A SEPARATE GET /notebooks from the sidebar resource's fetch — a direct API
+    // call on the boot / fresh-device path (local storage empty), used only to
+    // reconcile against the server before the slot loads.
+    log(
+      '📒 notebook.list FETCH (direct GET /notebooks) ← reconcileBootFromServer :: boot reconcile',
+    )
     items = await wrap(notebookApi.list())
   } catch (error) {
     // Almost impossible (the SPA just loaded over the same origin), but if the
