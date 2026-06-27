@@ -2,6 +2,7 @@ import {
   action,
   computed,
   log,
+  peek,
   withAsync,
   withAsyncData,
   withConnectHook,
@@ -211,10 +212,18 @@ export function upsertListItem(notebook: notebookApi.Notebook): void {
  * and the `deleteNotebookAction` guard MUST agree, or the UI offers a Delete that
  * the model then silently refuses. The synthetic welcome-floor row (the active
  * notebook is not in the backend list — the unsynced seed) counts as one slot.
+ *
+ * Reads the list via `peek` (G3): this helper is called both from the sidebar
+ * (`canDelete`/`canCreate`) AND from the bodies of `createNotebookAction` /
+ * `deleteNotebookAction` as a model-level backstop, i.e. OUTSIDE a reactive
+ * context. A bare `data()` would reconnect the resource from those action bodies;
+ * `peek` reads the cache without recomputing it. The sidebar stays reactive
+ * because it subscribes to the list itself (`notebookListResource.data()` for the
+ * rendered rows), so its re-render re-evaluates the count.
  */
 export function effectiveNotebookCount(): number {
-  const items = notebookListResource.data()
-  const activeId = activeNotebookIdAtom()
+  const items = peek(notebookListResource.data)
+  const activeId = peek(activeNotebookIdAtom)
   const floorShown = activeId !== undefined && !items.some((it) => it.id === activeId)
   return items.length + (floorShown ? 1 : 0)
 }
