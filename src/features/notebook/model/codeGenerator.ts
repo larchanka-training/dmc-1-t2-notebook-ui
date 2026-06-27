@@ -77,6 +77,22 @@ export const interruptInBrowserAtom = atom<(() => Promise<void>) | null>(
 // import. null = no model loaded.
 export const loadedModelDisplayAtom = atom<string | null>(null, 'notebook.loadedModelDisplay')
 
+// Per-cell in-browser generation state (TARDIS-168). The `withAsync` action has
+// a SINGLE global `.ready()`/`.error()`, so reading those per row made the
+// spinner/Stop and the error appear on EVERY markdown cell at once. WebLLM runs
+// one generation at a time (a single engine, a global `interruptGenerate`), so
+// the "which cell is busy" state is one id, not a Set like the Cloud tier
+// (`cloudGeneratingCellIdsAtom`). Errors stay in a Map so a finished cell can
+// keep showing its own failure while another cell generates.
+export const inBrowserGeneratingCellIdAtom = atom<string | null>(
+  null,
+  'notebook.cells.inBrowserGeneratingCellId',
+)
+export const inBrowserGenerateErrorsAtom = atom<Map<string, Error>>(
+  new Map(),
+  'notebook.cells.inBrowserGenerateErrors',
+)
+
 export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const generator = codeGeneratorAtom()
   if (!generator) return
@@ -86,6 +102,23 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
 
   const prompt = cell.code()
   if (!prompt.trim()) return
+
+  // Mark THIS cell as generating and clear its previous error, so the spinner /
+  // Stop button and any error render only on this row (not all markdown cells).
+  inBrowserGenerateErrorsAtom.set((m) => {
+    const next = new Map(m)
+    next.delete(cellId)
+    return next
+  })
+  inBrowserGeneratingCellIdAtom.set(cellId)
+  const stopGenerating = wrap(() => inBrowserGeneratingCellIdAtom.set(null))
+  const onError = wrap((err: Error) => {
+    inBrowserGenerateErrorsAtom.set((m) => {
+      const next = new Map(m)
+      next.set(cellId, err)
+      return next
+    })
+  })
 
   // Assemble notebook context (Epic 07 / #116) — cells ABOVE this prompt cell,
   // §4.3 — and prepend it to the prompt so the model sees the surrounding cells
@@ -123,13 +156,23 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const finish = wrap(() => finishThinkingAction())
   const fail = wrap(() => failThinkingAction())
 
-  const result = await wrap(generator(fullPrompt, onProgress))
-  if (result.incomplete) {
-    // Reasoning loop / empty answer: keep the "couldn't generate" notice, insert
-    // nothing (a half-baked or empty cell is worse than an explicit failure).
-    fail()
-    return
+  try {
+    const result = await wrap(generator(fullPrompt, onProgress))
+    if (result.incomplete) {
+      // Reasoning loop / empty answer: keep the "couldn't generate" notice in the
+      // ThinkingBlock, insert nothing (a half-baked cell is worse than failure).
+      fail()
+      return
+    }
+    finish()
+    insertResult(result.code)
+  } catch (err) {
+    // An engine-level failure (not a clean "incomplete"): record it for THIS
+    // cell and drop the thinking block so the row's error message takes over.
+    finish()
+    onError(err as Error)
+    throw err
+  } finally {
+    stopGenerating()
   }
-  finish()
-  insertResult(result.code)
 }, 'notebook.cells.generateAndInsert').extend(withAsync())

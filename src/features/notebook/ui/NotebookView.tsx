@@ -53,7 +53,12 @@ import {
 import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
-import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import {
+  codeGeneratorAtom,
+  generateAndInsertCodeAction,
+  inBrowserGeneratingCellIdAtom,
+  inBrowserGenerateErrorsAtom,
+} from '../model/codeGenerator'
 import {
   cloudGenerateAndInsertCodeAction,
   cloudGeneratingCellIdsAtom,
@@ -117,8 +122,10 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const isActive = activeCellIdAtom() === cell.id
   const mode = cellModeAtom()
   const hasGenerator = !!codeGeneratorAtom()
-  const isGenerating = !generateAndInsertCodeAction.ready()
-  const generateError = generateAndInsertCodeAction.error()
+  // Per-cell (TARDIS-168): the spinner/Stop and the error must show only on the
+  // row that is actually generating, not on every markdown cell.
+  const isGenerating = inBrowserGeneratingCellIdAtom() === cell.id
+  const generateError = inBrowserGenerateErrorsAtom().get(cell.id) ?? null
   const isCloudGenerating = cloudGeneratingCellIdsAtom().has(cell.id)
   const cloudGenerateError = cloudGenerateErrorsAtom().get(cell.id) ?? null
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin

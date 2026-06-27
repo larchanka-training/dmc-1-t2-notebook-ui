@@ -128,6 +128,8 @@ export {
   codeGeneratorAtom,
   interruptInBrowserAtom,
   loadedModelDisplayAtom,
+  inBrowserGeneratingCellIdAtom,
+  inBrowserGenerateErrorsAtom,
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
 } from './model/codeGenerator'
