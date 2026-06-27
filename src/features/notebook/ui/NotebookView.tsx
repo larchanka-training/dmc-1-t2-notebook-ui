@@ -430,7 +430,7 @@ export const NotebookView = reatomComponent(() => {
                 {/* Reasoning block when the agent is invoked on an empty notebook
                     (afterCellId is always null here). */}
                 {thinking ? (
-                  <div className="mt-4 w-full max-w-sm text-left">
+                  <div className="mt-4 w-full text-left">
                     <ThinkingBlock />
                   </div>
                 ) : null}

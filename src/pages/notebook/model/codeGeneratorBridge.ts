@@ -38,7 +38,9 @@ export const IN_BROWSER_SYSTEM_PROMPT = [
   'If the task needs a capability this sandbox does not have (network/fetch, DOM, files, timers, modules), DO NOT call or fake those APIs — they throw a ReferenceError at runtime. Instead return runnable code that uses console.log to state the capability is unavailable in the notebook sandbox.',
 ].join('\n')
 
-function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InBrowserGenerator {
+export function buildGenerator(
+  engine: NonNullable<ReturnType<typeof engineAtom>>,
+): InBrowserGenerator {
   return async (prompt, onProgress) => {
     const stream = await engine.chat.completions.create({
       messages: [
@@ -54,6 +56,7 @@ function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InB
     // WebLLM streams one decode-step per chunk, so the chunk count IS the number
     // of generated tokens — an exact live counter without a separate tokenizer.
     let tokens = 0
+    let budgetHit = false
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta.content ?? ''
       if (delta) tokens += 1
@@ -65,11 +68,19 @@ function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InB
         onProgress?.({ thinking: partial.thinking, tokens })
       }
       // Kill a runaway reasoning loop: still thinking, no code, over budget.
-      // (A user-requested Stop also ends this loop — it calls interruptGenerate
-      // via interruptInBrowserAtom, which makes the stream finish.)
-      if (partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
-        await engine.interruptGenerate()
-        break
+      //
+      // CRITICAL: ask the engine to stop but DO NOT `break` out of the stream.
+      // WebLLM holds a per-model lock for the whole generation and releases it
+      // only when its async generator runs to completion; bailing early with
+      // `break` calls the generator's `.return()` before that release, leaking
+      // the lock so the NEXT `create()` blocks forever on `lock.acquire()` (a
+      // dead loader, a frozen Stop). Instead we raise the interrupt flag once
+      // and let the loop drain: the engine's own loop sees the flag, stops, and
+      // emits its final chunk — releasing the lock cleanly. A user Stop works
+      // the same way (interruptInBrowserAtom → interruptGenerate).
+      if (!budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
+        budgetHit = true
+        void engine.interruptGenerate()
       }
     }
 
