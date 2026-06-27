@@ -241,6 +241,20 @@ per-account _active list_ limit, not a local-storage limit.
 > See also: the same cap is recorded in the monorepo docs
 > (`docs/System_Architecture.md`, `docs/requirements.md`).
 
+## Cross-tab list synchronisation
+
+The lightweight notebook **list** (ids + titles, no cells) is mirrored across tabs of the same origin, so a notebook created or deleted in one tab appears in the others' sidebars without a reload.
+Until device mode (#136) the editor saves unconditionally, so the new notebook is already in IndexedDB; the gap was purely that the sidebar list lives in `notebookListResource.data`, an in-memory atom another tab never heard about.
+This is list-only — full per-notebook content sync across tabs stays with #136.
+
+The mechanism lives in `model/notebookListCrossTab.ts` (`startNotebookListCrossTabSync`, started once from `app/model/setup.ts`) and mirrors the session cross-tab pattern (`entities/session/model/crossTabSync.ts`): one localStorage key (`notebook.list.crosstab`), echo-safe by value.
+
+- **Writer.** A `withChangeHook` on `notebookListResource.data` writes the rows to localStorage whenever they change locally (create, delete, post-create retry, boot fetch). `withChangeHook` is middleware that fires on a real change and does **not** subscribe to / connect the resource, so it cannot trigger a spurious `GET /notebooks` — the trap that previously caused a 401 storm. The write is skipped when the stored payload already equals the new rows.
+- **Reader.** A `storage` listener applies an incoming list into the resource via `data.set`. It compares against the current rows with `peek` (a plain `data()` read would recompute the computed and fire a fetch) and skips equal values, so applying a remote update never loops back into another write/event.
+- **Cross-account guard.** The payload is stamped with the owner id and ignored when it does not match the current `userAtom().id`, so one account's list can never surface under another on a shared device. (Two tabs are normally converged to one account by the session sync; this is a hard backstop.)
+
+The dev trace logs `📒 notebook.list BROADCAST → localStorage` on a write and `📒 notebook.list APPLY ← localStorage (another tab)` on an applied remote update.
+
 ## Scaling note
 
 Every POST/PATCH sends the **whole** document (full cell list + the entire

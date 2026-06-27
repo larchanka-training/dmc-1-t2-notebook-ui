@@ -22,6 +22,7 @@ import {
   startNotebookListSync,
   startSlot,
 } from '@/features/notebook'
+import { startNotebookListCrossTabSync } from '@/features/notebook/model/notebookListCrossTab'
 import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
@@ -202,3 +203,9 @@ rootFrame.run(async () => {
 // in both tabs on logout. `startSessionCrossTabSync` applies an incoming value
 // only when it differs by value, so the echo dies after one hop.
 startSessionCrossTabSync()
+
+// Mirror the lightweight notebook LIST (ids + titles) across tabs too, so a
+// notebook created in one tab shows up in the sidebar of the others without a
+// reload (#136 will own full device-mode sync; this is just the list). Same
+// echo-safe localStorage shape as the session sync.
+startNotebookListCrossTabSync()
