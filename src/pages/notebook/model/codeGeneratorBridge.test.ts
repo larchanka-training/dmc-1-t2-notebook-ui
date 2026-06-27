@@ -78,6 +78,75 @@ function makeFakeEngine(chunks: string[]) {
   return { engine, state }
 }
 
+// Engine that returns a DIFFERENT full response per `create()` call, so the
+// auto-repair retry (TARDIS-168) can be exercised. Each response is the model's
+// complete output; the fake splits it into one-token-ish chunks.
+function makeMultiResponseEngine(responses: string[]) {
+  const calls: ChatMessage[][] = []
+  let i = 0
+
+  async function* streamFor(text: string) {
+    for (const piece of text.split(' ')) {
+      yield { choices: [{ delta: { content: piece + ' ' } }] }
+    }
+  }
+
+  const engine = {
+    chat: {
+      completions: {
+        create: vi.fn().mockImplementation(async ({ messages }: { messages: ChatMessage[] }) => {
+          calls.push(messages)
+          const text = responses[Math.min(i, responses.length - 1)]
+          i += 1
+          return streamFor(text)
+        }),
+      },
+    },
+    interruptGenerate: vi.fn().mockResolvedValue(undefined),
+  }
+  return { engine, calls, createMock: engine.chat.completions.create }
+}
+
+type ChatMessage = { role: string; content: string }
+
+describe('buildGenerator — sandbox auto-repair (TARDIS-168)', () => {
+  test('retries once when the cell code uses DOM, and accepts the clean rewrite', async () => {
+    const { engine, calls, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      "display({type:'html',value:'<svg></svg>'})",
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(createMock).toHaveBeenCalledTimes(2) // first + one repair
+    expect(result.code).toContain('display(')
+    expect(result.code).not.toContain('document')
+    expect(result.incomplete).toBe(false)
+    // The repair turn names the offending API to the model.
+    const repairTurn = calls[1].at(-1)?.content ?? ''
+    expect(repairTurn).toContain('createElement')
+  })
+
+  test('keeps the answer incomplete when the retry still violates the sandbox', async () => {
+    const { engine, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      'window.alert("still bad");', // retry is still forbidden
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(result.incomplete).toBe(true) // still violating → not inserted
+  })
+
+  test('does NOT retry clean code', async () => {
+    const { engine, createMock } = makeMultiResponseEngine(['const a = 1;'])
+    const result = await buildGenerator(engine as never)('make a constant')
+
+    expect(createMock).toHaveBeenCalledTimes(1) // no repair needed
+    expect(result.incomplete).toBe(false)
+    expect(result.code).toBe('const a = 1;')
+  })
+})
+
 describe('buildGenerator — stream draining (TARDIS-168)', () => {
   test('drains the stream to completion on a normal answer', async () => {
     const { engine, state } = makeFakeEngine(['<think>ok</think>', 'const a = 1;'])

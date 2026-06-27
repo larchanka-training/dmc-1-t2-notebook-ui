@@ -10,7 +10,76 @@ import {
 } from '@/features/notebook'
 import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
 import { splitThinkAndCode } from './reasoningParser'
-import { isParseableJs } from './codeValidation'
+import { isParseableJs, detectSandboxViolations } from './codeValidation'
+
+type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+
+// One streamed generation pass: drains the WebLLM stream, surfaces reasoning +
+// token progress, and enforces the think-token budget. Returns the raw model
+// text and the think/code split. Extracted so the auto-repair retry can run a
+// second pass without duplicating the streaming/lock-safe loop (TARDIS-168).
+async function streamOnce(
+  engine: NonNullable<ReturnType<typeof engineAtom>>,
+  messages: ChatMessage[],
+  onProgress: ((p: { thinking: string; tokens: number }) => void) | undefined,
+  tokenOffset: number,
+): Promise<{ raw: string; tokens: number }> {
+  const stream = await engine.chat.completions.create({
+    messages,
+    stream: true,
+    max_tokens: IN_BROWSER_MAX_TOKENS,
+  })
+
+  let raw = ''
+  let lastThinking = ''
+  // WebLLM streams one decode-step per chunk, so the chunk count IS the number
+  // of generated tokens — an exact live counter without a separate tokenizer.
+  // `tokenOffset` carries the first pass's count so a retry keeps counting up.
+  let tokens = 0
+  let budgetHit = false
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta.content ?? ''
+    if (delta) tokens += 1
+    raw += delta
+    const partial = splitThinkAndCode(raw)
+    if (partial.thinking !== lastThinking || delta) {
+      lastThinking = partial.thinking
+      onProgress?.({ thinking: partial.thinking, tokens: tokenOffset + tokens })
+    }
+    // Kill a runaway reasoning loop: still thinking, no code, over budget.
+    //
+    // CRITICAL: ask the engine to stop but DO NOT `break` out of the stream.
+    // WebLLM holds a per-model lock for the whole generation and releases it
+    // only when its async generator runs to completion; bailing early with
+    // `break` calls the generator's `.return()` before that release, leaking
+    // the lock so the NEXT `create()` blocks forever on `lock.acquire()` (a
+    // dead loader, a frozen Stop). Instead we raise the interrupt flag once and
+    // let the loop drain: the engine's own loop sees the flag, stops, and emits
+    // its final chunk — releasing the lock cleanly. A user Stop works the same
+    // way (interruptInBrowserAtom → interruptGenerate).
+    if (!budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
+      budgetHit = true
+      void engine.interruptGenerate()
+    }
+  }
+  return { raw, tokens }
+}
+
+// Build the one-shot correction prompt when the cell code reached for DOM/canvas
+// /network APIs that don't exist in the QuickJS cell scope. Names the exact
+// offending APIs and the one correct pattern (draw inside the display() iframe).
+function buildRepairInstruction(violations: string[], previousCode: string): string {
+  return [
+    `Your previous answer used these APIs that DO NOT exist in the notebook cell: ${violations.join(', ')}.`,
+    'The cell runs in QuickJS with NO document/window/canvas and no network.',
+    'Rewrite it so it runs as-is. If it draws graphics, return ONLY a single',
+    "display({ type: 'html', value: '<svg>…</svg>' }) (or a <canvas> + <script> inside the html string) —",
+    'all DOM/canvas calls must live INSIDE that html string, never in the cell.',
+    'If it cannot be done without those APIs, use console.log to say so.',
+    'Return ONLY JavaScript code, no fences.',
+    `Previous answer:\n${previousCode}`,
+  ].join('\n')
+}
 
 // System prompt for the In-browser agent (T1). It must describe the REAL
 // runtime so the model stops emitting unrunnable code (TARDIS-168): cells run in
@@ -44,54 +113,62 @@ export function buildGenerator(
   engine: NonNullable<ReturnType<typeof engineAtom>>,
 ): InBrowserGenerator {
   return async (prompt, onProgress) => {
-    const stream = await engine.chat.completions.create({
-      messages: [
+    // Pass 1.
+    const first = await streamOnce(
+      engine,
+      [
         { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
-      stream: true,
-      max_tokens: IN_BROWSER_MAX_TOKENS,
-    })
+      onProgress,
+      0,
+    )
+    const { thinking, code, thinkOpen } = splitThinkAndCode(first.raw)
 
-    let raw = ''
-    let lastThinking = ''
-    // WebLLM streams one decode-step per chunk, so the chunk count IS the number
-    // of generated tokens — an exact live counter without a separate tokenizer.
-    let tokens = 0
-    let budgetHit = false
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta.content ?? ''
-      if (delta) tokens += 1
-      raw += delta
-      const partial = splitThinkAndCode(raw)
-      // Surface reasoning + token count live while the model streams.
-      if (partial.thinking !== lastThinking || delta) {
-        lastThinking = partial.thinking
-        onProgress?.({ thinking: partial.thinking, tokens })
-      }
-      // Kill a runaway reasoning loop: still thinking, no code, over budget.
-      //
-      // CRITICAL: ask the engine to stop but DO NOT `break` out of the stream.
-      // WebLLM holds a per-model lock for the whole generation and releases it
-      // only when its async generator runs to completion; bailing early with
-      // `break` calls the generator's `.return()` before that release, leaking
-      // the lock so the NEXT `create()` blocks forever on `lock.acquire()` (a
-      // dead loader, a frozen Stop). Instead we raise the interrupt flag once
-      // and let the loop drain: the engine's own loop sees the flag, stops, and
-      // emits its final chunk — releasing the lock cleanly. A user Stop works
-      // the same way (interruptInBrowserAtom → interruptGenerate).
-      if (!budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
-        budgetHit = true
-        void engine.interruptGenerate()
+    // Deterministic repair (TARDIS-168): a prompt can't stop a small model from
+    // emitting DOM/canvas/network code in the cell, so when the code parses but
+    // references sandbox-forbidden APIs, run ONE corrective pass naming the exact
+    // offenders. Only retry parseable-but-violating code: an unparseable or empty
+    // answer is handled below, and a clean answer needs no second round.
+    if (!thinkOpen && code.length > 0 && isParseableJs(code)) {
+      const violations = detectSandboxViolations(code)
+      if (violations.length > 0) {
+        const second = await streamOnce(
+          engine,
+          [
+            { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
+            { role: 'user', content: prompt },
+            { role: 'assistant', content: code },
+            { role: 'user', content: buildRepairInstruction(violations, code) },
+          ],
+          onProgress,
+          first.tokens,
+        )
+        const repaired = splitThinkAndCode(second.raw)
+        // Accept the retry only if it is a real improvement: parseable and no
+        // longer violating. Otherwise keep the first answer and let the
+        // violation surface as "incomplete" (no silent broken insert).
+        if (
+          !repaired.thinkOpen &&
+          repaired.code.length > 0 &&
+          isParseableJs(repaired.code) &&
+          detectSandboxViolations(repaired.code).length === 0
+        ) {
+          return { code: repaired.code, thinking: repaired.thinking, incomplete: false }
+        }
+        // Retry didn't fix it → the (still-violating) code is not usable.
+        return { code, thinking, incomplete: true }
       }
     }
 
-    const { thinking, code, thinkOpen } = splitThinkAndCode(raw)
-    // "Usable" code = the model finished the answer (closed think, produced code)
-    // OR the user stopped mid-answer but the partial code still parses. A
-    // budget-aborted reasoning loop never produced code, so it stays incomplete.
-    // Insert only parseable code; anything cut off mid-statement is dropped.
-    const incomplete = thinkOpen || code.length === 0 || !isParseableJs(code)
+    // "Usable" code = a finished answer (closed think, produced code) that parses
+    // and is sandbox-clean. A budget-aborted loop, an unclosed think, an empty
+    // answer, or code cut off mid-statement all stay incomplete.
+    const incomplete =
+      thinkOpen ||
+      code.length === 0 ||
+      !isParseableJs(code) ||
+      detectSandboxViolations(code).length > 0
     return { code, thinking, incomplete }
   }
 }
