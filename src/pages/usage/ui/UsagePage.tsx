@@ -227,6 +227,14 @@ const UsagePage = reatomComponent(() => {
 }, 'UsagePage')
 
 const demoPresenceResource = computed(async () => {
+  // TARDIS-167 (№22): Usage is PUBLIC. Check the user FIRST, before any other
+  // reactive read — `notebookListResource.data()` is not a harmless cache peek but
+  // the async list resource's trigger, so reading it while signed out makes it hot
+  // and fires the protected `GET /notebooks` WITHOUT a token (a 401 on a public
+  // page — the same №8 trap the sidebar guards against by checking `user` first).
+  // A signed-out visitor has no per-account seed to restore, so report "present"
+  // (true) to keep the restore block hidden and never touch the list/resolver.
+  if (!userAtom()) return true
   // Reactive triggers, read SYNCHRONOUSLY before the first await (a computed only
   // tracks dependencies up to its first await; the tombstone/storage reads below
   // are async and don't register). Deleting or restoring the seed mutates the
@@ -235,11 +243,6 @@ const demoPresenceResource = computed(async () => {
   // to Usage, without a full page reload (TARDIS-167 №23).
   notebookListResource.data()
   activeNotebookIdAtom()
-  // TARDIS-167 (№22): Usage is now public. The demo id is per-owner
-  // (`resolveDemoNotebookId` throws before user hydration), and restoring a
-  // per-account seed is meaningless when signed out — so without a user report
-  // "present" (true) to keep the restore block hidden and never call the resolver.
-  if (!userAtom()) return true
   // The seed counts as "present" only when NOT tombstoned: a deleted seed has a
   // durable tombstone (№23), and after a delete a stale local copy may still sit
   // in storage — so a tombstone means "deleted", and the restore block must show.

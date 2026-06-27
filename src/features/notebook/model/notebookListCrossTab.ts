@@ -23,7 +23,7 @@
 // are normally converged to one account by the session sync, but this is a hard
 // guard against ever surfacing one account's list under another.
 
-import { isDeepEqual, log, peek, withChangeHook } from '@reatom/core'
+import { addChangeHook, isDeepEqual, log, peek } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { userAtom } from '@/entities/session'
 import { notebook as notebookApi } from '@/shared/api'
@@ -60,11 +60,13 @@ function broadcastList(items: notebookApi.NotebookListItem[]): void {
 
 /**
  * Start cross-tab list sync. Attaches the writer change-hook and the reader
- * storage listener. Returns an unsubscribe handle (removes the storage listener;
- * the change-hook lives for the app's lifetime, like the resource itself).
+ * storage listener. Returns an unsubscribe handle that removes BOTH — the writer
+ * via `addChangeHook`'s returned remover and the storage listener — so
+ * `start`/`stop` are symmetric and idempotent (a repeated `start` after `stop`
+ * does not accumulate duplicate broadcasters).
  */
 export function startNotebookListCrossTabSync(): () => void {
-  notebookListResource.data.extend(withChangeHook((items) => broadcastList(items)))
+  const removeWriter = addChangeHook(notebookListResource.data, (items) => broadcastList(items))
 
   const handler = (e: StorageEvent) => {
     if (e.key !== STORAGE_KEY) return
@@ -81,5 +83,8 @@ export function startNotebookListCrossTabSync(): () => void {
     })
   }
   window.addEventListener('storage', handler)
-  return () => window.removeEventListener('storage', handler)
+  return () => {
+    removeWriter()
+    window.removeEventListener('storage', handler)
+  }
 }

@@ -11,11 +11,18 @@
 // the new id. The switch sequence below closes that window — drain first, flip
 // only after.
 
-import { action, atom, wrap } from '@reatom/core'
+import { action, atom, urlAtom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { appPath } from '@/shared/lib/paths'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
+import {
+  activeNotebookIdAtom,
+  bootSeedSuppressedAtom,
+  LOCAL_NOTEBOOK_ID,
+  loadNotebook,
+  restoreNotebook,
+} from './notebook'
 import { userAtom } from '@/entities/session'
 import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
@@ -215,6 +222,19 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     // the slot never lands on another account's local notebook.
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook(true))
+    // Honour seed suppression on the account-switch path too (review opus): when
+    // the new owner's seed is tombstoned and they have no surviving notebook,
+    // `loadNotebook` opened nothing real, left the slot on the inert legacy floor
+    // and raised `bootSeedSuppressedAtom`. Boot (`setup.ts`) reads this flag and
+    // routes to Usage/Restore; without the same handling here the slot would stay
+    // dead while the previous account's in-memory cells linger on a notebook route
+    // (cross-account data exposure, §11). SPA-navigate to Usage to unmount the
+    // editor, mirroring boot. `startBindings` self-refuses on the floor id anyway,
+    // so skipping it changes nothing.
+    if (bootSeedSuppressedAtom()) {
+      urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
+      return
+    }
     startBindings()
     slotOpenErrorAtom.set(null)
   } catch (error) {

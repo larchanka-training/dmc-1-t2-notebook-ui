@@ -82,4 +82,21 @@ describe('startNotebookListCrossTabSync', () => {
     emitStorage(STORAGE_KEY, broadcast(OWNER, [listItem('late', 'Late')]))
     expect(peek(notebookListResource.data)).toEqual([])
   })
+
+  // Review opus: stop() must remove the WRITER too (not only the storage
+  // listener), so a stop+restart stays symmetric and does not accumulate
+  // duplicate change-hooks that each re-broadcast. After a stop()+start() cycle a
+  // single list change must produce exactly ONE localStorage write, not two.
+  test('stop()+start() does not duplicate the writer (one change -> one write)', async () => {
+    stop()
+    stop = startNotebookListCrossTabSync()
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+
+    notebookListResource.data.set([listItem('z', 'Z')])
+    await new Promise((resolve) => setTimeout(resolve))
+
+    const writes = setItemSpy.mock.calls.filter(([key]) => key === STORAGE_KEY)
+    expect(writes).toHaveLength(1)
+    setItemSpy.mockRestore()
+  })
 })

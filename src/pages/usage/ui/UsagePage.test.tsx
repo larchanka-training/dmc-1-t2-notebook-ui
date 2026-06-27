@@ -86,12 +86,20 @@ describe('UsagePage', () => {
     // the per-account restore block — and the per-owner demo id resolver must not
     // be called.
     const getSpy = vi.spyOn(notebookStorage, 'get')
+    // Regression (gpt review): the presence detector must check the user BEFORE
+    // reading `notebookListResource.data()`. Reading it makes the async list
+    // resource hot and fires the protected GET /notebooks WITHOUT a token — a 401
+    // on a public page. Assert the list is never fetched while signed out.
+    const listSpy = vi.spyOn(notebookApi, 'list')
 
     render(<UsagePage />)
 
     expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /restore demo/i })).not.toBeInTheDocument()
     expect(getSpy).not.toHaveBeenCalled()
+    // Give any (incorrect) async resource compute a tick to fire before asserting.
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument())
+    expect(listSpy).not.toHaveBeenCalled()
   })
 
   test('restoring lifts the tombstone, stamps ownership and opens the notebook (TARDIS-167 №23 / #61 #67)', async () => {
