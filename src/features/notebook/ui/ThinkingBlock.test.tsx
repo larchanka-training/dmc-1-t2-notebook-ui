@@ -21,14 +21,16 @@ describe('ThinkingBlock', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  test('shows the streamed reasoning while thinking', () => {
+  test('shows the streamed reasoning and the live token counter while thinking', () => {
     act(() => {
       startThinkingAction('cell-1')
-      updateThinkingAction('Let me plan the pie chart…')
+      updateThinkingAction('Let me plan the pie chart…', 42)
     })
     render(<ThinkingBlock />)
     expect(screen.getByText('Thinking…')).toBeInTheDocument()
     expect(screen.getByText(/plan the pie chart/)).toBeInTheDocument()
+    // Counter shows generated / max tokens, secondary styling.
+    expect(screen.getByText(/42 \/ 2048 tokens/)).toBeInTheDocument()
   })
 
   test('switches to a dismissable failure notice when generation failed', async () => {

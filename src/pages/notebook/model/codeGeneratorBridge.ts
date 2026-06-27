@@ -1,15 +1,11 @@
 import { codeGeneratorAtom, loadedModelDisplayAtom } from '@/features/notebook'
-import type { InBrowserGenerator } from '@/features/notebook'
+import {
+  type InBrowserGenerator,
+  IN_BROWSER_MAX_TOKENS,
+  IN_BROWSER_THINK_TOKEN_BUDGET,
+} from '@/features/notebook'
 import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
 import { splitThinkAndCode } from './reasoningParser'
-
-// Generation budget for the In-browser tier (TARDIS-168). Reasoning models
-// (DeepSeek-R1-Distill) can loop inside `<think>` forever; without a cap the tab
-// freezes for minutes. `MAX_TOKENS` is the hard backstop; `THINK_CHAR_BUDGET`
-// aborts a run whose reasoning grows past a sane size before ever emitting code
-// (~4 chars/token ≈ a 1024-token think budget) — a degenerate loop, not progress.
-export const MAX_TOKENS = 2048
-export const THINK_CHAR_BUDGET = 4096
 
 // System prompt for the In-browser agent (T1). It must describe the REAL
 // runtime so the model stops emitting unrunnable code (TARDIS-168): cells run in
@@ -38,29 +34,34 @@ export const IN_BROWSER_SYSTEM_PROMPT = [
 ].join('\n')
 
 function buildGenerator(engine: NonNullable<ReturnType<typeof engineAtom>>): InBrowserGenerator {
-  return async (prompt, onThink) => {
+  return async (prompt, onProgress) => {
     const stream = await engine.chat.completions.create({
       messages: [
         { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
       stream: true,
-      max_tokens: MAX_TOKENS,
+      max_tokens: IN_BROWSER_MAX_TOKENS,
     })
 
     let raw = ''
     let lastThinking = ''
+    // WebLLM streams one decode-step per chunk, so the chunk count IS the number
+    // of generated tokens — an exact live counter without a separate tokenizer.
+    let tokens = 0
     let aborted = false
     for await (const chunk of stream) {
-      raw += chunk.choices[0]?.delta.content ?? ''
+      const delta = chunk.choices[0]?.delta.content ?? ''
+      if (delta) tokens += 1
+      raw += delta
       const partial = splitThinkAndCode(raw)
-      // Surface reasoning live while the model is still inside <think>.
-      if (partial.thinking && partial.thinking !== lastThinking) {
+      // Surface reasoning + token count live while the model streams.
+      if (partial.thinking !== lastThinking || delta) {
         lastThinking = partial.thinking
-        onThink?.(partial.thinking)
+        onProgress?.({ thinking: partial.thinking, tokens })
       }
       // Kill a runaway reasoning loop: still thinking, no code, over budget.
-      if (partial.thinkOpen && partial.thinking.length > THINK_CHAR_BUDGET) {
+      if (partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
         aborted = true
         await engine.interruptGenerate()
         break

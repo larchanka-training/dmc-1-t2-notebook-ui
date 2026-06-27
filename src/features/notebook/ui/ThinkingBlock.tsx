@@ -63,6 +63,14 @@ export const ThinkingBlock = reatomComponent(() => {
         </div>
       )}
 
+      {/* Token counter, bottom-right, secondary colour — like a textarea's char
+          limit. One stream chunk == one generated token (TARDIS-168). */}
+      {!isFailed && (
+        <div className="mt-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+          {session.tokens} / {session.maxTokens} tokens
+        </div>
+      )}
+
       {isFailed && (
         <div className="mt-2 flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">

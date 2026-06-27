@@ -1,4 +1,5 @@
 import { atom, action } from '@reatom/core'
+import { IN_BROWSER_MAX_TOKENS } from './codeGenerator'
 
 // Live "thinking" session for the In-browser reasoning models (TARDIS-168).
 //
@@ -19,6 +20,10 @@ export interface ThinkingSession {
   afterCellId: string | null
   /** Cumulative reasoning text streamed so far. */
   thinking: string
+  /** Tokens generated so far (one decode-step per stream chunk). */
+  tokens: number
+  /** Hard token cap for this run — the counter's denominator. */
+  maxTokens: number
   /** `thinking` while the model runs; `failed` when it produced no usable code. */
   phase: ThinkingPhase
 }
@@ -29,14 +34,20 @@ export const thinkingSessionAtom = atom<ThinkingSession | null>(null, 'notebook.
 
 /** Open a fresh thinking block anchored after `afterCellId` (null = end). */
 export const startThinkingAction = action((afterCellId: string | null) => {
-  thinkingSessionAtom.set({ afterCellId, thinking: '', phase: 'thinking' })
+  thinkingSessionAtom.set({
+    afterCellId,
+    thinking: '',
+    tokens: 0,
+    maxTokens: IN_BROWSER_MAX_TOKENS,
+    phase: 'thinking',
+  })
 }, 'notebook.inBrowserThinking.start')
 
-/** Replace the streamed reasoning text (called with the cumulative value). */
-export const updateThinkingAction = action((thinking: string) => {
+/** Replace the streamed reasoning text + token count (cumulative values). */
+export const updateThinkingAction = action((thinking: string, tokens: number) => {
   const session = thinkingSessionAtom()
   if (!session || session.phase !== 'thinking') return
-  thinkingSessionAtom.set({ ...session, thinking })
+  thinkingSessionAtom.set({ ...session, thinking, tokens })
 }, 'notebook.inBrowserThinking.update')
 
 /** Close the block after a successful insert (no trace left behind). */

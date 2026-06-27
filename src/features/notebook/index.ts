@@ -124,8 +124,17 @@ export { reatomCell } from './domain/cell'
 export type { Cell, CellKind, CellStatus, CellViewMode } from './domain/cell'
 export { runInWorker, restartWorker } from './runtime/workerHost'
 export type { OutputItem, RuntimeStatus, SerializedValue } from './runtime/types'
-export { codeGeneratorAtom, loadedModelDisplayAtom } from './model/codeGenerator'
-export type { InBrowserGenerator, InBrowserGenerateResult } from './model/codeGenerator'
+export {
+  codeGeneratorAtom,
+  loadedModelDisplayAtom,
+  IN_BROWSER_MAX_TOKENS,
+  IN_BROWSER_THINK_TOKEN_BUDGET,
+} from './model/codeGenerator'
+export type {
+  InBrowserGenerator,
+  InBrowserGenerateResult,
+  InBrowserProgress,
+} from './model/codeGenerator'
 export { cloudGenerateAndInsertCodeAction } from './model/cloudCodeGenerator'
 export {
   thinkingSessionAtom,

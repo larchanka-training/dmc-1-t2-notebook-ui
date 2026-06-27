@@ -75,11 +75,13 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
   // Live reasoning block (TARDIS-168): anchored after the insert target, or at
   // the notebook end when the dialog was opened below all cells (afterId null).
   startThinkingAction(afterId ?? null)
-  const onThink = wrap((thinking: string) => updateThinkingAction(thinking))
+  const onProgress = wrap((p: { thinking: string; tokens: number }) =>
+    updateThinkingAction(p.thinking, p.tokens),
+  )
   const finish = wrap(() => finishThinkingAction())
   const fail = wrap(() => failThinkingAction())
 
-  const result = await wrap(generator(prompt, onThink))
+  const result = await wrap(generator(prompt, onProgress))
   if (result.incomplete) {
     // The model never produced runnable code — surface the failure, insert
     // nothing, and keep the dialog open so the user can rephrase or retry.

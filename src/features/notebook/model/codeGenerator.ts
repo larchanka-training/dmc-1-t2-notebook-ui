@@ -13,6 +13,15 @@ import {
   failThinkingAction,
 } from './inBrowserThinking'
 
+// Generation budget for the In-browser tier (TARDIS-168), shared by the bridge
+// (enforces it) and the thinking UI (shows the counter denominator). WebLLM
+// streams one decode-step per chunk, so counting chunks == counting generated
+// tokens. `IN_BROWSER_MAX_TOKENS` is the hard backstop; once a reasoning model's
+// chain-of-thought passes `IN_BROWSER_THINK_TOKEN_BUDGET` without emitting any
+// code, the run is a degenerate loop and is aborted.
+export const IN_BROWSER_MAX_TOKENS = 2048
+export const IN_BROWSER_THINK_TOKEN_BUDGET = 1024
+
 // Result of one in-browser generation. Reasoning models (DeepSeek-R1-Distill)
 // emit a `<think>…</think>` stream before the code; the bridge splits it so the
 // notebook only ever inserts `code`, surfaces `thinking` live, and can refuse to
@@ -26,14 +35,23 @@ export interface InBrowserGenerateResult {
   incomplete: boolean
 }
 
+/** Live progress emitted per streamed chunk: reasoning text + generated tokens. */
+export interface InBrowserProgress {
+  /** Cumulative chain-of-thought text so far. */
+  thinking: string
+  /** Number of tokens generated so far (one decode-step per stream chunk). */
+  tokens: number
+}
+
 /**
- * In-browser generator contract. `onThink` (when provided) is called with the
- * cumulative reasoning text as it streams — the caller MUST pass a Reatom-`wrap`ped
- * callback, since it fires across async (`for await`) boundaries.
+ * In-browser generator contract. `onProgress` (when provided) is called per
+ * streamed chunk with the cumulative reasoning text and token count — the caller
+ * MUST pass a Reatom-`wrap`ped callback, since it fires across async
+ * (`for await`) boundaries.
  */
 export type InBrowserGenerator = (
   prompt: string,
-  onThink?: (thinking: string) => void,
+  onProgress?: (progress: InBrowserProgress) => void,
 ) => Promise<InBrowserGenerateResult>
 
 // Dependency-injection slot: set by external code (pages/notebook) when a
@@ -88,11 +106,13 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
   })
   // Live reasoning block anchored right after the prompt cell (TARDIS-168).
   startThinkingAction(cellId)
-  const onThink = wrap((thinking: string) => updateThinkingAction(thinking))
+  const onProgress = wrap((p: { thinking: string; tokens: number }) =>
+    updateThinkingAction(p.thinking, p.tokens),
+  )
   const finish = wrap(() => finishThinkingAction())
   const fail = wrap(() => failThinkingAction())
 
-  const result = await wrap(generator(fullPrompt, onThink))
+  const result = await wrap(generator(fullPrompt, onProgress))
   if (result.incomplete) {
     // Reasoning loop / empty answer: keep the "couldn't generate" notice, insert
     // nothing (a half-baked or empty cell is worse than an explicit failure).
