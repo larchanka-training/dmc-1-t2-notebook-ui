@@ -32,6 +32,14 @@ describe('IN_BROWSER_SYSTEM_PROMPT', () => {
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('DO NOT call or fake those APIs')
   })
 
+  test('directs canvas/DOM drawing INTO the display() html string, not the cell', () => {
+    // The most common failure: a model writes document.createElement('canvas')
+    // in the cell (no DOM there) instead of inside the display() iframe.
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('INSIDE the display() html string')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('getContext')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('Canvas example:')
+  })
+
   test('puts the hard constraints after the capabilities (trailing weight)', () => {
     expect(IN_BROWSER_SYSTEM_PROMPT.indexOf('HARD CONSTRAINTS')).toBeGreaterThan(
       IN_BROWSER_SYSTEM_PROMPT.indexOf('display({'),

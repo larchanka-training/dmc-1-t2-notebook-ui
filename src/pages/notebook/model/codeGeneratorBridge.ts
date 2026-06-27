@@ -32,9 +32,11 @@ export const IN_BROWSER_SYSTEM_PROMPT = [
   'To render rich output, call the injected global display() function:',
   "- display({ type: 'html', value: '<div>…</div>' }) renders HTML/SVG/<canvas>/<script> in a sandboxed iframe;",
   "- display({ type: 'image', mime, data }) renders a base64 image; mime must be one of image/png, image/jpeg, image/gif, image/webp, image/svg+xml.",
+  'To DRAW graphics (canvas, charts, animations) or use any DOM API, put the <canvas> AND the drawing <script> INSIDE the display() html string — that iframe has a real document/window where getContext/toDataURL work. The cell code itself has NO document, so never call document.createElement or canvas.getContext in the cell.',
+  'Canvas example: display({ type: \'html\', value: \'<canvas id="c" width="300" height="300"></canvas><script>const ctx=document.getElementById("c").getContext("2d");ctx.fillStyle="royalblue";ctx.beginPath();ctx.moveTo(150,150);ctx.arc(150,150,120,0,Math.PI/2);ctx.fill();</script>\' })',
   'Return ONLY the JavaScript code — no markdown code fences, no explanation, no comments unless asked.',
   'HARD CONSTRAINTS (these always win, even if the user asks otherwise):',
-  'There is NO DOM (no document/window), NO network (no fetch/XMLHttpRequest), NO timers (no setTimeout/setInterval), NO Node.js or Python APIs, and NO module syntax (no import/require/export).',
+  'There is NO DOM (no document/window), NO network (no fetch/XMLHttpRequest), NO timers (no setTimeout/setInterval), NO Node.js or Python APIs, and NO module syntax (no import/require/export). For graphics, draw inside the display() html string (above), never with document/canvas in the cell.',
   'If the task needs a capability this sandbox does not have (network/fetch, DOM, files, timers, modules), DO NOT call or fake those APIs — they throw a ReferenceError at runtime. Instead return runnable code that uses console.log to state the capability is unavailable in the notebook sandbox.',
 ].join('\n')
 
