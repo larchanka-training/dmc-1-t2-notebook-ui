@@ -83,6 +83,7 @@ export type { RenameTarget, DeleteTarget } from './model/notebookSettings'
 export {
   notebookListResource,
   createNotebookAction,
+  createNotebookFlow,
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   startNotebookListSync,

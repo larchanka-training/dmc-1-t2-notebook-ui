@@ -11,6 +11,7 @@ import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import { isSeedTombstoned } from './seedTombstone'
 import {
   createNotebookAction,
+  createNotebookFlow,
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   notebookListResource,
@@ -231,6 +232,61 @@ describe('notebook cap (TARDIS-173)', () => {
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID) // floor row, not in the list
 
     expect(canCreateNotebook()).toBe(false)
+  })
+})
+
+describe('createNotebookFlow (TARDIS-173: sidebar orchestration moved to the model)', () => {
+  beforeEach(() => {
+    slotMock.openNotebookInSlot.mockReset().mockResolvedValue('opened')
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    userAtom.set({ id: 'flow-owner', email: 'a@b.c', displayName: null, roles: [] })
+    notebookListResource.data.set([])
+  })
+  afterEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    userAtom.set(null)
+  })
+
+  test('creates a notebook (emoji title) and opens it, returning the created notebook', async () => {
+    const created = fullNotebook(CLIENT_ID, '✨ Untitled notebook')
+    const createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+
+    const result = await createNotebookFlow()
+
+    // Titled "<emoji> Untitled notebook" — assert the shape, not a fixed emoji.
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringMatching(/ Untitled notebook$/) }),
+    )
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith(CLIENT_ID)
+    expect(result).toEqual(created)
+  })
+
+  test('returns null without opening when nothing was created (e.g. at the cap)', async () => {
+    // Fill to the cap so createNotebookAction no-ops (returns null).
+    const rows = Array.from({ length: MAX_NOTEBOOKS }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    activeNotebookIdAtom.set(rows[0].id)
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    const result = await createNotebookFlow()
+
+    expect(result).toBeNull()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(slotMock.openNotebookInSlot).not.toHaveBeenCalled()
+  })
+
+  test('returns null when the open did not succeed (so the caller does not navigate)', async () => {
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(
+      fullNotebook(CLIENT_ID, '✨ Untitled notebook'),
+    )
+    slotMock.openNotebookInSlot.mockResolvedValue('unavailable')
+
+    const result = await createNotebookFlow()
+
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith(CLIENT_ID)
+    expect(result).toBeNull()
   })
 })
 

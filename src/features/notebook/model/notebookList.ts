@@ -397,6 +397,39 @@ export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
   }
 }, 'notebook.list.promoteSeedFloor')
 
+// Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
+const NEW_NOTEBOOK_EMOJIS = ['📓', '🧪', '🚀', '✨', '🧠'] as const
+const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
+
+// TARDIS-167 (#1): pick a RANDOM emoji each time. A module-level incrementing
+// counter reset to 0 on every page load, so after a reload the first create
+// always got the same emoji. A random pick has no cross-reload state.
+function nextNotebookTitle(): string {
+  const emoji = NEW_NOTEBOOK_EMOJIS[Math.floor(Math.random() * NEW_NOTEBOOK_EMOJIS.length)]
+  return `${emoji} ${NEW_NOTEBOOK_TITLE}`
+}
+
+/**
+ * The full "create a new notebook" flow, owned by the model so the sidebar stays
+ * a dumb view (it just calls this and, on a non-null result, navigates):
+ *   1. promote a clean unsynced welcome-seed floor to a real backend row first,
+ *      so it does not vanish when the new notebook becomes active (#9);
+ *   2. create the new notebook (titled with a random emoji);
+ *   3. open it in the editor slot.
+ *
+ * Returns the created notebook when it was created AND opened (so the caller can
+ * navigate to it), or `null` when nothing was created (e.g. at the cap / an
+ * in-flight create) or the open did not succeed. Concurrency, the cap guard and
+ * error surfacing all live in `createNotebookAction`; this is pure orchestration.
+ */
+export const createNotebookFlow = action(async (): Promise<notebookApi.Notebook | null> => {
+  await wrap(promoteSeedFloorIfUnsynced())
+  const created = await wrap(createNotebookAction(nextNotebookTitle()))
+  if (!created) return null
+  const outcome = await wrap(openNotebookInSlot(created.id))
+  return outcome === 'opened' || outcome === 'already' ? created : null
+}, 'notebook.list.createFlow')
+
 /**
  * Delete a notebook from the sidebar (#135). Optimistically drops the row (rolled
  * back by `withRollback`/`withTransaction` if the server `DELETE` fails, like
