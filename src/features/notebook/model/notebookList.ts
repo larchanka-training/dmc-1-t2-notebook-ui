@@ -1,30 +1,62 @@
 import {
   action,
   computed,
+  log,
+  peek,
   withAsync,
   withAsyncData,
+  withConnectHook,
   withRollback,
   withTransaction,
   wrap,
 } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { NotFoundError } from '@/shared/api/errors'
 import { userAtom } from '@/entities/session'
 import { newId } from '@/shared/lib/id'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { notebookStorage } from '../persistence/activeStorage'
-import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, resolveDemoNotebookId } from './notebook'
+import { setSeedTombstone } from './seedTombstone'
 import {
   bumpSlotGeneration,
+  openNotebookInSlot,
   quiesceActiveSlot,
   resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings,
   settleDeletedSlotToFloor,
 } from './slot'
 
-export const notebookListResource = computed(
-  async () => await wrap(notebookApi.list()),
-  'notebook.list',
-).extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
+// Trace every actual GET /notebooks and every caller that triggers a (re)fetch.
+// `source` = which file/owner asked, `reason` = why. Routed through the Reatom
+// `log` so it lines up with the rest of the dev trace under `connectLogger`.
+function logListFetch(event: string, source: string, reason: string): void {
+  log(`📒 notebook.list ${event} ← ${source} :: ${reason}`)
+}
+
+// GUARDRAIL (reatom.md "Lazy resources"): this is a LAZY computed. Reading
+// `notebookListResource.data()` SUBSCRIBES, which makes the resource hot and runs
+// the body below — i.e. reading data() fires `GET /notebooks`. So an auth-gate is
+// mandatory BEFORE any `data()` read (G1: check userAtom()/authStatusAtom first,
+// or a guest read fetches the protected list without a token → 401). Keep the
+// fetch to a single source per path (G2): the sidebar's own subscription is the
+// one fetcher on sign-in; don't add a manual `.retry()` on top of it.
+export const notebookListResource = computed(async () => {
+  // This body is the ONE place the network GET /notebooks actually fires for the
+  // resource. Whoever made the resource recompute (a first subscriber connecting,
+  // or an explicit `.retry()`) shows up in the preceding logs.
+  logListFetch('FETCH (resource compute → GET /notebooks)', 'notebookListResource', 'recompute')
+  return await wrap(notebookApi.list())
+}, 'notebook.list').extend(withAsyncData({ initState: [] as notebookApi.NotebookListItem[] }))
+
+// Log when the resource gains its FIRST subscriber (becomes hot) — in production
+// that is the sidebar mounting and reading `data()`. This is the implicit
+// trigger that is easy to miss when chasing "who fetched the list".
+notebookListResource.extend(
+  withConnectHook(() => {
+    logListFetch('CONNECT (first subscriber → resource hot)', 'notebookListResource', 'subscribed')
+  }),
+)
 
 notebookListResource.data.extend(withRollback())
 
@@ -45,44 +77,71 @@ notebookListResource.data.extend(withRollback())
  * across the await, so a rapid second account switch cannot fetch for a stale
  * owner. The initial synchronous emit is skipped — boot loads the list lazily
  * through the sidebar's own subscription, so there is no redundant fetch on
- * startup. The explicit retry is also skipped on the FIRST sign-in
- * (null → user): the sidebar's own subscription already fetches after the
- * post-login navigation, so retrying here too would double-fetch (TARDIS-167
- * №7). Returns an unsubscribe handle.
+ * startup.
+ *
+ * The explicit retry runs ONLY on a true account SWITCH (B after A, both
+ * non-null — e.g. a cross-tab login as another account, which arrives as
+ * userAtom A→B with NO null in between). In that case `NotebooksGroup` never
+ * unmounts (the user stays truthy), so the list resource stays HOT with the
+ * previous account's rows, and the `computed` does not read `userAtom` — so it
+ * would not refetch on its own and Bob would see Alice's list. The retry is what
+ * refreshes it.
+ *
+ * It is deliberately SKIPPED on the FIRST sign-in (null → user, i.e. login after
+ * logout/boot): there `NotebooksGroup` unmounted while signed out (it returns
+ * null without a user), so on sign-in it re-subscribes and the resource's own
+ * lazy fetch is the SINGLE source. Retrying here too is the double `GET
+ * /notebooks` after login (TARDIS-167 №7). Returns an unsubscribe handle.
  */
 export function startNotebookListSync(): () => void {
   let primed = false
   let lastOwnerId: string | null = null
-  return userAtom.subscribe((user) => {
-    const ownerId = user?.id ?? null
-    if (!primed) {
-      primed = true
-      lastOwnerId = ownerId
-      return
-    }
-    if (ownerId === lastOwnerId) return
-    const prevOwnerId = lastOwnerId
-    lastOwnerId = ownerId
-    // Drop the previous account's cached rows synchronously, before any await, so
-    // a foreign list cannot flash while the slot reset is still draining.
-    notebookListResource.reset()
-    // Reset the editor slot away from the previous owner, THEN refetch the new
-    // account's list behind an owner fence so a stale owner never wins.
-    void (async () => {
-      await wrap(resetSlotToFloorForAccountChange())
-      // TARDIS-167 (№7): refetch here ONLY on a real account SWITCH (B after A).
-      // On the FIRST sign-in (null → user) the sidebar mounts after the post-login
-      // navigation and its own subscription fetches the list — an extra retry here
-      // produced the observed double `GET /notebooks` (one from this sync on
-      // /login, one from the sidebar on /). On a true account switch the sidebar is
-      // already hot (the computed does not read `userAtom`, so it won't refetch on
-      // its own), so this retry is what refreshes it. The owner fence guards a
-      // rapid second switch landing mid-await.
-      if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
-        await wrap(notebookListResource.retry())
+  // The subscribe callback is wrapped in `wrap(...)` so the async work it kicks
+  // off carries a Reatom frame. This listener fires from `notify`; a bare
+  // `void (async …)()` would detach the stack, and every deep `await wrap(...)`
+  // inside `resetSlotToFloorForAccountChange` → `loadNotebook` (storage reads,
+  // the boot reconcile, the legacy-seed migration) would then throw
+  // `ReatomError: missing async stack` under production `clearStack()` — which
+  // aborted the whole first-sign-in boot and left the in-memory seed showing
+  // (TARDIS-167 №23). Wrapping the callback (the same pattern remoteSync uses for
+  // its `userAtom.subscribe`) keeps the frame across the awaits.
+  return userAtom.subscribe(
+    wrap((user) => {
+      const ownerId = user?.id ?? null
+      if (!primed) {
+        primed = true
+        lastOwnerId = ownerId
+        return
       }
-    })()
-  })
+      if (ownerId === lastOwnerId) return
+      const prevOwnerId = lastOwnerId
+      lastOwnerId = ownerId
+      // Drop the previous account's cached rows synchronously, before any await, so
+      // a foreign list cannot flash while the slot reset is still draining.
+      notebookListResource.reset()
+      // Reset the editor slot away from the previous owner, THEN refetch the new
+      // account's list behind an owner fence so a stale owner never wins.
+      void (async () => {
+        await wrap(resetSlotToFloorForAccountChange())
+        // Refetch ONLY on a true account SWITCH (both owners non-null — e.g. a
+        // cross-tab login as another account, A→B with no null between). There the
+        // sidebar never unmounted, so the hot resource keeps the previous account's
+        // rows and the `computed` won't refetch on its own. On the FIRST sign-in
+        // (null→user) this is skipped: the sidebar re-subscribed on sign-in and its
+        // own lazy fetch is the single source — retrying here too is the post-login
+        // double GET /notebooks (TARDIS-167 №7). The owner fence guards a rapid
+        // second switch landing mid-await.
+        if (prevOwnerId !== null && ownerId !== null && ownerId === lastOwnerId) {
+          logListFetch(
+            'RETRY',
+            'startNotebookListSync (owner-change subscription)',
+            `account switch ${prevOwnerId} → ${ownerId}`,
+          )
+          await wrap(notebookListResource.retry())
+        }
+      })()
+    }),
+  )
 }
 
 /**
@@ -136,6 +195,69 @@ export function renameListItem(id: string, title: string): void {
   )
 }
 
+/**
+ * TARDIS-167 (№23): add a notebook to the cached sidebar list immediately,
+ * WITHOUT waiting for a `GET /notebooks` refetch. Used by the demo Restore flow,
+ * which recreates the seed server-side and must surface its row right away —
+ * otherwise the seed shows only as the synthetic floor row and vanishes the
+ * moment another notebook is opened (until the next list refetch). Ordered by
+ * `createdAt desc` to match the fetch order; a no-op if the row already exists.
+ */
+export function upsertListItem(notebook: notebookApi.Notebook): void {
+  notebookListResource.data.set((items) => insertByCreatedAtDesc(items, toListItem(notebook)))
+}
+
+/**
+ * Number of notebooks the user effectively has (TARDIS-167 №23, B-1). The sidebar
+ * and the `deleteNotebookAction` guard MUST agree, or the UI offers a Delete that
+ * the model then silently refuses. The synthetic welcome-floor row (the active
+ * notebook is not in the backend list — the unsynced seed) counts as one slot.
+ *
+ * Reads the list via `peek` (G3): this helper is called both from the sidebar
+ * (`canDelete`/`canCreate`) AND from the bodies of `createNotebookAction` /
+ * `deleteNotebookAction` as a model-level backstop, i.e. OUTSIDE a reactive
+ * context. A bare `data()` would reconnect the resource from those action bodies;
+ * `peek` reads the cache without recomputing it. The sidebar stays reactive
+ * because it subscribes to the list itself (`notebookListResource.data()` for the
+ * rendered rows), so its re-render re-evaluates the count.
+ */
+export function effectiveNotebookCount(): number {
+  const items = peek(notebookListResource.data)
+  const activeId = peek(activeNotebookIdAtom)
+  const floorShown = activeId !== undefined && !items.some((it) => it.id === activeId)
+  return items.length + (floorShown ? 1 : 0)
+}
+
+/** B-1: deletion is allowed only while the user keeps at least one other notebook. */
+export function canDeleteNotebooks(): boolean {
+  return effectiveNotebookCount() > 1
+}
+
+/**
+ * Effective maximum number of notebooks the UI allows (TARDIS-167, review on
+ * PR #91 / TARDIS-173). This is NOT a backend create limit — the API has none.
+ * The client only ever loads and syncs the first `LIST_PAGE_LIMIT` (200) rows of
+ * `GET /notebooks`, so any notebook beyond that page would be invisible in the
+ * sidebar and never synced. Capping creation at the page size keeps every
+ * notebook the user can make reachable. Derived from the single source
+ * (`notebookApi.LIST_PAGE_LIMIT`) so the page size and the cap cannot drift.
+ *
+ * The welcome seed is counted as one slot (it occupies a listed/floor row like
+ * any other), so the practical ceiling is 199 user-created notebooks plus the
+ * restorable seed.
+ */
+export const MAX_NOTEBOOKS = notebookApi.LIST_PAGE_LIMIT
+
+/**
+ * Whether the user is below the notebook cap and may create another one. Shares
+ * `effectiveNotebookCount()` with the delete guard so the create affordance and
+ * the model never disagree (a UI "+" that the model would then refuse). Deleting
+ * any notebook drops the count and re-enables creation.
+ */
+export function canCreateNotebook(): boolean {
+  return effectiveNotebookCount() < MAX_NOTEBOOKS
+}
+
 // Model-level in-flight guard (CL-12): the sidebar disables the "+" while a create
 // is pending, but that is UX only — a second entry point (a shortcut, command
 // palette, or a direct call) could still fire overlapping creates, each minting a
@@ -147,6 +269,16 @@ export const createNotebookAction = action(async (title: string) => {
   const trimmed = title.trim()
   if (!trimmed) return null
   if (createInFlight) return null
+  // Cap guard (TARDIS-173): never create past the page-size ceiling the client can
+  // load/sync. The sidebar also disables the "+" and shows a tooltip; this is the
+  // model-level backstop so a second entry point (shortcut / command palette /
+  // direct call) cannot push the user over the limit. Deleting a notebook
+  // re-enables creation. No-op rather than throw — the affordance already explains
+  // why, and callers treat `null` as "not created".
+  if (!canCreateNotebook()) {
+    console.warn(`notebook.create: refusing to create past the cap of ${MAX_NOTEBOOKS}`)
+    return null
+  }
   createInFlight = true
 
   // Client-chosen UUID (FU1): the same id is both the optimistic row id AND the
@@ -202,6 +334,7 @@ export const createNotebookAction = action(async (title: string) => {
       items.map((it) => (it.id === id ? toListItem(nb) : it)),
     )
     try {
+      logListFetch('RETRY', 'createNotebookAction', 'post-create list reconcile')
       await wrap(notebookListResource.retry())
     } catch {
       // Best-effort refetch: the list invalidation is advisory. The reconciled
@@ -232,9 +365,13 @@ export const createNotebookAction = action(async (title: string) => {
  *     not remoteCreated, no tombstones) is exactly the #9 case ("did not edit the
  *     seed") and the engine never pushes it, so there is no race.
  *
- * Best-effort: a failed promote (offline / rejected) is logged and swallowed so
- * it never blocks creating the new notebook — the seed stays a local floor row
- * and syncs on its next edit.
+ * Best-effort here is a local liveness boundary, not a weaker server invariant.
+ * In the normal signed-in UI flow this promotion runs before the first non-demo
+ * create, so an account with server notebooks is expected to have had its
+ * per-user seed created at least once. If promotion fails and a later create
+ * still succeeds (for example, a squatted id or corrupt local storage), that is
+ * exceptional drift: fresh-device reconcile will treat the missing seed as
+ * deleted, and `features-demo/restore` remains resurrect-only.
  */
 export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
   const id = activeNotebookIdAtom()
@@ -276,6 +413,39 @@ export const promoteSeedFloorIfUnsynced = action(async (): Promise<void> => {
   }
 }, 'notebook.list.promoteSeedFloor')
 
+// Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
+const NEW_NOTEBOOK_EMOJIS = ['📓', '🧪', '🚀', '✨', '🧠'] as const
+const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
+
+// TARDIS-167 (#1): pick a RANDOM emoji each time. A module-level incrementing
+// counter reset to 0 on every page load, so after a reload the first create
+// always got the same emoji. A random pick has no cross-reload state.
+function nextNotebookTitle(): string {
+  const emoji = NEW_NOTEBOOK_EMOJIS[Math.floor(Math.random() * NEW_NOTEBOOK_EMOJIS.length)]
+  return `${emoji} ${NEW_NOTEBOOK_TITLE}`
+}
+
+/**
+ * The full "create a new notebook" flow, owned by the model so the sidebar stays
+ * a dumb view (it just calls this and, on a non-null result, navigates):
+ *   1. promote a clean unsynced welcome-seed floor to a real backend row first,
+ *      so it does not vanish when the new notebook becomes active (#9);
+ *   2. create the new notebook (titled with a random emoji);
+ *   3. open it in the editor slot.
+ *
+ * Returns the created notebook when it was created AND opened (so the caller can
+ * navigate to it), or `null` when nothing was created (e.g. at the cap / an
+ * in-flight create) or the open did not succeed. Concurrency, the cap guard and
+ * error surfacing all live in `createNotebookAction`; this is pure orchestration.
+ */
+export const createNotebookFlow = action(async (): Promise<notebookApi.Notebook | null> => {
+  await wrap(promoteSeedFloorIfUnsynced())
+  const created = await wrap(createNotebookAction(nextNotebookTitle()))
+  if (!created) return null
+  const outcome = await wrap(openNotebookInSlot(created.id))
+  return outcome === 'opened' || outcome === 'already' ? created : null
+}, 'notebook.list.createFlow')
+
 /**
  * Delete a notebook from the sidebar (#135). Optimistically drops the row (rolled
  * back by `withRollback`/`withTransaction` if the server `DELETE` fails, like
@@ -298,6 +468,15 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
     return
   }
 
+  // B-1 guard (TARDIS-167 №23): never delete the user's only notebook — that would
+  // leave the workspace with nothing open. The sidebar also hides/disables the
+  // Delete affordance in this case; this is the model-level backstop so a direct
+  // call (or a stray listed row) cannot empty the workspace.
+  if (!canDeleteNotebooks()) {
+    console.warn('notebook.delete: refusing to delete the only notebook')
+    return
+  }
+
   const wasActive = id === activeNotebookIdAtom()
 
   // Invalidate any in-flight open BEFORE the delete touches the slot/server (H2):
@@ -315,32 +494,67 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
     await wrap(quiesceActiveSlot())
   }
 
+  // Is this the user's welcome/feature-demo seed? If so, deleting it must leave a
+  // durable tombstone (TARDIS-167 №23 contract A) so boot never resurrects it.
+  // Resolved before the server call so the 404 (already-deleted) path can tombstone
+  // too. Best-effort: a resolution failure (e.g. signed out) must not block delete.
+  let isSeed = false
+  try {
+    isSeed = id === (await wrap(resolveDemoNotebookId()))
+  } catch {
+    // signed out / id unresolvable — cannot be the per-user seed; leave isSeed=false
+  }
+
   // Optimistically remove the row; a failed DELETE rolls it back (withTransaction).
   notebookListResource.data.set((items) => items.filter((it) => it.id !== id))
 
   try {
     await wrap(notebookApi.remove(id))
   } catch (error) {
-    // The DELETE failed (offline/5xx). withTransaction will roll the row back; we
-    // must also re-arm the slot we quiesced, so the user is left exactly where
-    // they were (open notebook, bindings live, pending edits intact). Re-throw so
-    // the transaction rolls back and the dialog surfaces the failure.
-    if (wasActive) restoreActiveSlotBindings()
-    throw error
+    // A 404 (NOTEBOOK_NOT_FOUND) means the notebook is ALREADY deleted server-side
+    // — a stale client (e.g. the seed was deleted on another device). That is not
+    // a failure: treat it as a successful delete (idempotent) so the row stays
+    // removed and we still tombstone/clean up, instead of showing "Delete failed".
+    if (!(error instanceof NotFoundError)) {
+      // A real failure (offline/5xx). withTransaction rolls the row back; re-arm
+      // the slot we quiesced so the user is left exactly where they were, then
+      // re-throw so the dialog surfaces the failure.
+      if (wasActive) restoreActiveSlotBindings()
+      throw error
+    }
+    console.info(`notebook.delete: ${id} was already deleted server-side (404); treating as done`)
+  }
+
+  // The seed was deleted (by us now, or already gone server-side): record the
+  // tombstone so boot does not recreate it. Best-effort — a meta-write hiccup
+  // must not roll back a delete that already succeeded.
+  if (isSeed) {
+    try {
+      await wrap(setSeedTombstone())
+    } catch (error) {
+      console.warn('notebook.delete: failed to record the seed tombstone', error)
+    }
   }
 
   // DELETE committed. From here nothing may throw out of the action, or
   // withTransaction would roll back a delete that already succeeded server-side
   // (H2). Both remaining steps are best-effort.
   if (wasActive) {
-    // Degrade the slot to the welcome floor. `settleDeletedSlotToFloor` is itself
-    // best-effort, but wrap it here too (defence in depth, H2): NOTHING after the
-    // committed DELETE may reject out of this `withTransaction` action, or it
-    // would roll back a delete that already succeeded server-side.
+    // B-2 (TARDIS-167 №23): the open notebook was deleted, so move the slot to the
+    // FIRST remaining row (newest by createdAt — the row was already removed above,
+    // so `data()[0]` is the top survivor), instead of resurrecting the welcome
+    // seed. Fall back to the seed floor only if nothing remains (B-1 normally
+    // prevents deleting the last notebook, but stay defensive). All best-effort
+    // (H2): nothing here may reject out of the committed-DELETE transaction.
+    const topRemaining = notebookListResource.data().at(0)
     try {
-      await wrap(settleDeletedSlotToFloor())
+      if (topRemaining) {
+        await wrap(openNotebookInSlot(topRemaining.id))
+      } else {
+        await wrap(settleDeletedSlotToFloor())
+      }
     } catch (error) {
-      console.error('notebook.delete: settling the slot to the floor failed', error)
+      console.error('notebook.delete: settling the slot after delete failed', error)
     }
   }
   // Drop the local copy + its sync queue. Best-effort: a storage hiccup must not

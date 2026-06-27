@@ -1,11 +1,20 @@
 import { Check, Copy, RefreshCcw } from 'lucide-react'
-import { action, atom, computed, withAsync, withAsyncData, wrap } from '@reatom/core'
+import { action, atom, computed, urlAtom, withAsync, withAsyncData, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { notebook as notebookApi } from '@/shared/api'
 import { userAtom } from '@/entities/session'
-import { resolveDemoNotebookId } from '@/features/notebook'
+import {
+  activeNotebookIdAtom,
+  clearSeedTombstone,
+  isSeedTombstoned,
+  notebookListResource,
+  openNotebookInSlot,
+  resolveDemoNotebookId,
+  upsertListItem,
+} from '@/features/notebook'
 import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNotebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
+import { appPath } from '@/shared/lib/paths'
 import { Button } from '@/shared/ui/button'
 
 const examples = [
@@ -218,19 +227,63 @@ const UsagePage = reatomComponent(() => {
 }, 'UsagePage')
 
 const demoPresenceResource = computed(async () => {
-  // TARDIS-167 (№22): Usage is now public. The demo id is per-owner
-  // (`resolveDemoNotebookId` throws before user hydration), and restoring a
-  // per-account seed is meaningless when signed out — so without a user report
-  // "present" (true) to keep the restore block hidden and never call the resolver.
+  // TARDIS-167 (№22): Usage is PUBLIC. Check the user FIRST, before any other
+  // reactive read — `notebookListResource.data()` is not a harmless cache peek but
+  // the async list resource's trigger, so reading it while signed out makes it hot
+  // and fires the protected `GET /notebooks` WITHOUT a token (a 401 on a public
+  // page — the same №8 trap the sidebar guards against by checking `user` first).
+  // A signed-out visitor has no per-account seed to restore, so report "present"
+  // (true) to keep the restore block hidden and never touch the list/resolver.
   if (!userAtom()) return true
+  // Reactive triggers, read SYNCHRONOUSLY before the first await (a computed only
+  // tracks dependencies up to its first await; the tombstone/storage reads below
+  // are async and don't register). Deleting or restoring the seed mutates the
+  // notebook list and the active slot id, so touching them here invalidates this
+  // resource — the restore button then appears/disappears on the next navigation
+  // to Usage, without a full page reload (TARDIS-167 №23).
+  notebookListResource.data()
+  activeNotebookIdAtom()
+  // The seed counts as "present" only when NOT tombstoned: a deleted seed has a
+  // durable tombstone (№23), and after a delete a stale local copy may still sit
+  // in storage — so a tombstone means "deleted", and the restore block must show.
+  if (await wrap(isSeedTombstoned())) return false
   const demoId = await wrap(resolveDemoNotebookId())
   return Boolean(await wrap(notebookStorage.get(demoId)))
 }, 'usage.demoPresence').extend(withAsyncData({ initState: true }))
 
 const restoreDemo = action(async () => {
+  // Recreate the per-account seed server-side, then make it the real current
+  // notebook locally (TARDIS-167 №23 / #61 #67):
+  //   1. lift the deleted-seed tombstone so boot stops suppressing it;
+  //   2. write the returned document to storage;
+  //   3. stamp owner + remoteCreated sync-state so the owner-scoped boot picker
+  //      and the sidebar treat it as this user's notebook (it already exists
+  //      server-side — we just created it);
+  //   4. open it in the editor slot so the user sees the result immediately.
   const restored = await wrap(notebookApi.restoreFeaturesDemo())
+  await wrap(clearSeedTombstone())
   await wrap(notebookStorage.put(restored))
+  const ownerId = userAtom()?.id
+  await wrap(
+    notebookStorage.putSyncState({
+      notebookId: restored.id,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+      ...(ownerId !== undefined ? { ownerId } : {}),
+      lastSyncedUpdatedAt: restored.updatedAt,
+    }),
+  )
+  // Surface the restored seed in the sidebar list immediately (no GET refetch), so
+  // it does not show only as the synthetic floor row and vanish the moment another
+  // notebook is opened before the next list fetch.
+  upsertListItem(restored)
   demoPresenceResource.data.set(true)
+  await wrap(openNotebookInSlot(restored.id))
+  // TARDIS-167 №23 (review #4): leave the Usage page for the editor so the user
+  // lands on the just-restored notebook instead of staying on /usage with no
+  // visible result. SPA navigation via the router base (notebook route is '/').
+  urlAtom.set((url) => new URL(appPath(''), url.origin), true)
 }, 'usage.restoreDemo').extend(withAsync())
 
 export default UsagePage

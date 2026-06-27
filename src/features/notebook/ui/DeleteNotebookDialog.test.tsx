@@ -13,6 +13,7 @@ import { notebookStorage } from '../persistence/activeStorage'
 // throw `TypeError` before `notebookApi.remove` and fails the whole suite.
 vi.mock('../model/slot', () => ({
   bumpSlotGeneration: vi.fn(),
+  openNotebookInSlot: vi.fn().mockResolvedValue('opened'),
   quiesceActiveSlot: vi.fn().mockResolvedValue(undefined),
   resetSlotToFloorForAccountChange: vi.fn().mockResolvedValue(undefined),
   restoreActiveSlotBindings: vi.fn(),
@@ -37,7 +38,19 @@ beforeEach(() => {
   vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
   vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
   deleteNotebookAction.error.set(undefined)
-  notebookListResource.data.set([])
+  // Two rows: the delete target + one more, so the B-1 "keep at least one
+  // notebook" guard (TARDIS-167 №23) allows deleting the target in these tests.
+  notebookListResource.data.set([
+    {
+      id: TARGET.id,
+      title: TARGET.title,
+      formatVersion: 1,
+      createdAt: 0,
+      updatedAt: 0,
+      cellsCount: 0,
+    },
+    { id: 'keep-1', title: 'Keep me', formatVersion: 1, createdAt: 0, updatedAt: 0, cellsCount: 0 },
+  ])
 })
 
 afterEach(() => {

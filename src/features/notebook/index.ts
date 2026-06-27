@@ -19,6 +19,7 @@ export {
   notebookTitleAtom,
   loadNotebook,
   notebookLoadedAtom,
+  bootSeedSuppressedAtom,
   notebookBaseUpdatedAtAtom,
   storageCompatibilityAtom,
   restoreNotebook,
@@ -82,10 +83,17 @@ export type { RenameTarget, DeleteTarget } from './model/notebookSettings'
 export {
   notebookListResource,
   createNotebookAction,
+  createNotebookFlow,
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   startNotebookListSync,
+  upsertListItem,
+  canDeleteNotebooks,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
 } from './model/notebookList'
+export { reconcileBootFromServer } from './model/bootReconcile'
+export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'
 export {
   openNotebookInSlot,
   resetSlotToFloorForAccountChange,

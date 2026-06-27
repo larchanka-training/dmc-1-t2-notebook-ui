@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { SidebarProvider } from '@/shared/ui/sidebar'
@@ -146,6 +146,50 @@ describe('AppSidebar — create guard (FU3)', () => {
   })
 })
 
+describe('AppSidebar — notebook cap (TARDIS-173)', () => {
+  // Fill the list to the cap with one row active (no floor) so the create
+  // affordance is at the ceiling. MAX_NOTEBOOKS is imported via the real barrel
+  // (the mock keeps every non-mocked export real).
+  const capRows = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+
+  test('marks the "+" as disabled at the cap (model unit-test covers the create block)', async () => {
+    const { MAX_NOTEBOOKS } = await import('@/features/notebook')
+    const rows = capRows(MAX_NOTEBOOKS)
+    // Mock the fetch too: the resource refetches on mount and would otherwise
+    // overwrite the seeded rows with the beforeEach single-item list, dropping the
+    // count below the cap.
+    vi.spyOn(notebookApi, 'list').mockResolvedValue(rows)
+    notebookListResource.data.set(rows)
+    act(() => activeNotebookIdAtom.set(rows[0].id))
+
+    renderSidebar()
+
+    // The list resource briefly resets to its empty initState while it refetches
+    // on mount; wait until the capped rows settle so the cap is in effect. The
+    // button is marked `aria-disabled` (not native `disabled`) so it stays
+    // hoverable and can show the "limit reached" tooltip.
+    const addButton = screen.getByRole('button', { name: /new notebook/i })
+    await waitFor(() => expect(addButton).toHaveAttribute('aria-disabled', 'true'))
+  })
+
+  test('keeps the "+" enabled below the cap', () => {
+    const rows = capRows(3)
+    vi.spyOn(notebookApi, 'list').mockResolvedValue(rows)
+    notebookListResource.data.set(rows)
+    act(() => activeNotebookIdAtom.set(rows[0].id))
+
+    renderSidebar()
+
+    expect(screen.getByRole('button', { name: /new notebook/i })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  })
+})
+
 // M7: assert the observable UI contract, not just spy calls — navigation gating,
 // the rendered open-error, Delete wiring and the floor-Delete guard.
 describe('AppSidebar — UI contract (M7)', () => {
@@ -195,6 +239,20 @@ describe('AppSidebar — UI contract (M7)', () => {
     await user.click(menus[0])
 
     // Rename appears once the menu is open; the floor row offers no Delete (M5).
+    expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
+  })
+
+  test('offers no Delete when only one notebook exists (B-1, TARDIS-167 №23)', async () => {
+    const user = userEvent.setup()
+    // Exactly one notebook, open in the slot: no floor row, one listed row → the
+    // single-notebook guard hides Delete so the workspace can't be emptied.
+    act(() => activeNotebookIdAtom.set(BACKEND_ID))
+    renderSidebar()
+
+    const menus = screen.getAllByRole('button', { name: /notebook actions/i })
+    await user.click(menus[menus.length - 1])
+
     expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /delete/i })).toBeNull()
   })

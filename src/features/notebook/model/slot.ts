@@ -11,17 +11,25 @@
 // the new id. The switch sequence below closes that window — drain first, flip
 // only after.
 
-import { action, atom, wrap } from '@reatom/core'
+import { action, atom, urlAtom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
+import { appPath } from '@/shared/lib/paths'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
-import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID, loadNotebook, restoreNotebook } from './notebook'
+import {
+  activeNotebookIdAtom,
+  bootSeedSuppressedAtom,
+  LOCAL_NOTEBOOK_ID,
+  loadNotebook,
+  restoreNotebook,
+} from './notebook'
 import { userAtom } from '@/entities/session'
 import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { pullServerNotebook } from './pull'
+import { reconcileBootFromServer } from './bootReconcile'
 
 // Live teardown handles for the bindings of the notebook currently in the slot.
 // `null` when a binding is not running (AI context only runs in persisted mode).
@@ -203,10 +211,30 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     return
   }
   try {
-    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution, so
-    // the floor becomes THIS owner's deterministic demo notebook.
+    // First sign-in / account switch is a boot for THIS owner (TARDIS-167 №23):
+    // reconcile local storage against the server (pull the newest notebook, honour
+    // a deleted-seed tombstone) so a fresh device opens the user's newest notebook
+    // instead of a brand-new seed. Best-effort; never blocks the slot.
+    await wrap(reconcileBootFromServer())
+    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution; with
+    // `pickNewest` it then opens the newest notebook OWNED BY this user (the seed
+    // id is derived from user.id; others are matched by sync-state ownerId), so
+    // the slot never lands on another account's local notebook.
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
-    await wrap(loadNotebook())
+    await wrap(loadNotebook(true))
+    // Honour seed suppression on the account-switch path too (review opus): when
+    // the new owner's seed is tombstoned and they have no surviving notebook,
+    // `loadNotebook` opened nothing real, left the slot on the inert legacy floor
+    // and raised `bootSeedSuppressedAtom`. Boot (`setup.ts`) reads this flag and
+    // routes to Usage/Restore; without the same handling here the slot would stay
+    // dead while the previous account's in-memory cells linger on a notebook route
+    // (cross-account data exposure, §11). SPA-navigate to Usage to unmount the
+    // editor, mirroring boot. `startBindings` self-refuses on the floor id anyway,
+    // so skipping it changes nothing.
+    if (bootSeedSuppressedAtom()) {
+      urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
+      return
+    }
     startBindings()
     slotOpenErrorAtom.set(null)
   } catch (error) {

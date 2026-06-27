@@ -24,7 +24,10 @@ import { userAtom } from '@/entities/session'
 import { themeModeAtom, type ThemeMode } from '@/entities/theme'
 import {
   createNotebookAction,
-  promoteSeedFloorIfUnsynced,
+  createNotebookFlow,
+  canDeleteNotebooks,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
   notebookListResource,
   notebookTitleAtom,
   openNotebookInSlot,
@@ -38,6 +41,7 @@ import {
 import { logoutAction } from '@/features/auth'
 import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -266,19 +270,10 @@ function NotebookRowMenu({ onRename, onDelete }: { onRename?: () => void; onDele
   )
 }
 
-// Default title for the quick "+" create (new-design-v2 uses "Untitled notebook").
-// Open-into-slot, rename and delete are wired here (#135); multi-notebook routing
-// / duplicate stay in epic 04.
-const NEW_NOTEBOOK_EMOJIS = ['📓', '🧪', '🚀', '✨', '🧠'] as const
+// Fallback title shown for the active notebook before it has a real name
+// (new-design-v2 uses "Untitled notebook"). The create flow itself — emoji title,
+// seed promotion, open-into-slot — lives in the model (`createNotebookFlow`).
 const NEW_NOTEBOOK_TITLE = 'Untitled notebook'
-
-// TARDIS-167 (#1): pick a RANDOM emoji each time. A module-level incrementing
-// counter reset to 0 on every page load, so after a reload the first create
-// always got the same emoji (📓). A random pick has no cross-reload state.
-function nextNotebookTitle(): string {
-  const emoji = NEW_NOTEBOOK_EMOJIS[Math.floor(Math.random() * NEW_NOTEBOOK_EMOJIS.length)]
-  return `${emoji} ${NEW_NOTEBOOK_TITLE}`
-}
 
 const NotebooksGroup = reatomComponent(() => {
   const user = userAtom()
@@ -309,15 +304,12 @@ const NotebooksGroup = reatomComponent(() => {
   // row + a list retry, which can transiently drop or mis-roll-back a row).
   const creating = !createNotebookAction.ready()
 
+  // The whole create flow (seed promotion → create → open-into-slot) lives in the
+  // model; the sidebar just runs it and navigates on success. Navigation stays
+  // here — it is a presentation concern the model should not know about.
   const onCreate = wrap(async () => {
-    // TARDIS-167 (#9): if an unsynced welcome-seed floor is open, give it a
-    // backend identity FIRST so it stays a listed row instead of vanishing once
-    // the new notebook becomes active. Best-effort — never blocks the create.
-    await wrap(promoteSeedFloorIfUnsynced())
-    const created = await wrap(createNotebookAction(nextNotebookTitle()))
-    if (!created) return
-    const outcome = await wrap(openNotebookInSlot(created.id))
-    if (outcome === 'opened' || outcome === 'already') {
+    const created = await wrap(createNotebookFlow())
+    if (created) {
       urlAtom.set((url) => new URL(notebookHref, url.origin), true)
     }
   })
@@ -334,21 +326,52 @@ const NotebooksGroup = reatomComponent(() => {
   const showFloorRow =
     !activeInList &&
     (!filterText || (currentTitle || NEW_NOTEBOOK_TITLE).toLowerCase().includes(filterText))
+  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook, so the
+  // Delete affordance is hidden when only one slot exists. Uses the shared
+  // `canDeleteNotebooks()` helper so the affordance and the model-level guard in
+  // `deleteNotebookAction` count slots identically (no UI Delete that the model
+  // then silently refuses).
+  const canDelete = canDeleteNotebooks()
+  // Cap guard (TARDIS-173): the client only loads/syncs the first page of
+  // notebooks, so creation is capped at that page size. Disable the "+" at the
+  // ceiling and explain why in a tooltip; deleting a notebook re-enables it. The
+  // model-level guard in `createNotebookAction` is the backstop for other entry
+  // points.
+  const atNotebookCap = !canCreateNotebook()
 
   return (
     <SidebarGroup className="min-h-0 flex-1">
       <div className="flex shrink-0 items-center justify-between gap-1 pr-1">
         <SidebarGroupLabel className={GROUP_LABEL}>Notebooks</SidebarGroupLabel>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 text-muted-foreground hover:text-primary"
-          aria-label="New notebook"
-          onClick={onCreate}
-          disabled={creating}
-        >
-          <Plus className="size-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn(
+                  'size-6 shrink-0 text-muted-foreground hover:text-primary',
+                  // Cap: keep the button hoverable (so its tooltip shows) but look
+                  // and behave disabled. A native `disabled` button suppresses
+                  // hover events, which would hide the very tooltip that explains
+                  // why creation is blocked.
+                  atNotebookCap && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
+                )}
+                aria-label="New notebook"
+                aria-disabled={atNotebookCap}
+                onClick={atNotebookCap ? undefined : onCreate}
+                disabled={creating}
+              >
+                <Plus className="size-4" />
+              </Button>
+            }
+          />
+          {atNotebookCap && (
+            <TooltipContent>
+              {`Notebook limit reached (${MAX_NOTEBOOKS}). Delete a notebook to create a new one.`}
+            </TooltipContent>
+          )}
+        </Tooltip>
       </div>
       <SidebarGroupContent className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="relative shrink-0 px-1">
@@ -389,7 +412,7 @@ const NotebooksGroup = reatomComponent(() => {
                   // The local-only welcome-seed floor cannot be deleted; only an
                   // open backend notebook gets a Delete item (#135).
                   onDelete={
-                    activeId === LOCAL_NOTEBOOK_ID
+                    activeId === LOCAL_NOTEBOOK_ID || !canDelete
                       ? undefined
                       : wrap(() =>
                           deleteTargetAtom.set({
@@ -439,7 +462,7 @@ const NotebooksGroup = reatomComponent(() => {
                     // Defence-in-depth (M5): never offer Delete for the local
                     // welcome floor, even if it ever appears as a list row.
                     onDelete={
-                      nb.id === LOCAL_NOTEBOOK_ID
+                      nb.id === LOCAL_NOTEBOOK_ID || !canDelete
                         ? undefined
                         : wrap(() => deleteTargetAtom.set({ id: nb.id, title }))
                     }

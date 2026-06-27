@@ -524,6 +524,12 @@ Frontend вызывает endpoint только через `src/shared/api/noteb
 
 Demo notebook id детерминирован через UUIDv5 namespace `7f3a2b14-9c8d-4e6f-b1a2-c3d4e5f60718` и id владельца, чтобы frontend seed и backend restore совпадали по known vectors.
 
+Endpoint resurrect-only: soft-deleted demo возвращается в active state, active demo возвращается идемпотентно, never-created demo или чужой owner на этом id дают `404 NOTEBOOK_NOT_FOUND`.
+Backend не генерирует seed-контент при restore: seed создаёт frontend на boot и промоутит перед первым non-demo create.
+Normal UI create flow сохраняет server-side seed invariant: если чистый never-synced per-user seed floor открыт, `promoteSeedFloorIfUnsynced()` сначала создаёт demo на сервере, затем `createNotebookAction()` создаёт новый non-demo notebook.
+Поэтому non-empty server list без per-user demo id трактуется как удалённый demo и ведёт к локальному tombstone; состояние “есть server notebooks, но demo никогда не создавался” считается drift вне healthy UI path.
+Best-effort в seed promotion означает liveness-компромисс для локального клиента: transient/local failure не должен навсегда блокировать создание ноутбука, но такой failure не расширяет контракт `features-demo/restore` до создания нового seed с нуля.
+
 Local legacy seed `00000000-0000-4000-8000-000000000001` мигрируется в deterministic demo id put-before-delete, с сохранением содержимого, `updatedAt`, `ownerId` и `deletedCells`, а sync-state становится `remoteCreated:false`, `dirty:true`.
 
 ### 12.2. Conflict resolution

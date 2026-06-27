@@ -39,6 +39,7 @@ const snapshot = (notebook: NotebookJSON): NotebookJSON => structuredClone(noteb
 export function createMemoryAdapter(): NotebookStorageAdapter {
   const store = new Map<string, NotebookJSON>()
   const syncStore = new Map<string, NotebookSyncState>()
+  const metaStore = new Map<string, unknown>()
 
   return {
     async get(id) {
@@ -75,6 +76,7 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
     async clearAll() {
       store.clear()
       syncStore.clear()
+      metaStore.clear()
     },
     async getSyncState(notebookId) {
       const state = syncStore.get(notebookId)
@@ -91,6 +93,17 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
     },
     async deleteSyncState(notebookId) {
       syncStore.delete(notebookId)
+    },
+    async getMeta(key) {
+      const value = metaStore.get(key)
+      // Snapshot on the boundary, matching the notebook/sync stores.
+      return value === undefined ? undefined : structuredClone(value)
+    },
+    async putMeta(key, value) {
+      metaStore.set(key, structuredClone(value))
+    },
+    async deleteMeta(key) {
+      metaStore.delete(key)
     },
   }
 }

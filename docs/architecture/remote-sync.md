@@ -171,14 +171,89 @@ notebook from the sidebar (#135 open-into-slot) switches the slot to its id, and
 the slot controller (`model/slot.ts`) re-arms autosave / remote-sync / AI-context
 on the new id after draining the outgoing notebook's in-flight save.
 
-**Shared-floor caveat (still open).** Until #67 derives a per-user demo id
-(`uuidv5(DEMO_NAMESPACE, user.id)`), the boot floor is the same `LOCAL_NOTEBOOK_ID`
-for every user, so the first-user-to-POST / cross-owner-403 limitation still
-applies to that floor notebook specifically. The 403 stays handled fail-safe
-(terminal status, queue kept, no infinite loop, no false `synced`). The owner-gate
-also refuses to push a queue whose `ownerId` differs from the current user. A real
-per-user id for the floor is #67's job, built on the switchable slot delivered
-here.
+**Per-user demo id.** The boot seed id is now per-user —
+`resolveDemoNotebookId() = uuidv5(DEMO_NAMESPACE, user.id)` — so two accounts on
+one device get distinct seed ids and never collide on the floor notebook. The
+owner-gate still refuses to push a queue whose `ownerId` differs from the current
+user, and the legacy shared `LOCAL_NOTEBOOK_ID` is migrated to the per-user id on
+boot (`migrateLegacySeedIfNeeded`).
+
+## Boot, deletion and the seed tombstone (TARDIS-167 №23)
+
+The boot/delete/seed rules form one contract; the slot id alone does not capture
+it.
+
+**Boot — which notebook opens.** Boot (`loadNotebook(pickNewest=true)`, called
+from `setup.ts` on reload and from `resetSlotToFloorForAccountChange` on first
+sign-in) opens the **newest notebook owned by the current user** by `createdAt`
+desc — not always the seed. "Owned" = the per-user seed, or a notebook whose
+`sync` partition records `ownerId === user.id` (a notebook without provable
+ownership is skipped, so a shared device never opens another account's local
+notebook). `pickNewest` is boot-only; `degrade`/`reset` slot transitions keep
+going to the seed floor (`loadNotebook()` without the flag).
+
+**Empty local → server reconcile.** When local storage has no notebooks,
+`reconcileBootFromServer()` (`model/bootReconcile.ts`) runs BEFORE the slot loads:
+offline/empty list → seed path; non-empty list → pull the newest server notebook
+into storage (stamping `ownerId` + `remoteCreated` so the owner-scoped picker
+accepts it), and if the per-user seed id is **absent** from the server list, the
+seed was deleted on another device → set the tombstone locally.
+
+**Server-side seed invariant.** In the normal signed-in UI flow, an account that has any server notebooks has had its per-user demo notebook persisted on the server at least once.
+The create button preserves this invariant: when the clean, never-synced per-user seed floor is open, `promoteSeedFloorIfUnsynced()` posts that seed first, and only then does `createNotebookAction()` create the new non-demo notebook.
+Dirty or already-created seeds are owned by the remote-sync engine; by the time a non-demo server notebook exists through the healthy UI path, the demo either already exists server-side or has been soft-deleted later.
+Fresh-device reconcile therefore treats a non-empty server list without the per-user seed id as “the seed was deleted elsewhere”, not as “the seed never existed”.
+The `promoteSeedFloorIfUnsynced()` best-effort boundary is local liveness: a transient promotion failure is swallowed so notebook creation is not bricked by a local seed problem, but such a path is exceptional drift from the server invariant and must not make `features-demo/restore` mint arbitrary seed content.
+
+**Seed tombstone (contract A).** Deleting the seed writes a durable per-account
+marker in the storage `meta` partition (`seedTombstone.ts`, key
+`seed-tombstone:<ownerId>`). `loadNotebook` does not resurrect a tombstoned seed;
+`clearAll()` wipes the marker. **Restore** (usage page) lifts the tombstone,
+recreates the seed server-side, stamps owner sync-state, surfaces the row in the
+sidebar immediately (`upsertListItem`, no refetch) and opens it.
+
+**Deletion contracts.** B-1: the user always keeps at least one notebook — the
+Delete affordance is hidden and `deleteNotebookAction` refuses when only one slot
+exists. B-2: deleting the **active** notebook opens the top remaining row (newest
+by `createdAt`) via `openNotebookInSlot`, instead of resurrecting the seed. A
+delete that 404s (already deleted server-side) is treated as an idempotent success
+(tombstone the seed, drop the local copy, no "Delete failed").
+
+**Creation cap (TARDIS-173).** The backend enforces no maximum number of
+notebooks per user; the `200` on `GET /notebooks` is the page-size ceiling
+(`limit`, `le=200`). The client reads only that single first page
+(`notebook.ts` `LIST_PAGE_LIMIT`), so a notebook created beyond it would be
+invisible in the sidebar and never synced. The UI therefore caps creation at the
+page size: `MAX_NOTEBOOKS = LIST_PAGE_LIMIT`. `canCreateNotebook()` is
+`effectiveNotebookCount() < MAX_NOTEBOOKS` — the **same** count the B-1 delete
+guard uses, so the create "+" and the delete guard never disagree. The sidebar
+marks the "+" `aria-disabled` at the cap (kept hoverable, not native `disabled`,
+so its "limit reached" tooltip still shows) and `createNotebookAction` is the
+model-level backstop for other entry points. Deleting any notebook drops the
+count and re-enables creation. The welcome seed counts as one slot (it occupies a
+listed/floor row), so the practical ceiling is **199 user-created notebooks plus
+the restorable seed**. Known minor: a user near the cap who has deleted their
+seed (tombstoned, slot freed) can reach 200 user notebooks — still within the
+page the client can load/sync, so nothing is hidden. IndexedDB is shared across
+accounts on a device and stores more rows than one account's cap; the cap is a
+per-account _active list_ limit, not a local-storage limit.
+
+> See also: the same cap is recorded in the monorepo docs
+> (`docs/System_Architecture.md`, `docs/requirements.md`).
+
+## Cross-tab list synchronisation
+
+The lightweight notebook **list** (ids + titles, no cells) is mirrored across tabs of the same origin, so a notebook created or deleted in one tab appears in the others' sidebars without a reload.
+Until device mode (#136) the editor saves unconditionally, so the new notebook is already in IndexedDB; the gap was purely that the sidebar list lives in `notebookListResource.data`, an in-memory atom another tab never heard about.
+This is list-only — full per-notebook content sync across tabs stays with #136.
+
+The mechanism lives in `model/notebookListCrossTab.ts` (`startNotebookListCrossTabSync`, started once from `app/model/setup.ts`) and mirrors the session cross-tab pattern (`entities/session/model/crossTabSync.ts`): one localStorage key (`notebook.list.crosstab`), echo-safe by value.
+
+- **Writer.** A `withChangeHook` on `notebookListResource.data` writes the rows to localStorage whenever they change locally (create, delete, post-create retry, boot fetch). `withChangeHook` is middleware that fires on a real change and does **not** subscribe to / connect the resource, so it cannot trigger a spurious `GET /notebooks` — the trap that previously caused a 401 storm. The write is skipped when the stored payload already equals the new rows.
+- **Reader.** A `storage` listener applies an incoming list into the resource via `data.set`. It compares against the current rows with `peek` (a plain `data()` read would recompute the computed and fire a fetch) and skips equal values, so applying a remote update never loops back into another write/event.
+- **Cross-account guard.** The payload is stamped with the owner id and ignored when it does not match the current `userAtom().id`, so one account's list can never surface under another on a shared device. (Two tabs are normally converged to one account by the session sync; this is a hard backstop.)
+
+The dev trace logs `📒 notebook.list BROADCAST → localStorage` on a write and `📒 notebook.list APPLY ← localStorage (another tab)` on an applied remote update.
 
 ## Scaling note
 
@@ -257,13 +332,18 @@ save-committed subscriber) is `wrap`-captured, and every await is
 `await wrap(promise)`, so atom reads/writes in continuations keep a stack — the
 same pattern autosave uses.
 
+The notebook list is a lazy `computed + withAsyncData` resource: reading
+`notebookListResource.data()` subscribes to it, which makes it hot and fires
+`GET /notebooks`. Reading the list can perform a network request. The guardrails
+for that (auth-gate before the read, one fetch source, `peek`/hooks instead of a
+read for side-effects) live in `reatom.md` under "Lazy resources".
+
 ## Known follow-ups
 
-- **Per-user server id (#67).** #135 made the slot id switchable
-  (`activeNotebookIdAtom`); the boot floor is still the shared `LOCAL_NOTEBOOK_ID`,
-  which only the first user can POST. A real per-account id for the floor
-  (`uuidv5(DEMO_NAMESPACE, user.id)`) is #67's job, built on the switchable slot
-  (see "Notebook id scoping" above). A cross-owner `403` is handled fail-safe today.
+- **Per-user server id (#67) — done.** The boot floor now uses a per-account id
+  (`resolveDemoNotebookId() = uuidv5(DEMO_NAMESPACE, user.id)`), with the legacy
+  shared `LOCAL_NOTEBOOK_ID` migrated on boot. See "Boot, deletion and the seed
+  tombstone" above. A cross-owner `403`/`404` is still handled fail-safe.
 - **#136 (untrusted device).** Once `clearLocalNotebookData` is wired to sign-out,
   the sync-metadata persist already skips a write for a torn-down/paused engine and
   `pauseRemoteSync` cancels the persist-retry timer, but the full single-flight /

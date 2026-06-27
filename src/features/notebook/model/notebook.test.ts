@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { userAtom } from '@/entities/session'
+import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
 import {
   activeNotebookIdAtom,
@@ -7,13 +9,18 @@ import {
   cellsAtom,
   changeCellKind,
   deleteCell,
+  bootSeedSuppressedAtom,
+  loadNotebook,
   LOCAL_NOTEBOOK_ID,
   moveCell,
   moveCellTo,
+  notebookLoadedAtom,
   notebookSnapshot,
+  resolveDemoNotebookId,
   restoreNotebook,
   updateCellCode,
 } from './notebook'
+import { setSeedTombstone } from './seedTombstone'
 import { canRedoAtom, canUndoAtom, redo, undo } from './history'
 
 describe('notebook store', () => {
@@ -286,5 +293,123 @@ describe('activeNotebookIdAtom (slot id source)', () => {
     // serializer keys the snapshot by the active id so autosave writes under it.
     expect(activeNotebookIdAtom()).toBe(otherId)
     expect(notebookSnapshot().id).toBe(otherId)
+  })
+})
+
+describe('loadNotebook + seed tombstone (TARDIS-167 №23)', () => {
+  const USER = { id: 'boot-owner', roles: [] }
+
+  beforeEach(async () => {
+    await notebookStorage.clearAll()
+    userAtom.set(USER as never)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    notebookLoadedAtom.set(false)
+  })
+  afterEach(async () => {
+    await notebookStorage.clearAll()
+    userAtom.set(null)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  test('recreates the seed on boot when it is NOT tombstoned', async () => {
+    await loadNotebook()
+    const demoId = await resolveDemoNotebookId()
+    // A fresh welcome seed was persisted under the per-user demo id.
+    expect(await notebookStorage.get(demoId)).toBeDefined()
+  })
+
+  test('does NOT recreate the seed on boot when it is tombstoned', async () => {
+    await setSeedTombstone()
+    await loadNotebook()
+    const demoId = await resolveDemoNotebookId()
+    // The deleted seed stays gone — boot must not resurrect it.
+    expect(await notebookStorage.get(demoId)).toBeUndefined()
+    expect(notebookLoadedAtom()).toBe(true)
+  })
+
+  // Review #3: a tombstoned seed with no surviving local notebook must leave the
+  // slot on the inert legacy floor id and flag the suppression, so `startBindings`
+  // refuses to arm and the first edit cannot resurrect the seed. The boot caller
+  // reads the flag to route the user to the Usage Restore affordance.
+  test('demotes the slot to the legacy floor and flags suppression when the seed is tombstoned with no survivor', async () => {
+    await setSeedTombstone()
+
+    await loadNotebook(true)
+
+    expect(bootSeedSuppressedAtom()).toBe(true)
+    expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
+    const demoId = await resolveDemoNotebookId()
+    expect(await notebookStorage.get(demoId)).toBeUndefined()
+  })
+
+  test('does NOT flag suppression when a fresh seed is written (not tombstoned)', async () => {
+    await loadNotebook(true)
+    expect(bootSeedSuppressedAtom()).toBe(false)
+  })
+
+  // Bootstrap step 3: open the NEWEST locally-stored notebook OWNED by this user.
+  const makeLocal = (id: string, createdAt: number) => ({
+    formatVersion: FORMAT_VERSION,
+    id,
+    title: `nb-${id}`,
+    createdAt,
+    updatedAt: createdAt,
+    cells: [],
+  })
+  // Mark a stored notebook as owned by `ownerId` via its sync-state (the only
+  // place ownership lives — NotebookJSON carries none).
+  const own = async (id: string, ownerId: string) => {
+    await notebookStorage.putSyncState({
+      notebookId: id,
+      remoteCreated: true,
+      dirty: false,
+      ownerId,
+      deletedCells: [],
+    })
+  }
+
+  test('boot (pickNewest) opens the newest notebook OWNED by this user (createdAt desc)', async () => {
+    await notebookStorage.put(makeLocal('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 100))
+    await own('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', USER.id)
+    await notebookStorage.put(makeLocal('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 300))
+    await own('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', USER.id)
+    await notebookStorage.put(makeLocal('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 200))
+    await own('cccccccc-cccc-4ccc-8ccc-cccccccccccc', USER.id)
+
+    await loadNotebook(true)
+
+    // The slot opened the createdAt-newest OWNED notebook (300), not the seed.
+    expect(activeNotebookIdAtom()).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+  })
+
+  test('boot (pickNewest) ignores another account local notebooks (cross-account safety)', async () => {
+    // A newer notebook owned by a DIFFERENT account is present on this shared
+    // device; it must NOT be opened under the current user. With no notebook of
+    // ours, boot falls back to our per-user seed.
+    await notebookStorage.put(makeLocal('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 999))
+    await own('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'someone-else')
+
+    await loadNotebook(true)
+
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
+  })
+
+  test('boot (pickNewest) falls back to the per-user seed when nothing is stored locally', async () => {
+    await loadNotebook(true)
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
+    expect(await notebookStorage.get(demoId)).toBeDefined()
+  })
+
+  test('degrade/reset (pickNewest=false) stays on the seed even when other notebooks exist', async () => {
+    // The slot controller's degrade/reset path must NOT be re-routed to another
+    // notebook — it specifically wants the seed floor.
+    await notebookStorage.put(makeLocal('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 300))
+
+    await loadNotebook()
+
+    const demoId = await resolveDemoNotebookId()
+    expect(activeNotebookIdAtom()).toBe(demoId)
   })
 })

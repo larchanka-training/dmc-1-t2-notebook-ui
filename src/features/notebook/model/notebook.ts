@@ -7,6 +7,7 @@ import { reatomCell, type Cell, type CellKind } from '../domain/cell'
 import { clearHistory, recordOperation } from './history'
 import { bumpNotebookRestored, bumpNotebookRevision } from './revision'
 import { DEMO_CELLS, SEED_TITLE } from './featureDemoNotebook'
+import { isSeedTombstoned } from './seedTombstone'
 import { userAtom } from '@/entities/session'
 import { uuidV5 } from '@/shared/lib/id'
 
@@ -80,6 +81,15 @@ export const notebookBaseUpdatedAtAtom = atom<number | null>(null, 'notebook.bas
 // overwritten by the restored cells. Single-notebook MVP; one boot per session.
 export const notebookLoadedAtom = atom(false, 'notebook.loaded')
 
+// TARDIS-167 №23 (review #3): set on boot when the per-user seed is tombstoned
+// AND no local notebook of this user survives — so `loadNotebook` deliberately
+// opened nothing real (the slot stays on the inert legacy floor id, never armed).
+// The boot caller reads this to route the user to the Usage page's Restore
+// affordance instead of leaving an unbacked, unsaveable in-memory seed on screen
+// whose first edit would resurrect the deleted seed. Reset to false on every
+// other load path (a real notebook was opened, or a fresh seed was written).
+export const bootSeedSuppressedAtom = atom(false, 'notebook.bootSeedSuppressed')
+
 export type StorageCompatibility = 'ok' | 'newer-format'
 
 // Storage compatibility gate. If IndexedDB contains a notebook created by a
@@ -133,11 +143,77 @@ function resetToFreshSeed(demoId: string): void {
   restoreNotebook(freshDemoNotebook(demoId))
 }
 
+/**
+ * Local notebooks that provably belong to the CURRENT user (TARDIS-167 №23).
+ *
+ * SAFETY (AGENTS §11, cross-account): IndexedDB is shared by every account on the
+ * device and `NotebookJSON` carries no owner, so a bare "local notebooks" set
+ * could leak another account's notebooks into this user's boot. Ownership is
+ * determined deterministically from `user.id`:
+ *   • the per-user seed id (`resolveDemoNotebookId`) is derived from `user.id`,
+ *     so it is always ours; and
+ *   • every other notebook is ours only when its sync-state `ownerId` matches.
+ * A notebook with no sync-state and a non-seed id has no provable owner — it is
+ * excluded rather than risk a leak. Returns `[]` when signed out.
+ */
+export async function listOwnedLocalNotebooks(): Promise<NotebookJSON[]> {
+  const ownerId = userAtom()?.id?.toLowerCase()
+  if (!ownerId) return []
+  const demoId = await wrap(resolveDemoNotebookId())
+
+  const local = await wrap(notebookStorage.list())
+  const mine: NotebookJSON[] = []
+  for (const nb of local) {
+    if (nb.id === demoId) {
+      mine.push(nb)
+      continue
+    }
+    const state = await wrap(notebookStorage.getSyncState(nb.id))
+    if (state?.ownerId?.toLowerCase() === ownerId) mine.push(nb)
+  }
+  return mine
+}
+
+/**
+ * Whether the current user has at least one local notebook of their own. Used by
+ * the boot server-reconcile (review #2) to decide if local storage is
+ * authoritative for THIS account — a bare `notebookStorage.list()` would count
+ * another account's notebooks on a shared device and wrongly skip the reconcile,
+ * leaving the user with a fresh seed instead of their own server notebook.
+ */
+export async function hasOwnedLocalNotebooks(): Promise<boolean> {
+  return (await listOwnedLocalNotebooks()).length > 0
+}
+
+/**
+ * Choose which notebook the editor slot opens on boot (TARDIS-167 №23, contract
+ * B / bootstrap step 3). Returns the newest OWNED locally-stored notebook by
+ * creation time (newest-first, matching the sidebar's `createdAt desc` order), or
+ * `undefined` when nothing of ours is stored locally yet — the caller then falls
+ * back to the per-user seed (step 4).
+ *
+ * `list()` orders by `updatedAt`, but boot must pick by CREATION time so a merely
+ * re-opened notebook does not outrank a newer one; we sort explicitly here.
+ */
+async function pickNewestLocalNotebookId(): Promise<string | undefined> {
+  const mine = await wrap(listOwnedLocalNotebooks())
+  if (mine.length === 0) return undefined
+  // createdAt desc, ties broken by id desc — a deterministic "newest first" that
+  // matches the sidebar order.
+  const sorted = [...mine].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+  return sorted[0].id
+}
+
 async function migrateLegacySeedIfNeeded(demoId: string): Promise<void> {
-  const [demo, legacy] = await Promise.all([
-    wrap(notebookStorage.get(demoId)),
-    wrap(notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID)),
-  ])
+  // Read sequentially with `await wrap(...)` rather than `await Promise.all([wrap,
+  // wrap])`: `Promise.all` returns a NEW, unwrapped promise, so awaiting IT drops
+  // the Reatom frame — every `wrap(...)` AFTER the Promise.all (the deletes below)
+  // then throws `ReatomError: missing async stack` under production `clearStack()`.
+  // That frame loss cascaded into `loadNotebook` (its post-migration `pickNewest`
+  // / storage reads failed), which is why a fresh sign-in fell back to the seed
+  // (TARDIS-167 №23). Two IndexedDB reads in series is negligible.
+  const demo = await wrap(notebookStorage.get(demoId))
+  const legacy = await wrap(notebookStorage.get(LEGACY_LOCAL_NOTEBOOK_ID))
   if (!demo && legacy) {
     const migrated: NotebookJSON = { ...legacy, id: demoId }
     await wrap(notebookStorage.put(migrated))
@@ -194,9 +270,18 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
  * the newer-format gate, and any storage failure all return `false` (a base
  * timestamp is set after seeding too, so the return value — not the base — is
  * the reliable "was something restored" signal).
+ *
+ * `pickNewest` (TARDIS-167 №23 bootstrap step 3): only the app-boot caller passes
+ * `true`, so when the slot starts on the floor it opens the NEWEST locally-stored
+ * notebook (createdAt desc) instead of always the seed. The slot controller's
+ * degrade/reset callers pass `false` (the default) — they specifically WANT the
+ * seed floor, so they must not be re-routed to some other notebook.
  */
-export const loadNotebook = action(async () => {
+export const loadNotebook = action(async (pickNewest = false) => {
   storageCompatibilityAtom.set('ok')
+  // Default: this load opens (or seeds) a real notebook. Only the tombstoned
+  // seed-with-no-survivor branch below flips it true (review #3).
+  bootSeedSuppressedAtom.set(false)
   let restored = false
   try {
     if (activeNotebookIdAtom() === LOCAL_NOTEBOOK_ID) {
@@ -216,11 +301,39 @@ export const loadNotebook = action(async () => {
       } catch (migrationError) {
         console.warn('notebook: legacy seed migration failed; continuing', migrationError)
       }
+      // Boot only (step 3): prefer the newest locally-stored notebook over the
+      // seed. After a delete the seed may be tombstoned while others remain, so the
+      // slot must land on the newest of those. No local notebooks → keep the demo
+      // id and fall through to the seed/tombstone branch (step 4). Best-effort.
+      if (pickNewest) {
+        try {
+          const newestLocalId = await wrap(pickNewestLocalNotebookId())
+          if (newestLocalId !== undefined) activeNotebookIdAtom.set(newestLocalId)
+        } catch (listError) {
+          console.warn('notebook: choosing the newest local notebook failed; using seed', listError)
+        }
+      }
     }
     const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (stored) {
       restoreNotebook(stored)
       restored = true
+    } else if (await wrap(isSeedTombstoned())) {
+      // The user deleted their welcome/feature-demo seed (TARDIS-167 №23 contract
+      // A) AND has no other local notebook (step 3 above found none, so the active
+      // id is still the demo id). Do NOT recreate the seed: writing a fresh one
+      // here is exactly the bug that resurrected a deleted welcome notebook on
+      // every boot.
+      //
+      // Review #3: also DEMOTE the slot to the inert legacy floor id and flag the
+      // suppression. `startBindings` refuses to arm autosave/remote-sync on
+      // `LOCAL_NOTEBOOK_ID`, so the first edit can no longer persist+push a fresh
+      // seed and resurrect it. The boot caller reads `bootSeedSuppressedAtom` to
+      // route the user to the Usage page's Restore affordance instead of leaving
+      // an unbacked, unsaveable in-memory seed on screen.
+      activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+      notebookBaseUpdatedAtAtom.set(null)
+      bootSeedSuppressedAtom.set(true)
     } else {
       // No stored notebook for the active id. Establish a FRESH welcome seed in
       // memory before snapshotting it: `notebookSnapshot()` serializes the current

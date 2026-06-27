@@ -211,4 +211,32 @@ describe.each(backends)('NotebookStorageAdapter contract: $name', ({ create }) =
     if (!result.ok) result.current.title = 'mutated'
     expect((await store.get(ID))?.title).toBe('stored')
   })
+
+  // Meta partition (TARDIS-167 №23): per-account durable markers.
+  test('getMeta returns undefined for an unknown key', async () => {
+    expect(await store.getMeta('seed-tombstone:x')).toBeUndefined()
+  })
+
+  test('putMeta then getMeta round-trips a value', async () => {
+    await store.putMeta('seed-tombstone:x', true)
+    expect(await store.getMeta('seed-tombstone:x')).toBe(true)
+  })
+
+  test('putMeta replaces an existing value at the same key', async () => {
+    await store.putMeta('k', true)
+    await store.putMeta('k', false)
+    expect(await store.getMeta('k')).toBe(false)
+  })
+
+  test('deleteMeta removes a marker', async () => {
+    await store.putMeta('k', true)
+    await store.deleteMeta('k')
+    expect(await store.getMeta('k')).toBeUndefined()
+  })
+
+  test('clearAll wipes meta markers too', async () => {
+    await store.putMeta('k', true)
+    await store.clearAll()
+    expect(await store.getMeta('k')).toBeUndefined()
+  })
 })

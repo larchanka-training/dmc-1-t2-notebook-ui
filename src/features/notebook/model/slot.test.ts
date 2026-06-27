@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { notebook as notebookApi } from '@/shared/api'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
+import { urlAtom } from '@reatom/core'
+import { userAtom } from '@/entities/session'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { setSeedTombstone, clearSeedTombstone } from './seedTombstone'
 import {
   bumpSlotGeneration,
   openNotebookInSlot,
+  resetSlotToFloorForAccountChange,
   slotOpenErrorAtom,
   slotOpeningPhaseAtom,
   stopSlot,
@@ -299,6 +303,36 @@ describe('open is fenced against a lock-free reset/delete during the drain (H3/B
     // The slot was NOT flipped to the opened id, and no bindings were re-armed.
     expect(activeNotebookIdAtom()).toBe(LOCAL_NOTEBOOK_ID)
     expect(h.startRemoteSync).not.toHaveBeenCalledWith(SERVER_ID)
+  })
+})
+
+describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', () => {
+  const OWNER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+
+  afterEach(async () => {
+    await clearSeedTombstone()
+    userAtom.set(null)
+    await notebookStorage.clearAll()
+  })
+
+  test('navigates to /usage (Restore) and does NOT arm bindings when the new owner has a tombstoned seed and nothing to open', async () => {
+    userAtom.set({ id: OWNER, email: 'a@b.c', displayName: null, roles: [] })
+    await notebookStorage.clearAll() // no local notebooks for this owner
+    await setSeedTombstone() // their seed was deleted earlier
+    // Empty server list -> reconcile is a no-op -> loadNotebook hits the
+    // tombstone-with-no-survivor branch and raises bootSeedSuppressedAtom.
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    const initialPath = urlAtom().pathname
+
+    await resetSlotToFloorForAccountChange()
+
+    // Routed to Usage (Restore), mirroring the boot path...
+    expect(urlAtom().pathname).not.toBe(initialPath)
+    expect(urlAtom().pathname).toMatch(/usage$/)
+    // ...and the dead floor slot is NOT armed (no autosave/remote-sync on the
+    // legacy floor, so the previous account's cells can't be saved/pushed).
+    expect(h.startAutosave).not.toHaveBeenCalled()
+    expect(h.startRemoteSync).not.toHaveBeenCalled()
   })
 })
 

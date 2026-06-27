@@ -1,17 +1,28 @@
-import { connectLogger, log, wrap } from '@reatom/core'
+import { connectLogger, log, urlAtom, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
-import { LOGIN_PATH } from '@/shared/lib/paths'
-import { parsePersistRecord, readPersistRecord } from '@/shared/lib/persist'
-import { accessTokenAtom, refreshTokenAtom, userAtom } from '@/entities/session'
+import { appPath } from '@/shared/lib/paths'
+import { readPersistRecord } from '@/shared/lib/persist'
+import {
+  accessTokenAtom,
+  refreshTokenAtom,
+  userAtom,
+  authStatusAtom,
+  SESSION_STORAGE_KEYS,
+  type SessionUser,
+} from '@/entities/session'
+import { startSessionCrossTabSync } from '@/entities/session/model/crossTabSync'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
+  bootSeedSuppressedAtom,
   loadNotebook,
   markBootRestored,
+  reconcileBootFromServer,
   startNotebookListSync,
   startSlot,
 } from '@/features/notebook'
+import { startNotebookListCrossTabSync } from '@/features/notebook/model/notebookListCrossTab'
 import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
@@ -43,14 +54,11 @@ globalThis.LOG = log
 // as a withMiddleware hook, which only runs during a reactive computation, not
 // during a plain action-body read at startup. We therefore seed atoms directly
 // from localStorage (via the shared persist helpers) before any action runs.
-const REFRESH_TOKEN_KEY = 'session.refreshToken'
-
-type SessionUser = NonNullable<ReturnType<typeof userAtom>>
-
+// Keys come from the single source in `entities/session` so they cannot drift.
 rootFrame.run(() => {
-  const token = readPersistRecord<string>('session.accessToken')
-  const refresh = readPersistRecord<string>(REFRESH_TOKEN_KEY)
-  const user = readPersistRecord<SessionUser>('session.user')
+  const token = readPersistRecord<string>(SESSION_STORAGE_KEYS.accessToken)
+  const refresh = readPersistRecord<string>(SESSION_STORAGE_KEYS.refreshToken)
+  const user = readPersistRecord<SessionUser>(SESSION_STORAGE_KEYS.user)
   if (token !== null) accessTokenAtom.set(token)
   if (refresh !== null) refreshTokenAtom.set(refresh)
   if (user !== null) userAtom.set(user)
@@ -60,9 +68,17 @@ rootFrame.run(() => {
 // HTTP client wiring
 // ---------------------------------------------------------------------------
 
-// Wire the API client's auth token source to the auth atom.
-// This composition lives here so `shared/api` stays framework-agnostic.
-setAuthTokenGetter(() => accessTokenAtom())
+// Wire the API client's auth token source. Read the access token straight from
+// localStorage, NOT via accessTokenAtom(): the same reason `getRefreshToken`
+// does (below). The 401 refresh-retry in `refreshMiddleware` calls this getter
+// from a DETACHED async continuation after `await refreshOnce()`, where the
+// Reatom frame is off the stack — a cold-atom read there throws
+// `ReatomError: missing async stack` under production `clearStack()`, aborting
+// the retry so a create/patch fails with "request failed" right after a 401.
+// `onTokensRefreshed` writes the fresh token through `rootFrame.run` with
+// withLocalStorage(subscribe:false), so localStorage holds the rotated token
+// before the retry reads it here (TARDIS-167 №19/№23 follow-up).
+setAuthTokenGetter(() => readPersistRecord<string>(SESSION_STORAGE_KEYS.accessToken))
 
 // Wire the refresh token handlers so the 401 middleware can silently rotate
 // tokens and retry failed requests without involving UI code.
@@ -74,7 +90,7 @@ setRefreshHandlers({
   // storage would be missed and the user spuriously logged out. The token is
   // opaque (no reactivity needed), so the atom is not the source of truth here.
   // See .agents/issues/TARDIS-74/login-flow-issue.md.
-  getRefreshToken: () => readPersistRecord<string>(REFRESH_TOKEN_KEY),
+  getRefreshToken: () => readPersistRecord<string>(SESSION_STORAGE_KEYS.refreshToken),
   onTokensRefreshed: (accessToken, refreshToken) => {
     // Persist + update atoms in a guaranteed Reatom frame so the rotated
     // refresh token is in localStorage before the retried request reads it.
@@ -134,21 +150,41 @@ rootFrame.run(async () => {
     // The feature-demo id is derived from user.id. On the login page there is no
     // user yet, so starting the notebook slot would bind autosave/remoteSync to
     // the legacy floor id. The userAtom subscription in startNotebookListSync boots
-    // the slot after sign-in.
-    if (userAtom() === null) return
+    // the slot after sign-in. Gate on the single derived auth status (anything but
+    // 'authenticated' — anonymous or a still-pending restore — skips slot boot).
+    if (authStatusAtom() !== 'authenticated') return
+    // Server-reconcile BEFORE loading the slot (TARDIS-167 №23 bootstrap step 4b):
+    // when local storage is empty (fresh device), pull the account's newest
+    // notebook into IndexedDB and tombstone the seed if it was deleted elsewhere,
+    // so `loadNotebook(true)` then opens the right notebook instead of reseeding.
+    // Best-effort and self-contained — never blocks boot.
+    await wrap(reconcileBootFromServer())
     // A real restore (existing stored notebook) surfaces "Saved · <time>" right
     // away, seeded from the stored timestamp — instead of a blank indicator
     // until the first edit. A fresh seed / newer-format / failure returns false
     // and keeps the idle state.
-    const restored = await wrap(loadNotebook())
+    // Boot picks the newest locally-stored notebook for the slot (TARDIS-167 №23
+    // bootstrap step 3); only this boot caller passes `true`.
+    const restored = await wrap(loadNotebook(true))
     bootedNotebook = true
     if (restored) markBootRestored()
+    // Review #3 (TARDIS-167 №23): the user deleted their seed and has no other
+    // notebook, so `loadNotebook` opened nothing real and left the slot on the
+    // inert legacy floor (autosave/remote-sync stay unbound). Send them to the
+    // Usage page's Restore affordance instead of an unbacked, unsaveable seed
+    // whose first edit would resurrect the deleted seed. SPA navigation (no
+    // reload), so boot does not re-run and loop.
+    if (bootSeedSuppressedAtom()) {
+      urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
+    }
   } finally {
     if (bootedNotebook) {
       // Start the editor slot for the boot notebook: autosave + background
       // remote-sync (#134, self-guards on auth) + optional persisted AI context
       // (Mode B), all bound to the active slot id (#135). The slot controller owns
       // these bindings so open-into-slot can safely switch them to another id.
+      // When the seed was suppressed (review #3) the active id is the legacy
+      // floor, so `startBindings` self-refuses to arm — harmless, kept for symmetry.
       startSlot()
     }
   }
@@ -159,21 +195,17 @@ rootFrame.run(async () => {
 // ---------------------------------------------------------------------------
 
 // withLocalStorage(subscribe:false) does not register storage event listeners,
-// so we sync atoms manually here for cross-tab consistency.
-window.addEventListener('storage', (e: StorageEvent) => {
-  if (e.key === 'session.accessToken') {
-    const newToken = parsePersistRecord<string>(e.newValue)
-    rootFrame.run(() => accessTokenAtom.set(newToken))
-    if (!newToken && window.location.pathname !== LOGIN_PATH) {
-      window.location.replace(LOGIN_PATH)
-    }
-  }
-  if (e.key === 'session.refreshToken') {
-    const newRefresh = parsePersistRecord<string>(e.newValue)
-    rootFrame.run(() => refreshTokenAtom.set(newRefresh))
-  }
-  if (e.key === 'session.user') {
-    const newUser = parsePersistRecord<SessionUser>(e.newValue)
-    rootFrame.run(() => userAtom.set(newUser))
-  }
-})
+// so cross-tab session propagation is wired in ONE echo-safe place (see
+// `entities/session/model/crossTabSync.ts`). The previous inline handler here
+// re-`set` persisted atoms on every event, which re-wrote localStorage with a
+// fresh record id/timestamp and bounced the event back to the other tab — an
+// infinite ping-pong that flickered the UI between login and the signed-in view
+// in both tabs on logout. `startSessionCrossTabSync` applies an incoming value
+// only when it differs by value, so the echo dies after one hop.
+startSessionCrossTabSync()
+
+// Mirror the lightweight notebook LIST (ids + titles) across tabs too, so a
+// notebook created in one tab shows up in the sidebar of the others without a
+// reload (#136 will own full device-mode sync; this is just the list). Same
+// echo-safe localStorage shape as the session sync.
+startNotebookListCrossTabSync()

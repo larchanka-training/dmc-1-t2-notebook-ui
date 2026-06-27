@@ -182,4 +182,13 @@ export interface NotebookStorageAdapter {
   putSyncState(state: NotebookSyncState): Promise<void>
   /** Delete one notebook's sync state. No-op if it does not exist. */
   deleteSyncState(notebookId: string): Promise<void>
+  /**
+   * Read a per-account durable marker by key (TARDIS-167 №23 meta partition).
+   * Value is opaque (validated by the caller). `undefined` if absent.
+   */
+  getMeta(key: string): Promise<unknown>
+  /** Insert or replace a meta marker at `key`. */
+  putMeta(key: string, value: unknown): Promise<void>
+  /** Delete a meta marker by key. No-op if absent. */
+  deleteMeta(key: string): Promise<void>
 }

@@ -1,18 +1,24 @@
 import { peek } from '@reatom/core'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError, notebook as notebookApi } from '@/shared/api'
+import { NotFoundError } from '@/shared/api/errors'
 import { userAtom } from '@/entities/session'
 import * as idLib from '@/shared/lib/id'
 import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
+import * as notebookModel from './notebook'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
+import { isSeedTombstoned } from './seedTombstone'
 import {
   createNotebookAction,
+  createNotebookFlow,
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
   notebookListResource,
   renameListItem,
   startNotebookListSync,
+  canCreateNotebook,
+  MAX_NOTEBOOKS,
 } from './notebookList'
 
 // Delete drives the slot controller's two-phase active-delete API (quiesce before
@@ -21,6 +27,7 @@ import {
 // autosave/remote-sync/AI bindings the controller starts.
 const slotMock = vi.hoisted(() => ({
   bumpSlotGeneration: vi.fn(),
+  openNotebookInSlot: vi.fn(),
   quiesceActiveSlot: vi.fn(),
   resetSlotToFloorForAccountChange: vi.fn(),
   restoreActiveSlotBindings: vi.fn(),
@@ -28,6 +35,7 @@ const slotMock = vi.hoisted(() => ({
 }))
 vi.mock('./slot', () => ({
   bumpSlotGeneration: slotMock.bumpSlotGeneration,
+  openNotebookInSlot: slotMock.openNotebookInSlot,
   quiesceActiveSlot: slotMock.quiesceActiveSlot,
   resetSlotToFloorForAccountChange: slotMock.resetSlotToFloorForAccountChange,
   restoreActiveSlotBindings: slotMock.restoreActiveSlotBindings,
@@ -179,6 +187,109 @@ describe('createNotebookAction', () => {
   })
 })
 
+describe('notebook cap (TARDIS-173)', () => {
+  beforeEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+  afterEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+  })
+
+  // Build N listed rows, with one of them active so no synthetic floor row is
+  // added on top (effectiveNotebookCount would otherwise be N + 1).
+  const fillList = (n: number) => {
+    const rows = Array.from({ length: n }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    if (rows.length > 0) activeNotebookIdAtom.set(rows[0].id)
+  }
+
+  test('canCreateNotebook() is true below the cap and false at it', () => {
+    fillList(MAX_NOTEBOOKS - 1)
+    expect(canCreateNotebook()).toBe(true)
+
+    fillList(MAX_NOTEBOOKS)
+    expect(canCreateNotebook()).toBe(false)
+  })
+
+  test('createNotebookAction is a no-op at the cap (no API call)', async () => {
+    fillList(MAX_NOTEBOOKS)
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    const result = await createNotebookAction('over the limit')
+
+    expect(result).toBeNull()
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+
+  test('the unsynced seed floor counts toward the cap', () => {
+    // MAX-1 listed rows + an active floor (active id not in the list) = MAX slots.
+    const rows = Array.from({ length: MAX_NOTEBOOKS - 1 }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID) // floor row, not in the list
+
+    expect(canCreateNotebook()).toBe(false)
+  })
+})
+
+describe('createNotebookFlow (TARDIS-173: sidebar orchestration moved to the model)', () => {
+  beforeEach(() => {
+    slotMock.openNotebookInSlot.mockReset().mockResolvedValue('opened')
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    userAtom.set({ id: 'flow-owner', email: 'a@b.c', displayName: null, roles: [] })
+    notebookListResource.data.set([])
+  })
+  afterEach(() => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    userAtom.set(null)
+  })
+
+  test('creates a notebook (emoji title) and opens it, returning the created notebook', async () => {
+    const created = fullNotebook(CLIENT_ID, '✨ Untitled notebook')
+    const createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(created)
+
+    const result = await createNotebookFlow()
+
+    // Titled "<emoji> Untitled notebook" — assert the shape, not a fixed emoji.
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringMatching(/ Untitled notebook$/) }),
+    )
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith(CLIENT_ID)
+    expect(result).toEqual(created)
+  })
+
+  test('returns null without opening when nothing was created (e.g. at the cap)', async () => {
+    // Fill to the cap so createNotebookAction no-ops (returns null).
+    const rows = Array.from({ length: MAX_NOTEBOOKS }, (_, i) =>
+      listItem(`${i}`.padStart(8, '0') + '-0000-4000-8000-000000000000', `nb-${i}`),
+    )
+    notebookListResource.data.set(rows)
+    activeNotebookIdAtom.set(rows[0].id)
+    const createSpy = vi.spyOn(notebookApi, 'create')
+
+    const result = await createNotebookFlow()
+
+    expect(result).toBeNull()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(slotMock.openNotebookInSlot).not.toHaveBeenCalled()
+  })
+
+  test('returns null when the open did not succeed (so the caller does not navigate)', async () => {
+    vi.spyOn(notebookApi, 'create').mockResolvedValue(
+      fullNotebook(CLIENT_ID, '✨ Untitled notebook'),
+    )
+    slotMock.openNotebookInSlot.mockResolvedValue('unavailable')
+
+    const result = await createNotebookFlow()
+
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith(CLIENT_ID)
+    expect(result).toBeNull()
+  })
+})
+
 describe('renameListItem (TARDIS-167 #2)', () => {
   test('patches a listed row title in place (no refetch — the title rides autosave → PATCH)', () => {
     notebookListResource.data.set([listItem('a', 'Old A'), listItem('b', 'B')])
@@ -296,17 +407,24 @@ describe('promoteSeedFloorIfUnsynced (TARDIS-167 #9)', () => {
 describe('deleteNotebookAction', () => {
   const NB_ID = '55555555-5555-4555-8555-555555555555'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     slotMock.quiesceActiveSlot.mockReset().mockResolvedValue(undefined)
     slotMock.restoreActiveSlotBindings.mockReset()
     slotMock.settleDeletedSlotToFloor.mockReset().mockResolvedValue(undefined)
+    slotMock.openNotebookInSlot.mockReset().mockResolvedValue('opened')
     vi.spyOn(notebookStorage, 'delete').mockResolvedValue()
     vi.spyOn(notebookStorage, 'deleteSyncState').mockResolvedValue()
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    // A signed-in user so the per-account seed tombstone has an owner; clear any
+    // tombstone left by a previous test for isolation.
+    userAtom.set({ id: 'delete-suite-owner', roles: [] } as never)
+    await notebookStorage.clearAll()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    await notebookStorage.clearAll()
+    userAtom.set(null)
   })
 
   test('removes the row, deletes server-side, and cleans up local storage', async () => {
@@ -335,27 +453,32 @@ describe('deleteNotebookAction', () => {
     expect(peek(notebookListResource.data)).toEqual([other, listItem(NB_ID, 'Doomed')])
   })
 
-  test('quiesces the slot BEFORE the server DELETE, then settles to the floor AFTER (H1)', async () => {
+  test('quiesces the slot BEFORE the server DELETE, then opens the top remaining AFTER (H1 + B-2)', async () => {
     activeNotebookIdAtom.set(NB_ID) // the doomed notebook is open in the slot
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    // Two rows so the B-1 "keep at least one notebook" guard does not short-circuit.
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Doomed')])
     const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
 
     await deleteNotebookAction(NB_ID)
 
     // H1: id-bound work is stopped BEFORE the destructive request (so an in-flight
-    // push can't recreate the id), and the slot only degrades AFTER the commit.
+    // push can't recreate the id). B-2: after the commit the slot opens the top
+    // remaining row ('keep'), NOT the resurrected seed floor.
     expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
-    expect(slotMock.settleDeletedSlotToFloor).toHaveBeenCalledTimes(1)
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledTimes(1)
+    expect(slotMock.openNotebookInSlot).toHaveBeenCalledWith('keep')
+    expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
     const quiesceOrder = slotMock.quiesceActiveSlot.mock.invocationCallOrder[0]
     const removeOrder = removeSpy.mock.invocationCallOrder[0]
-    const settleOrder = slotMock.settleDeletedSlotToFloor.mock.invocationCallOrder[0]
+    const openOrder = slotMock.openNotebookInSlot.mock.invocationCallOrder[0]
     expect(quiesceOrder).toBeLessThan(removeOrder)
-    expect(removeOrder).toBeLessThan(settleOrder)
+    expect(removeOrder).toBeLessThan(openOrder)
   })
 
   test('re-arms the slot and rolls the row back when the active-notebook DELETE fails (H1)', async () => {
     activeNotebookIdAtom.set(NB_ID) // open in the slot
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    const keep = listItem('keep', 'Keep me')
+    notebookListResource.data.set([keep, listItem(NB_ID, 'Doomed')])
     vi.spyOn(notebookApi, 'remove').mockRejectedValue(new ApiError(500, 'boom', 'boom'))
 
     await expect(deleteNotebookAction(NB_ID)).rejects.toThrow()
@@ -365,12 +488,13 @@ describe('deleteNotebookAction', () => {
     expect(slotMock.quiesceActiveSlot).toHaveBeenCalledTimes(1)
     expect(slotMock.restoreActiveSlotBindings).toHaveBeenCalledTimes(1)
     expect(slotMock.settleDeletedSlotToFloor).not.toHaveBeenCalled()
-    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Doomed')])
+    expect(peek(notebookListResource.data)).toEqual([keep, listItem(NB_ID, 'Doomed')])
   })
 
   test('does not roll back a committed DELETE even if settling the slot fails (H2)', async () => {
     activeNotebookIdAtom.set(NB_ID)
-    notebookListResource.data.set([listItem(NB_ID, 'Doomed')])
+    const keep = listItem('keep', 'Keep me')
+    notebookListResource.data.set([keep, listItem(NB_ID, 'Doomed')])
     vi.spyOn(notebookApi, 'remove').mockResolvedValue()
     // settle is best-effort: even if it rejected, the action must NOT reject (which
     // would roll back the committed server delete). The real settle never throws;
@@ -379,7 +503,7 @@ describe('deleteNotebookAction', () => {
 
     await expect(deleteNotebookAction(NB_ID)).resolves.toBeUndefined()
     // Row stays removed (delete committed), not resurrected by a rollback.
-    expect(peek(notebookListResource.data)).toEqual([])
+    expect(peek(notebookListResource.data)).toEqual([keep])
   })
 
   test('refuses to delete the local welcome floor (M5)', async () => {
@@ -392,6 +516,82 @@ describe('deleteNotebookAction', () => {
     expect(removeSpy).not.toHaveBeenCalled()
     expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
     expect(peek(notebookListResource.data)).toEqual([listItem(LOCAL_NOTEBOOK_ID, 'Welcome')])
+  })
+
+  // B-1 (TARDIS-167 №23): the user must always keep at least one notebook. A
+  // "true single notebook" is the active row itself with nothing else — no floor.
+  test('refuses to delete the only notebook (B-1)', async () => {
+    activeNotebookIdAtom.set(NB_ID) // the single row IS the open notebook (no floor)
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(NB_ID, 'Only one')])
+
+    await deleteNotebookAction(NB_ID)
+
+    // Guarded no-op: no server call, the single row stays.
+    expect(removeSpy).not.toHaveBeenCalled()
+    expect(slotMock.quiesceActiveSlot).not.toHaveBeenCalled()
+    expect(peek(notebookListResource.data)).toEqual([listItem(NB_ID, 'Only one')])
+  })
+
+  // B-1 review fix: the sidebar affordance and the model guard must count slots
+  // identically (shared `canDeleteNotebooks()`). When an unsynced welcome-seed
+  // floor is open AND one backend row exists, the user effectively has TWO slots,
+  // so deleting the backend row is allowed — the floor seed remains. The old model
+  // counted only `data().length` (== 1) and wrongly refused (a UI Delete the model
+  // then silently no-op'd).
+  test('allows deleting a backend row while an unsynced seed floor is open (B-1)', async () => {
+    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID) // floor seed open, not in the list
+    const removeSpy = vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem(NB_ID, 'One backend row')])
+
+    await deleteNotebookAction(NB_ID)
+
+    // The floor seed is the kept slot, so the backend row is deletable.
+    expect(removeSpy).toHaveBeenCalledWith(NB_ID)
+    expect(peek(notebookListResource.data)).toEqual([])
+  })
+
+  // TARDIS-167 №23 contract A: deleting the seed leaves a durable tombstone so
+  // boot never resurrects it.
+  test('tombstones the seed when the seed notebook is deleted', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    // A second row so the B-1 guard allows deleting the seed.
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(SEED_ID, 'Welcome')])
+
+    await deleteNotebookAction(SEED_ID)
+
+    expect(await isSeedTombstoned()).toBe(true)
+    expect(peek(notebookListResource.data)).toEqual([listItem('keep', 'Keep me')])
+  })
+
+  test('does not tombstone when a non-seed notebook is deleted', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Regular')])
+
+    await deleteNotebookAction(NB_ID)
+
+    expect(await isSeedTombstoned()).toBe(false)
+  })
+
+  // A stale client deleting an already-deleted notebook gets 404; that is an
+  // idempotent success, not a "Delete failed" error.
+  test('treats a 404 as an idempotent success and still tombstones the seed', async () => {
+    const SEED_ID = '99999999-9999-4999-8999-999999999999'
+    vi.spyOn(notebookModel, 'resolveDemoNotebookId').mockResolvedValue(SEED_ID)
+    vi.spyOn(notebookApi, 'remove').mockRejectedValue(
+      new NotFoundError('NOTEBOOK_NOT_FOUND', 'Notebook not found'),
+    )
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(SEED_ID, 'Welcome')])
+
+    // Resolves (no throw) — the dialog must NOT show a failure.
+    await expect(deleteNotebookAction(SEED_ID)).resolves.toBeUndefined()
+    // Row stays removed and the seed is tombstoned.
+    expect(peek(notebookListResource.data)).toEqual([listItem('keep', 'Keep me')])
+    expect(await isSeedTombstoned()).toBe(true)
   })
 })
 
@@ -422,16 +622,18 @@ describe('startNotebookListSync (refresh on account change)', () => {
     userAtom.set(null)
   })
 
-  test('resets and refetches the list when the account changes within a session', async () => {
+  test('resets and refetches the list on a true account SWITCH (B after A)', async () => {
     userAtom.set(ALICE)
     stop = startNotebookListSync()
     resetSpy.mockClear()
     retrySpy.mockClear()
 
-    userAtom.set(BOB) // switch account
+    userAtom.set(BOB) // switch account (A → B, no null between)
     await new Promise((resolve) => setTimeout(resolve))
 
-    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched.
+    // Alice's editor slot and cached rows are dropped, then Bob's list is fetched
+    // (the sidebar never unmounted across the switch, so its hot resource keeps
+    // Alice's rows and won't refetch on its own — this retry refreshes it).
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).toHaveBeenCalledTimes(1)
@@ -445,7 +647,7 @@ describe('startNotebookListSync (refresh on account change)', () => {
     )
   })
 
-  test('does not refetch on the first sign-in null → user (sidebar fetches on its own) — №7', async () => {
+  test('does NOT refetch on the first sign-in null → user (sidebar re-subscribes and fetches) — №7', async () => {
     userAtom.set(null)
     stop = startNotebookListSync()
     resetSpy.mockClear()
@@ -455,8 +657,9 @@ describe('startNotebookListSync (refresh on account change)', () => {
     await new Promise((resolve) => setTimeout(resolve))
 
     // The slot is reset for the new owner and stale rows dropped, but the explicit
-    // retry is skipped: the sidebar's own subscription fetches after navigation,
-    // so an extra retry here would double-fetch GET /notebooks (TARDIS-167 №7).
+    // retry is skipped: NotebooksGroup unmounted while signed out, so on sign-in it
+    // re-subscribes and the resource's own lazy fetch is the SINGLE source.
+    // Retrying here too is the post-login double GET /notebooks (TARDIS-167 №7).
     expect(slotMock.resetSlotToFloorForAccountChange).toHaveBeenCalledTimes(1)
     expect(resetSpy).toHaveBeenCalledTimes(1)
     expect(retrySpy).not.toHaveBeenCalled()
