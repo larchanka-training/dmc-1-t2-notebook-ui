@@ -86,13 +86,22 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
   const finish = wrap(() => finishThinkingAction())
   const fail = wrap(() => failThinkingAction())
 
-  const result = await wrap(generator(prompt, onProgress))
-  if (result.incomplete) {
-    // The model never produced runnable code — surface the failure in the
-    // ThinkingBlock (with its Dismiss action) and insert nothing.
+  try {
+    const result = await wrap(generator(prompt, onProgress))
+    if (result.incomplete) {
+      // The model never produced runnable code — surface the failure in the
+      // ThinkingBlock (with its Dismiss action) and insert nothing.
+      fail()
+      return
+    }
+    finish()
+    insertCell(result.code)
+  } catch (err) {
+    // An engine-level throw (WebGPU loss, OOM, …) is NOT a clean "incomplete":
+    // without this the ThinkingBlock would hang forever on "Thinking…" with a
+    // dead Stop button. Surface it as a failure so the block resolves, then
+    // rethrow so `agentSendInBrowserAction.error()` still reflects it.
     fail()
-    return
+    throw err
   }
-  finish()
-  insertCell(result.code)
 }, 'notebook.agentChat.sendInBrowser').extend(withAsync())

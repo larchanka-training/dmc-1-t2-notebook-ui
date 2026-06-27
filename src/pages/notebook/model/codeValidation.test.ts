@@ -70,4 +70,18 @@ describe('detectSandboxViolations', () => {
   test('returns nothing for unparseable code (handled by isParseableJs)', () => {
     expect(detectSandboxViolations('const a = document.createElement(')).toEqual([])
   })
+
+  test('does NOT flag a user-declared local that shadows a forbidden global', () => {
+    // A local `document`/`fetch` binding is sandbox-safe — it is not the host API.
+    expect(
+      detectSandboxViolations('const document = { id: 1 }; console.log(document.id);'),
+    ).toEqual([])
+    expect(detectSandboxViolations('function fetch(x) { return x; } fetch(1);')).toEqual([])
+    expect(detectSandboxViolations('const f = (document) => document.x; f({ x: 1 });')).toEqual([])
+  })
+
+  test('still flags a real reference to the forbidden global', () => {
+    // Sanity: shadow-skip must not blind the detector to genuine host use.
+    expect(detectSandboxViolations('const el = document.body;')).toEqual(['document'])
+  })
 })

@@ -75,14 +75,83 @@ export function detectSandboxViolations(code: string): string[] {
   } catch {
     return []
   }
+  // Pass 1: collect every name the code BINDS locally (declarations, params,
+  // function/class names). A user who declares their own `document`/`fetch`
+  // shadows the host global and is sandbox-safe, so such names must never be
+  // flagged — not at the binding site and not where they are later used. Without
+  // this we'd false-flag `const document = {}; document.id` and fire a needless
+  // repair pass. Single flat set (no nested-scope tracking): for THIS detector
+  // — “did the model reach for the real host API” — a shadow anywhere means the
+  // name isn't the host global, which is the safe call.
+  const declared = new Set<string>()
+  collectBindings(ast, declared)
+
   const found = new Set<string>()
-  visit(ast, found)
+  visit(ast, found, declared)
   return [...found].sort()
 }
 
-function visit(value: unknown, found: Set<string>): void {
+// Pass 1 walker: record bound identifier names without flagging anything.
+function collectBindings(value: unknown, declared: Set<string>): void {
   if (Array.isArray(value)) {
-    for (const item of value) visit(item, found)
+    for (const item of value) collectBindings(item, declared)
+    return
+  }
+  if (!value || typeof value !== 'object') return
+  const node = value as AstNode
+  if (typeof node.type !== 'string') return
+
+  if (node.type === 'VariableDeclarator') addBoundNames(node.id, declared)
+  if (
+    node.type === 'FunctionDeclaration' ||
+    node.type === 'FunctionExpression' ||
+    node.type === 'ArrowFunctionExpression'
+  ) {
+    if (node.id) addBoundNames(node.id, declared)
+    for (const param of (node.params as unknown[]) ?? []) addBoundNames(param, declared)
+  }
+  if (node.type === 'CatchClause' && node.param) addBoundNames(node.param, declared)
+  if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
+    const id = node.id as AstNode | undefined
+    if (id?.type === 'Identifier') declared.add(id.name as string)
+  }
+
+  for (const key in node) {
+    if (key === 'type') continue
+    collectBindings(node[key], declared)
+  }
+}
+
+// Extract the identifier names bound by a (possibly destructuring) pattern.
+function addBoundNames(pattern: unknown, declared: Set<string>): void {
+  if (!pattern || typeof pattern !== 'object') return
+  const node = pattern as AstNode
+  switch (node.type) {
+    case 'Identifier':
+      declared.add(node.name as string)
+      return
+    case 'ArrayPattern':
+      for (const el of (node.elements as unknown[]) ?? []) addBoundNames(el, declared)
+      return
+    case 'ObjectPattern':
+      for (const prop of (node.properties as unknown[]) ?? []) {
+        const p = prop as AstNode
+        // `{ a }` / `{ a: b }` bind the VALUE; `...rest` binds its argument.
+        addBoundNames(p.type === 'RestElement' ? p.argument : p.value, declared)
+      }
+      return
+    case 'AssignmentPattern':
+      addBoundNames(node.left, declared)
+      return
+    case 'RestElement':
+      addBoundNames(node.argument, declared)
+      return
+  }
+}
+
+function visit(value: unknown, found: Set<string>, declared: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) visit(item, found, declared)
     return
   }
   if (!value || typeof value !== 'object') return
@@ -91,16 +160,17 @@ function visit(value: unknown, found: Set<string>): void {
 
   if (node.type === 'Identifier') {
     const name = node.name as string
-    if (FORBIDDEN_GLOBALS.has(name)) found.add(name)
+    // Flag only a reference to the REAL host global — never a locally-bound name.
+    if (FORBIDDEN_GLOBALS.has(name) && !declared.has(name)) found.add(name)
     return
   }
   if (node.type === 'MemberExpression') {
-    visit(node.object, found)
+    visit(node.object, found, declared)
     // A non-computed property (`x.getContext`) is a method name, not a global
     // reference — flag it only against FORBIDDEN_METHODS. A computed property
     // (`x[expr]`) is a real expression, so recurse into it normally.
     if (node.computed) {
-      visit(node.property, found)
+      visit(node.property, found, declared)
     } else {
       const prop = node.property as AstNode | undefined
       if (prop?.type === 'Identifier' && FORBIDDEN_METHODS.has(prop.name as string)) {
@@ -112,12 +182,12 @@ function visit(value: unknown, found: Set<string>): void {
   // A non-computed object-property key (`{ document: 1 }`) is not a reference;
   // skip the key, inspect the value.
   if (node.type === 'Property' && node.computed !== true) {
-    visit(node.value, found)
+    visit(node.value, found, declared)
     return
   }
 
   for (const key in node) {
     if (key === 'type') continue
-    visit(node[key], found)
+    visit(node[key], found, declared)
   }
 }

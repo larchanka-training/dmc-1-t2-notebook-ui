@@ -603,11 +603,18 @@ const TEXT_CODECS_BOOTSTRAP = `(() => {
  * cloneable types (Array / Map / Set / Date / RegExp / ArrayBuffer + views) and
  * Error objects; throws on functions / symbols.
  *
- * Two deliberate deviations from the platform: the thrown value is a plain Error
- * whose `.name` is set to 'DataCloneError' (QuickJS has no DOMException, so a
- * cell can match on `e.name` but not `instanceof DOMException`); and host-only
- * types absent from the VM (Blob / File / ImageData) do not exist here, so any
- * unrecognised object is cloned as a plain `{}` of its OWN ENUMERABLE keys.
+ * Deliberate deviations from the platform (acceptable for the notebook sandbox):
+ *  - the thrown value is a plain Error whose `.name` is 'DataCloneError' (QuickJS
+ *    has no DOMException, so a cell can match on `e.name` but not
+ *    `instanceof DOMException`);
+ *  - host-only types absent from the VM (Blob / File / ImageData) do not exist
+ *    here, so any unrecognised object is cloned as a plain `{}` of its OWN
+ *    ENUMERABLE keys;
+ *  - ArrayBuffer / typed-array views are NOT registered in `seen`, so two views
+ *    onto the SAME buffer clone to two independent buffers (the platform keeps
+ *    them aliased). Edge fidelity only — not worth the extra bookkeeping here;
+ *  - `AggregateError` is not in ERROR_CTORS, so it flattens to `Error` and drops
+ *    `.errors`.
  */
 const STRUCTURED_CLONE_BOOTSTRAP = `(() => {
   const UNCLONEABLE = "Failed to execute 'structuredClone': value could not be cloned."
