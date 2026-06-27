@@ -9,7 +9,8 @@ export {
   SESSION_STORAGE_KEYS,
   type SessionUser,
 } from './model/session'
-// NOTE: `startSessionCrossTabSync` is deliberately NOT re-exported here. It
+export { authStatusAtom, type AuthStatus } from './model/authStatus'
+// NOTE: `startSessionCrossTabSync` is deliberately NOT re-exported here.
 // imports `@/setup` (which calls `clearStack()` at import time); pulling that
 // into the widely-imported session barrel would transitively run `clearStack()`
 // in every test that touches `@/entities/session` and break the shared

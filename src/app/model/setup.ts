@@ -7,6 +7,7 @@ import {
   accessTokenAtom,
   refreshTokenAtom,
   userAtom,
+  authStatusAtom,
   SESSION_STORAGE_KEYS,
   type SessionUser,
 } from '@/entities/session'
@@ -148,8 +149,9 @@ rootFrame.run(async () => {
     // The feature-demo id is derived from user.id. On the login page there is no
     // user yet, so starting the notebook slot would bind autosave/remoteSync to
     // the legacy floor id. The userAtom subscription in startNotebookListSync boots
-    // the slot after sign-in.
-    if (userAtom() === null) return
+    // the slot after sign-in. Gate on the single derived auth status (anything but
+    // 'authenticated' — anonymous or a still-pending restore — skips slot boot).
+    if (authStatusAtom() !== 'authenticated') return
     // Server-reconcile BEFORE loading the slot (TARDIS-167 №23 bootstrap step 4b):
     // when local storage is empty (fresh device), pull the account's newest
     // notebook into IndexedDB and tombstone the seed if it was deleted elsewhere,

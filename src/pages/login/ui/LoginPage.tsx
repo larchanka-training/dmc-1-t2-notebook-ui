@@ -1,12 +1,12 @@
 import { useEffect } from 'react'
 import { urlAtom } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { accessTokenAtom, userAtom } from '@/entities/session'
+import { authStatusAtom } from '@/entities/session'
 import { LoginForm } from '@/features/auth'
 import { appPath } from '@/shared/lib/paths'
 
 const LoginPage = reatomComponent(() => {
-  const isAuthenticated = accessTokenAtom() !== null && userAtom() !== null
+  const isAuthenticated = authStatusAtom() === 'authenticated'
   const rawFrom = urlAtom().searchParams.get('from')
   // #1 — reject protocol-relative URLs (//evil.com) which pass startsWith('/')
   // but navigate to an external origin via window.location.replace.

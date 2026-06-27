@@ -4,7 +4,7 @@ import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { userAtom } from '@/entities/session'
+import { authStatusAtom, userAtom } from '@/entities/session'
 import { OTP_EXPIRED_CODE, requestOtpAction, verifyOtpAction } from '../model/auth'
 import {
   devOtpDataAtom,
@@ -142,7 +142,7 @@ export const LoginForm = reatomComponent(() => {
   })
 
   const user = userAtom()
-  if (user) {
+  if (authStatusAtom() === 'authenticated' && user) {
     return (
       <div className="w-full max-w-sm space-y-4 text-center">
         <h1 className="text-2xl font-semibold">Welcome, {user.displayName ?? user.email}</h1>
