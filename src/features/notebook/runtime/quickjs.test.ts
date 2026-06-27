@@ -865,6 +865,18 @@ describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
     expect(r.status).toBe('error')
     expect(r.items.some((it) => it.type === 'error')).toBe(true)
   })
+
+  test('TextDecoder maps malformed UTF-8 to the replacement char U+FFFD', async () => {
+    // 0x80 is a lone continuation byte; [0xE2,0x82] is a truncated 3-byte head.
+    // Both are invalid — the WHATWG decoder emits U+FFFD (65533) for each, with
+    // the surrounding ASCII ('A', 'B') untouched.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0x41, 0x80, 0x42, 0xe2, 0x82]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65,65533,66,65533' })
+  })
 })
 
 describe('kernel.run — structuredClone', () => {
