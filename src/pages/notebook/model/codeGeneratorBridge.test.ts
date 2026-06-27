@@ -28,4 +28,16 @@ describe('IN_BROWSER_SYSTEM_PROMPT', () => {
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('ONLY the JavaScript code')
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('no markdown code fences')
   })
+
+  test('tells the model to degrade gracefully instead of faking missing APIs', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('HARD CONSTRAINTS')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('ReferenceError')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('DO NOT call or fake those APIs')
+  })
+
+  test('puts the hard constraints after the capabilities (trailing weight)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT.indexOf('HARD CONSTRAINTS')).toBeGreaterThan(
+      IN_BROWSER_SYSTEM_PROMPT.indexOf('display({'),
+    )
+  })
 })
