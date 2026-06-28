@@ -589,11 +589,15 @@ const TEXT_CODECS_BOOTSTRAP = `(() => {
       let i = 0
       while (i < bytes.length) {
         const b0 = bytes[i++]
-        let cp, extra
+        let cp, extra, min
         if (b0 < 0x80) { out += String.fromCharCode(b0); continue }
-        else if ((b0 & 0xe0) === 0xc0) { cp = b0 & 0x1f; extra = 1 }
-        else if ((b0 & 0xf0) === 0xe0) { cp = b0 & 0x0f; extra = 2 }
-        else if ((b0 & 0xf8) === 0xf0) { cp = b0 & 0x07; extra = 3 }
+        // 'min' is the smallest code point this byte-length may legitimately
+        // encode; anything below it is an OVERLONG form and must be rejected
+        // (TARDIS-168 M3, WHATWG UTF-8). A 0xC0/0xC1 lead byte yields min 0x80
+        // with a value below it, so it is rejected by the min check downstream.
+        else if ((b0 & 0xe0) === 0xc0) { cp = b0 & 0x1f; extra = 1; min = 0x80 }
+        else if ((b0 & 0xf0) === 0xe0) { cp = b0 & 0x0f; extra = 2; min = 0x800 }
+        else if ((b0 & 0xf8) === 0xf0) { cp = b0 & 0x07; extra = 3; min = 0x10000 }
         else { out += '\ufffd'; continue }
         let ok = true
         for (let k = 0; k < extra; k++) {
@@ -601,7 +605,11 @@ const TEXT_CODECS_BOOTSTRAP = `(() => {
           cp = (cp << 6) | (bytes[i] & 0x3f)
           i++
         }
-        if (!ok || cp > 0x10ffff) { out += '\ufffd'; continue }
+        // Reject (to U+FFFD): truncated continuation, overlong encoding, the
+        // lone-surrogate range (0xD800-0xDFFF), and anything past U+10FFFF.
+        if (!ok || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+          out += '\ufffd'; continue
+        }
         if (cp >= 0x10000) {
           cp -= 0x10000
           out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))

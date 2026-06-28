@@ -897,6 +897,39 @@ describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
     expect(r.status).toBe('done')
     expect(r.items).toContainEqual({ type: 'stdout', text: '65,65533,66,65533' })
   })
+
+  test('TextDecoder rejects an overlong encoding (overlong NUL) as U+FFFD (M3)', async () => {
+    // 0xC0 0x80 is the overlong 2-byte form of U+0000. A spec decoder must NOT
+    // accept it as NUL — the computed code point (0) is below the 2-byte minimum
+    // (0x80), so the whole sequence collapses to a single U+FFFD (TARDIS-168 M3).
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xc0, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
+
+  test('TextDecoder rejects a UTF-8-encoded surrogate as U+FFFD (M3)', async () => {
+    // 0xED 0xA0 0x80 decodes to U+D800, a lone surrogate. WHATWG forbids it —
+    // the decoder must emit U+FFFD instead of a raw surrogate code unit.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xed, 0xa0, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
+
+  test('TextDecoder rejects a code point above U+10FFFF as U+FFFD (M3)', async () => {
+    // 0xF5 0x80 0x80 0x80 would decode to U+140000, beyond the Unicode range.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xf5, 0x80, 0x80, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
 })
 
 describe('kernel.run — structuredClone', () => {
