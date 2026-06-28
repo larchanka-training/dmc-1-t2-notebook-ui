@@ -17,6 +17,16 @@ import { runInBrowserGeneration } from './inBrowserThinking'
 export const IN_BROWSER_MAX_TOKENS = 4096
 export const IN_BROWSER_THINK_TOKEN_BUDGET = 2048
 
+// Sampling defaults for in-browser code generation (TARDIS-168 C2). The bridge
+// passes these to every `chat.completions.create`. A prompt alone can't stop a
+// small quantised model from collapsing into a self-confirming reasoning loop
+// ("looks good. yes, that works. all set." forever) on a trivial task — that is
+// a SAMPLING pathology, fixed by penalising repetition. Low temperature keeps
+// codegen deterministic; the repetition/frequency penalties break the loop.
+export const IN_BROWSER_TEMPERATURE = 0.3
+export const IN_BROWSER_REPETITION_PENALTY = 1.15
+export const IN_BROWSER_FREQUENCY_PENALTY = 0.7
+
 // Result of one in-browser generation. Reasoning models (DeepSeek-R1-Distill)
 // emit a `<think>…</think>` stream before the code; the bridge splits it so the
 // notebook only ever inserts `code`, surfaces `thinking` live, and can refuse to

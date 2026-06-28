@@ -132,6 +132,9 @@ export {
   inBrowserGenerateErrorsAtom,
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
+  IN_BROWSER_TEMPERATURE,
+  IN_BROWSER_REPETITION_PENALTY,
+  IN_BROWSER_FREQUENCY_PENALTY,
 } from './model/codeGenerator'
 export type {
   InBrowserGenerator,

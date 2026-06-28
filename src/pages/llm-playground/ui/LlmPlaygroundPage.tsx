@@ -98,7 +98,10 @@ const LocalPanel = reatomComponent(() => {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Cpu className="size-4 shrink-0 text-muted-foreground" />
+          {/* C4 (TARDIS-168): green when a model is loaded/ready, grey otherwise. */}
+          <Cpu
+            className={cn('size-4 shrink-0', engine ? 'text-green-600' : 'text-muted-foreground')}
+          />
           <Select
             value={modelId}
             onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
@@ -123,6 +126,12 @@ const LocalPanel = reatomComponent(() => {
                         >
                           {m.id}
                         </span>
+                        {/* C3 (TARDIS-168): mark chain-of-thought models. */}
+                        {m.reasoning && (
+                          <span className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                            thinking
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
                         {m.size}

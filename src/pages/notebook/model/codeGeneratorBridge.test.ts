@@ -181,6 +181,21 @@ describe('buildGenerator — sandbox auto-repair (TARDIS-168)', () => {
     expect(result.code).toBe('const a = 1;')
   })
 
+  test('passes sampling defaults (temperature + penalties) to create() (C2)', async () => {
+    const { engine, createMock } = makeMultiResponseEngine(['const a = 1;'])
+    await buildGenerator(engine as never)('make a constant')
+
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream: true,
+        max_tokens: 4096,
+        temperature: 0.3,
+        frequency_penalty: 0.7,
+        repetition_penalty: 1.15,
+      }),
+    )
+  })
+
   test('tags the incomplete reason as violations after a failed repair (M2)', async () => {
     const { engine } = makeMultiResponseEngine([
       "const c=document.createElement('canvas');",
@@ -228,16 +243,22 @@ describe('buildGenerator — stream draining (TARDIS-168)', () => {
   test('on a runaway reasoning loop, interrupts ONCE and still drains the stream', async () => {
     // A long unclosed <think> that blows the token budget: every chunk keeps the
     // think open, so the budget guard trips. The fix must NOT break out of the
-    // loop — it must let the stream finish so the lock is released.
-    const chunks = Array.from({ length: 4000 }, () => '<think>loop ')
-    const { engine, state } = makeFakeEngine(chunks)
+    // loop — it must let the stream finish so the lock is released. The budget
+    // gate is reasoning-only (C1), so load a reasoning model id.
+    loadedModelIdAtom.set('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')
+    try {
+      const chunks = Array.from({ length: 4000 }, () => '<think>loop ')
+      const { engine, state } = makeFakeEngine(chunks)
 
-    const result = await buildGenerator(engine as never)('loop forever')
+      const result = await buildGenerator(engine as never)('loop forever')
 
-    expect(result.incomplete).toBe(true) // no usable code
-    expect(result.reason).toBe('degenerate') // classified for the UI hint (M2)
-    expect(state.interruptCalls).toBe(1) // interrupted exactly once, not per-chunk
-    expect(state.released).toBe(true) // CRITICAL: lock released → next run won't deadlock
+      expect(result.incomplete).toBe(true) // no usable code
+      expect(result.reason).toBe('degenerate') // classified for the UI hint (M2)
+      expect(state.interruptCalls).toBe(1) // interrupted exactly once, not per-chunk
+      expect(state.released).toBe(true) // CRITICAL: lock released → next run won't deadlock
+    } finally {
+      loadedModelIdAtom.set(null)
+    }
   })
 
   test('destroys a wedged engine when the stream never ends after interrupt (H6)', async () => {
@@ -265,7 +286,8 @@ describe('buildGenerator — stream draining (TARDIS-168)', () => {
         unload,
       }
       engineAtom.set(engine as never)
-      loadedModelIdAtom.set('some-model')
+      // Budget gate is reasoning-only (C1) — use a reasoning model id.
+      loadedModelIdAtom.set('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')
 
       const run = buildGenerator(engine as never)('loop forever')
       // Let the 2100 buffered chunks drain (microtasks), tripping the budget and

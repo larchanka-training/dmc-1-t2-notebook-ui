@@ -6,7 +6,13 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export type LoadProgress = { progress: number; text: string }
 
-export type ModelEntry = { id: string; size: string }
+// `reasoning: true` marks a chain-of-thought model (it streams a <think>…</think>
+// monologue before the answer). The flag is a CURATED property, not something
+// web-llm exposes: ModelRecord has no reasoning field in @mlc-ai/web-llm 0.2.84,
+// so we maintain it by id here. It drives the think-token budget + reasoning cap
+// (only meaningful for these models) and the "thinking" picker badge (TARDIS-168
+// C1/C3).
+export type ModelEntry = { id: string; size: string; reasoning?: boolean }
 
 export const MODEL_CATALOG: ModelEntry[] = [
   { id: 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC', size: '~1 GB' },
@@ -19,9 +25,21 @@ export const MODEL_CATALOG: ModelEntry[] = [
   { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', size: '~1.82 GB' },
   { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC', size: '~2.2 GB' },
   { id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', size: '~4.5 GB' },
-  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB', reasoning: true },
   { id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', size: '~1 GB' },
 ]
+
+// Curated set of reasoning-model ids, derived from the catalog flag. Used to
+// decide whether to apply the think-token budget / reasoning prompt cap and to
+// show the "thinking" badge (TARDIS-168 C1/C3).
+export const REASONING_MODEL_IDS = new Set(
+  MODEL_CATALOG.filter((m) => m.reasoning).map((m) => m.id),
+)
+
+/** Whether a model id is a curated reasoning (chain-of-thought) model. */
+export function isReasoningModel(id: string | null | undefined): boolean {
+  return !!id && REASONING_MODEL_IDS.has(id)
+}
 
 export const AVAILABLE_MODELS = MODEL_CATALOG.map((m) => m.id)
 

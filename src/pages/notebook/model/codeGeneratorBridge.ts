@@ -11,8 +11,11 @@ import {
   type InBrowserIncompleteReason,
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
+  IN_BROWSER_TEMPERATURE,
+  IN_BROWSER_REPETITION_PENALTY,
+  IN_BROWSER_FREQUENCY_PENALTY,
 } from '@/features/notebook'
-import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
+import { engineAtom, loadedModelIdAtom, isReasoningModel } from '@/features/web-llm'
 import { splitThinkAndCode } from './reasoningParser'
 import { isParseableJs, detectSandboxViolations } from './codeValidation'
 
@@ -46,11 +49,18 @@ async function streamOnce(
   messages: ChatMessage[],
   onProgress: ((p: { thinking: string; tokens: number }) => void) | undefined,
   tokenOffset: number,
+  isReasoning: boolean,
 ): Promise<{ raw: string; tokens: number }> {
   const stream = await engine.chat.completions.create({
     messages,
     stream: true,
     max_tokens: IN_BROWSER_MAX_TOKENS,
+    // Sampling defaults (TARDIS-168 C2): low temperature for deterministic
+    // codegen + repetition/frequency penalties that break the self-confirming
+    // reasoning loop a prompt alone can't stop.
+    temperature: IN_BROWSER_TEMPERATURE,
+    frequency_penalty: IN_BROWSER_FREQUENCY_PENALTY,
+    repetition_penalty: IN_BROWSER_REPETITION_PENALTY,
   })
 
   let raw = ''
@@ -102,8 +112,12 @@ async function streamOnce(
       onProgress?.({ thinking: partial.thinking, tokens: tokenOffset + tokens })
     }
     // Kill a runaway reasoning loop: still thinking, no code, over budget. Raise
-    // the interrupt once (never per chunk) and let the loop keep draining.
-    if (!budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
+    // the interrupt once (never per chunk) and let the loop keep draining. Only
+    // reasoning models open a <think> block, so the budget gate is a no-op for
+    // others; we additionally gate on `isReasoning` to make that explicit and
+    // avoid clipping a non-reasoning model that legitimately emits a literal
+    // "<think>" string in its output (TARDIS-168 C1).
+    if (isReasoning && !budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
       budgetHit = true
       void engine.interruptGenerate()
     }
@@ -181,6 +195,10 @@ function reportIncomplete(args: {
 export function buildGenerator(
   engine: NonNullable<ReturnType<typeof engineAtom>>,
 ): InBrowserGenerator {
+  // Resolve once per build: the think-token budget applies only to reasoning
+  // models (TARDIS-168 C1). The engine atom is rebound on every model load, so
+  // the id read here matches the engine this generator was built for.
+  const isReasoning = isReasoningModel(loadedModelIdAtom())
   return async (prompt, onProgress) => {
     // Pass 1.
     const first = await streamOnce(
@@ -191,6 +209,7 @@ export function buildGenerator(
       ],
       onProgress,
       0,
+      isReasoning,
     )
     const { thinking, code, thinkOpen } = splitThinkAndCode(first.raw)
 
@@ -218,6 +237,7 @@ export function buildGenerator(
           ],
           onProgress,
           first.tokens,
+          isReasoning,
         )
         const repaired = splitThinkAndCode(second.raw)
         // Accept the retry only if it is a real improvement: parseable and no

@@ -50,7 +50,12 @@ export const NotebookLlmBar = reatomComponent(() => {
   return (
     <div className="border-b border-border bg-muted/30 px-6 py-2.5" data-test-id="llm-bar">
       <div className="flex items-center gap-3">
-        <Cpu className="size-4 shrink-0 text-muted-foreground" />
+        {/* C4 (TARDIS-168): green when a model is loaded and ready, grey while
+            loading or when none is loaded. `engine !== null` is the readiness
+            signal (it is cleared at the start of every load). */}
+        <Cpu
+          className={cn('size-4 shrink-0', engine ? 'text-green-600' : 'text-muted-foreground')}
+        />
         <Select
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
@@ -74,6 +79,8 @@ export const NotebookLlmBar = reatomComponent(() => {
                       <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}
                       </span>
+                      {/* C3 (TARDIS-168): mark chain-of-thought models. */}
+                      {m.reasoning && <Cpu className={cn('size-2 shrink-0', 'text-green-600')} />}
                     </span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">{m.size}</span>
                   </span>
