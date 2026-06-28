@@ -17,6 +17,7 @@ import {
   Trash2,
   CircleHelp,
   BookOpen,
+  Settings,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -63,7 +64,7 @@ import {
   SidebarMenuItem,
 } from '@/shared/ui/sidebar'
 import { cn } from '@/shared/lib/cn'
-import { LOGIN_PATH } from '@/shared/lib/paths'
+import { LOGIN_PATH, SETTINGS_PATH } from '@/shared/lib/paths'
 
 // Up to two initials for the identity-menu avatar: first letters of the first
 // two name words, else the first two characters of the label.
@@ -133,6 +134,11 @@ const AuthSection = reatomComponent(() => {
         align="start"
         className="w-[calc(var(--anchor-width)-12px)] min-w-0"
       >
+        <DropdownMenuItem render={<a href={SETTINGS_PATH} />}>
+          <Settings className="size-4" />
+          <span className="text-sm">Settings</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={wrap(async () => logoutAction())}>
           <LogOut className="size-4" />
           <div className="flex flex-col">
