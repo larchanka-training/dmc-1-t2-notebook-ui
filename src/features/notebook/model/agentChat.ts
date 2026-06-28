@@ -5,6 +5,7 @@ import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
 import { codeGeneratorAtom } from './codeGenerator'
+import { runInBrowserGeneration, thinkingSessionAtom } from './inBrowserThinking'
 
 // The cell id after which to insert when the agent responds.
 // undefined means append at the end of the notebook.
@@ -57,16 +58,33 @@ export const agentSendAction = action(async (prompt: string) => {
 export const agentSendInBrowserAction = action(async (prompt: string) => {
   const generator = codeGeneratorAtom()
   if (!generator) return
+  // Bail BEFORE closing the dialog if a generation is already running: the
+  // single-flight guard would refuse this run anyway, and closing first would
+  // drop the user's prompt with no feedback. Keep the dialog open so they can
+  // retry once the active run finishes (TARDIS-168).
+  if (thinkingSessionAtom()?.phase === 'thinking') return
   const afterId = agentInsertAfterIdAtom()
 
-  const insertAndClose = wrap((code: string) => {
-    const newCell = addCell(afterId, 'code')
-    updateCellCode(newCell.id, code)
-    focusCell(newCell.id)
-    enterEdit(newCell.id)
-    agentChatOpenAtom.set(false)
-  })
+  // Close the dialog (and its blurred overlay) up front — unlike the Cloud tier,
+  // the in-browser run streams a live reasoning block into the NOTEBOOK flow, so
+  // the modal would otherwise sit on top of it (TARDIS-168). Both the live
+  // thinking and a failure are surfaced by the in-notebook ThinkingBlock, not
+  // the dialog, so there is nothing left for the modal to show.
+  agentChatOpenAtom.set(false)
 
-  const code = await wrap(generator(prompt))
-  insertAndClose(code)
+  // Agent tier: live reasoning block anchored after the insert target (or the
+  // notebook end when afterId is null). No per-cell error channel here — omitting
+  // onError makes the shared helper KEEP the failed block visible on an engine
+  // throw (its Dismiss action), instead of resolving to a per-row error. The
+  // helper's single-flight guard refuses a second concurrent run (TARDIS-168 H1).
+  await wrap(
+    runInBrowserGeneration(generator, prompt, afterId ?? null, {
+      onInsert: (code) => {
+        const newCell = addCell(afterId, 'code')
+        updateCellCode(newCell.id, code)
+        focusCell(newCell.id)
+        enterEdit(newCell.id)
+      },
+    }),
+  )
 }, 'notebook.agentChat.sendInBrowser').extend(withAsync())

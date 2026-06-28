@@ -289,6 +289,10 @@ export function NotebookCell({
                       disabled={!generatorLoaded || isGenerating}
                       onClick={onInBrowserGenerate}
                     >
+                      {/* While generating, this stays a spinner; the Stop
+                          control lives in the in-notebook ThinkingBlock right
+                          below this cell (TARDIS-168), so the toolbar doesn't
+                          duplicate it. */}
                       {isGenerating ? (
                         <Loader2 className="size-4.5 animate-spin" />
                       ) : (

@@ -53,14 +53,21 @@ import {
 import { lineNumbersAtom, outlineVisibleAtom } from '../model/notebookSettings'
 import { hasOutlineAtom } from '../model/outline'
 import { runCell, stopCell } from '../model/runtime'
-import { codeGeneratorAtom, generateAndInsertCodeAction } from '../model/codeGenerator'
+import {
+  codeGeneratorAtom,
+  generateAndInsertCodeAction,
+  inBrowserGeneratingCellIdAtom,
+  inBrowserGenerateErrorsAtom,
+} from '../model/codeGenerator'
 import {
   cloudGenerateAndInsertCodeAction,
   cloudGeneratingCellIdsAtom,
   cloudGenerateErrorsAtom,
 } from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
+import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
+import { ThinkingBlock } from './ThinkingBlock'
 import { RateLimitedError } from '@/shared/api/errors'
 import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
@@ -115,8 +122,10 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
   const isActive = activeCellIdAtom() === cell.id
   const mode = cellModeAtom()
   const hasGenerator = !!codeGeneratorAtom()
-  const isGenerating = !generateAndInsertCodeAction.ready()
-  const generateError = generateAndInsertCodeAction.error()
+  // Per-cell (TARDIS-168): the spinner/Stop and the error must show only on the
+  // row that is actually generating, not on every markdown cell.
+  const isGenerating = inBrowserGeneratingCellIdAtom() === cell.id
+  const generateError = inBrowserGenerateErrorsAtom().get(cell.id) ?? null
   const isCloudGenerating = cloudGeneratingCellIdsAtom().has(cell.id)
   const cloudGenerateError = cloudGenerateErrorsAtom().get(cell.id) ?? null
   // Note: search-match highlighting is subscribed inside CodeCellEditor (a thin
@@ -329,6 +338,9 @@ const CellInserter = reatomComponent<CellInserterProps>(({ afterId, variant = 'b
 export const NotebookView = reatomComponent(() => {
   const cells = cellsAtom()
   const showNotebookLoader = slotOpeningPhaseAtom() === 'remote-only'
+  // Live in-browser reasoning block (TARDIS-168). Anchored after a specific cell
+  // (`afterCellId`) or at the notebook end (`afterCellId === null`).
+  const thinking = thinkingSessionAtom()
 
   // Whether the outline pane actually occupies space right now: only on wide
   // layouts (≤1280px it is a floating drawer over a scrim, not a column), when
@@ -415,6 +427,13 @@ export const NotebookView = reatomComponent(() => {
                 <div className="w-full max-w-sm">
                   <CellInserter variant="empty" />
                 </div>
+                {/* Reasoning block when the agent is invoked on an empty notebook
+                    (afterCellId is always null here). */}
+                {thinking ? (
+                  <div className="mt-4 w-full text-left">
+                    <ThinkingBlock />
+                  </div>
+                ) : null}
                 <a
                   href={appPath('usage')}
                   className="mt-4 text-sm font-medium text-primary hover:underline"
@@ -443,10 +462,12 @@ export const NotebookView = reatomComponent(() => {
                             isLast={idx === cells.length - 1}
                           />
                         </SortableCell>
+                        {thinking?.afterCellId === cell.id ? <ThinkingBlock /> : null}
                         {idx < cells.length - 1 ? <CellInserter afterId={cell.id} /> : null}
                       </div>
                     ))}
 
+                    {thinking && thinking.afterCellId === null ? <ThinkingBlock /> : null}
                     <CellInserter afterId={cells[cells.length - 1].id} variant="end" />
                   </div>
                 </SortableContext>

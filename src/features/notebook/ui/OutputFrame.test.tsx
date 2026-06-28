@@ -16,6 +16,41 @@ describe('OutputFrame — sandbox hardening', () => {
     expect(srcDoc).toContain('img-src data: blob:')
   })
 
+  test('delivers user HTML as data (innerHTML), not inlined into the markup (M4)', () => {
+    // A model emitting `</main></body>` or a stray <script> must NOT be able to
+    // escape the #output-root wrapper and clobber the shell. The user HTML is
+    // carried as a JS string the shell assigns to root.innerHTML.
+    const evil =
+      '</main></body><script>parent.postMessage({kind:"iframe-resize",height:9999},"*")</script>'
+    const { container } = render(<OutputFrame html={evil} />)
+    const srcDoc = container.querySelector('iframe')!.getAttribute('srcdoc') ?? ''
+    // #output-root is emitted EMPTY in the markup (user html is not between the tags).
+    expect(srcDoc).toContain(
+      'id="output-root" style="padding:8px; font-family: system-ui, sans-serif;"></main>',
+    )
+    // The raw </main>/<script> sequences from the user are escaped (\u003c), so the
+    // HTML parser can't act on them; they live only inside the USER_HTML literal.
+    expect(srcDoc).not.toContain('</main></body><script>parent.postMessage')
+    expect(srcDoc).toContain('USER_HTML')
+  })
+
+  test('ignores a resize ping carrying the wrong nonce (M4)', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<OutputFrame html="<b>x</b>" />)
+      const iframe = container.querySelector('iframe')!
+      // A forged ping (re-executed user script guessing the message shape) with a
+      // bogus nonce must not move the frame height.
+      act(() => {
+        pingFrom(iframe, 300, 'not-the-real-nonce')
+        vi.advanceTimersByTime(20)
+      })
+      expect(iframe.style.height).toBe('80px') // MIN_HEIGHT, unchanged
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('keeps allow-scripts but never allow-same-origin', () => {
     const { container } = render(<OutputFrame html="<b>hi</b>" />)
     const sandbox = container.querySelector('iframe')!.getAttribute('sandbox') ?? ''
@@ -131,14 +166,22 @@ describe('OutputFrame — resize sizing', () => {
   })
 })
 
+/** Read the per-frame nonce the shell embedded in its srcdoc (TARDIS-168 M4). */
+function nonceOf(iframe: HTMLIFrameElement): string {
+  const srcDoc = iframe.getAttribute('srcdoc') ?? ''
+  return /const NONCE = "([^"]+)"/.exec(srcDoc)?.[1] ?? ''
+}
+
 /**
  * Dispatch a `iframe-resize` message that looks like it came from the given
  * iframe's content window (the component checks `event.source`). jsdom doesn't
  * let us set `source` via the MessageEvent ctor, so we patch it on the event.
+ * Carries the frame's real nonce so the parent accepts it (a forged ping with a
+ * wrong/absent nonce is dropped — see the M4 test).
  */
-function pingFrom(iframe: HTMLIFrameElement, height: number) {
+function pingFrom(iframe: HTMLIFrameElement, height: number, nonce = nonceOf(iframe)) {
   const event = new MessageEvent('message', {
-    data: { kind: 'iframe-resize', height },
+    data: { kind: 'iframe-resize', height, nonce },
   })
   Object.defineProperty(event, 'source', { value: iframe.contentWindow })
   window.dispatchEvent(event)

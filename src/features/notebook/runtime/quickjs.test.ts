@@ -44,6 +44,33 @@ describe('kernel.run — happy path', () => {
     expect(r.items).toContainEqual({ type: 'stdout', text: 'note' })
   })
 
+  test('kernel boots and installs every injected global (bootstrap smoke, M5)', async () => {
+    // The base64 / text-codec / structuredClone polyfills are in-VM bootstrap
+    // STRINGS eval'd at kernel start (they can't cross the emscripten boundary).
+    // A syntax error in any one throws from createKernel and takes down the WHOLE
+    // kernel — not just that helper — and the strings are invisible to
+    // ESLint/tsc. This guard fails loudly if a polyfill stops installing
+    // (TARDIS-168 M5).
+    // `console` is an object (its methods are functions); the rest are callables.
+    const globals: Array<[name: string, kind: string]> = [
+      ['console', 'object'],
+      ['display', 'function'],
+      ['btoa', 'function'],
+      ['atob', 'function'],
+      ['TextEncoder', 'function'],
+      ['TextDecoder', 'function'],
+      ['structuredClone', 'function'],
+    ]
+    const r = await runFresh(
+      `console.log([${globals.map(([g]) => `typeof ${g}`).join(',')}].join(","))`,
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({
+      type: 'stdout',
+      text: globals.map(([, kind]) => kind).join(','),
+    })
+  })
+
   test('top-level await is supported', async () => {
     const r = await runFresh('const v = await Promise.resolve(42); console.log(v)')
     expect(r.status).toBe('done')
@@ -437,6 +464,26 @@ describe('kernel.run — display() API', () => {
     expect(r.items.some((it) => it.type === 'image')).toBe(false)
   })
 
+  test('display({ type: "canvas", html }) is tolerated and renders as html', async () => {
+    // Models frequently hallucinate a `type: 'canvas'` with an `html` field;
+    // the runtime maps both near-misses onto the html case (TARDIS-168).
+    const r = await runFresh('display({ type: "canvas", html: "<canvas id=\\"c\\"></canvas>" })')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'html', html: '<canvas id="c"></canvas>' })
+  })
+
+  test('display({ type: "svg", html }) is tolerated and renders as html', async () => {
+    // Models also emit `type: 'svg'`; SVG is plain HTML content (TARDIS-168).
+    const r = await runFresh('display({ type: "svg", html: "<svg><circle r=\\"5\\"/></svg>" })')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'html', html: '<svg><circle r="5"/></svg>' })
+  })
+
+  test('display({ type: "html", html }) accepts the html field alias', async () => {
+    const r = await runFresh('display({ type: "html", html: "<b>y</b>" })')
+    expect(r.items).toContainEqual({ type: 'html', html: '<b>y</b>' })
+  })
+
   test('display() with an unknown shape is silently ignored', async () => {
     const r = await runFresh('display({ type: "weird", whatever: 1 }); console.log("after")')
     expect(r.status).toBe('done')
@@ -768,5 +815,204 @@ describe('kernel.run — trailing marker hardening (TARDIS-65)', () => {
     } finally {
       kernel.dispose()
     }
+  })
+})
+
+describe('kernel.run — base64 globals (btoa / atob)', () => {
+  test('btoa encodes ASCII to base64', async () => {
+    const r = await runFresh('console.log(btoa("hello"))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'aGVsbG8=' })
+  })
+
+  test('atob decodes base64 back to the original string', async () => {
+    const r = await runFresh('console.log(atob("aGVsbG8="))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'hello' })
+  })
+
+  test('btoa/atob round-trip is byte-exact for binary strings (incl. NUL)', async () => {
+    // The codec runs IN-VM, so binary strings with embedded \x00 (e.g. decoded
+    // PNG bytes) survive the round-trip — they never cross the host boundary.
+    // Compare in-cell and log the boolean plus the recovered byte values.
+    const r = await runFresh(
+      'const s = "\\x00\\xff\\x10ABC"; const back = atob(btoa(s));' +
+        ' console.log(back === s, [...back].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true 0,255,16,65,66,67' })
+  })
+
+  test('btoa coerces non-string arguments via ToString (browser semantics)', async () => {
+    // btoa(42) encodes "42" → "NDI=", matching the native global.
+    const r = await runFresh('console.log(btoa(42))')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'NDI=' })
+  })
+
+  test('btoa on a code point > 0xFF throws INSIDE the cell, not the host', async () => {
+    const r = await runFresh('btoa("\u2603")') // snowman — outside Latin-1
+    expect(r.status).toBe('error')
+    // Assert the SPECIFIC error (TG7): a bare "some error" would also pass if a
+    // broken bootstrap string threw a SyntaxError, masking a real regression.
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('InvalidCharacterError')
+  })
+
+  test('atob rejects a "=" in the middle instead of silently truncating', async () => {
+    // Forgiving-base64: a padding char mid-string is not in the alphabet — throw,
+    // do not decode just the prefix before it.
+    const r = await runFresh('atob("YQ==YQ==")')
+    expect(r.status).toBe('error')
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('InvalidCharacterError')
+  })
+
+  test('atob accepts forgiving trailing padding (length multiple of 4)', async () => {
+    // "aGk=" decodes to "hi"; the single trailing "=" is stripped, not rejected.
+    const r = await runFresh('console.log(atob("aGk="))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'hi' })
+  })
+
+  test('atob/btoa errors carry the platform error name (InvalidCharacterError)', async () => {
+    const r = await runFresh('try { atob("=") } catch (e) { console.log(e.name) }')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'InvalidCharacterError' })
+  })
+})
+
+describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
+  test('TextEncoder.encode produces UTF-8 bytes (multi-byte char)', async () => {
+    // '€' (U+20AC) encodes to E2 82 AC; 'A' to 41.
+    const r = await runFresh('console.log(Array.from(new TextEncoder().encode("A€")).join(","))')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65,226,130,172' })
+  })
+
+  test('TextEncoder().encoding is "utf-8" and result is a Uint8Array', async () => {
+    const r = await runFresh(
+      'const e = new TextEncoder(); console.log(e.encoding, e.encode("x") instanceof Uint8Array)',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'utf-8 true' })
+  })
+
+  test('TextDecoder.decode reverses the encoding (incl. surrogate pair)', async () => {
+    // U+1F600 (😀) is a 4-byte sequence — exercises astral round-trip.
+    const r = await runFresh(
+      'const s = "a€b😀"; const back = new TextDecoder().decode(new TextEncoder().encode(s)); console.log(back === s)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true' })
+  })
+
+  test('TextDecoder decodes a raw Uint8Array of UTF-8 bytes', async () => {
+    const r = await runFresh(
+      'console.log(new TextDecoder().decode(new Uint8Array([72, 105, 226, 130, 172])))',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'Hi€' })
+  })
+
+  test('TextDecoder rejects an unsupported encoding label', async () => {
+    const r = await runFresh('new TextDecoder("utf-16")')
+    expect(r.status).toBe('error')
+    // Specific error (TG7): the constructor throws RangeError per WHATWG, not a
+    // generic failure that a broken bootstrap would also produce.
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('RangeError')
+  })
+
+  test('TextDecoder maps malformed UTF-8 to the replacement char U+FFFD', async () => {
+    // 0x80 is a lone continuation byte; [0xE2,0x82] is a truncated 3-byte head.
+    // Both are invalid — the WHATWG decoder emits U+FFFD (65533) for each, with
+    // the surrounding ASCII ('A', 'B') untouched.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0x41, 0x80, 0x42, 0xe2, 0x82]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65,65533,66,65533' })
+  })
+
+  test('TextDecoder rejects an overlong encoding (overlong NUL) as U+FFFD (M3)', async () => {
+    // 0xC0 0x80 is the overlong 2-byte form of U+0000. A spec decoder must NOT
+    // accept it as NUL — the computed code point (0) is below the 2-byte minimum
+    // (0x80), so the whole sequence collapses to a single U+FFFD (TARDIS-168 M3).
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xc0, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
+
+  test('TextDecoder rejects a UTF-8-encoded surrogate as U+FFFD (M3)', async () => {
+    // 0xED 0xA0 0x80 decodes to U+D800, a lone surrogate. WHATWG forbids it —
+    // the decoder must emit U+FFFD instead of a raw surrogate code unit.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xed, 0xa0, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
+
+  test('TextDecoder rejects a code point above U+10FFFF as U+FFFD (M3)', async () => {
+    // 0xF5 0x80 0x80 0x80 would decode to U+140000, beyond the Unicode range.
+    const r = await runFresh(
+      'const out = new TextDecoder().decode(new Uint8Array([0xf5, 0x80, 0x80, 0x80]));' +
+        ' console.log([...out].map((c) => c.charCodeAt(0)).join(","))',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '65533' })
+  })
+})
+
+describe('kernel.run — structuredClone', () => {
+  test('deep-clones nested objects (mutating the clone does not touch the source)', async () => {
+    const r = await runFresh(
+      'const src = { a: { b: 1 } }; const c = structuredClone(src); c.a.b = 99;' +
+        ' console.log(src.a.b, c.a.b, c.a !== src.a)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: '1 99 true' })
+  })
+
+  test('clones Map, Set and Date by value', async () => {
+    const r = await runFresh(
+      'const m = new Map([["k", 1]]); const s = new Set([1, 2]); const d = new Date(0);' +
+        ' const c = structuredClone({ m, s, d });' +
+        ' console.log(c.m.get("k"), c.s.has(2), c.d.getTime(), c.m !== m)',
+    )
+    expect(r.items).toContainEqual({ type: 'stdout', text: '1 true 0 true' })
+  })
+
+  test('preserves cycles', async () => {
+    const r = await runFresh(
+      'const o = {}; o.self = o; const c = structuredClone(o); console.log(c.self === c, c !== o)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true true' })
+  })
+
+  test('throws on a value that cannot be cloned (a function)', async () => {
+    const r = await runFresh('structuredClone({ fn: () => 1 })')
+    expect(r.status).toBe('error')
+    // Specific error (TG7): the platform name is DataCloneError, asserted so a
+    // SyntaxError from a broken clone bootstrap can't pass as "some error".
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('DataCloneError')
+  })
+
+  test('an uncloneable value throws with the platform error name (DataCloneError)', async () => {
+    const r = await runFresh('try { structuredClone(() => 1) } catch (e) { console.log(e.name) }')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'DataCloneError' })
+  })
+
+  test('clones an Error, preserving name and message (not flattened to {})', async () => {
+    const r = await runFresh(
+      'const c = structuredClone(new TypeError("boom"));' +
+        ' console.log(c instanceof TypeError, c.name, c.message)',
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'stdout', text: 'true TypeError boom' })
   })
 })

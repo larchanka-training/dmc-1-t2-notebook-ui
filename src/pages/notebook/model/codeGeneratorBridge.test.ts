@@ -1,0 +1,358 @@
+import { describe, expect, test, vi } from 'vitest'
+import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
+import {
+  thinkingSessionAtom,
+  startThinkingAction,
+  requestStopAction,
+  finishThinkingAction,
+} from '@/features/notebook'
+import { IN_BROWSER_SYSTEM_PROMPT, buildGenerator } from './codeGeneratorBridge'
+
+describe('IN_BROWSER_SYSTEM_PROMPT', () => {
+  test('describes the QuickJS Web Worker sandbox', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('QuickJS')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('Web Worker')
+  })
+
+  test('forbids the unavailable browser/Node capabilities', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('NO DOM')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('fetch')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('import/require/export')
+  })
+
+  test('documents the display() API with the allowed image MIME types', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("display({ type: 'html'")
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("display({ type: 'image'")
+    for (const mime of ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']) {
+      expect(IN_BROWSER_SYSTEM_PROMPT).toContain(mime)
+    }
+  })
+
+  test('pins the only valid display() types and the value field (no type canvas)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("ONLY type 'html' or type 'image'")
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("there is no type 'canvas'")
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("'value' field")
+  })
+
+  test('never tells the model to refuse a drawing task (graphics go via display)', () => {
+    // Regression: a trailing "use only console.log" line made the model answer
+    // "Cannot render pie chart without DOM/canvas" instead of using display().
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain(
+      'Charts, graphics, canvas and visualizations ARE supported',
+    )
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('NEVER refuse a drawing task')
+    expect(IN_BROWSER_SYSTEM_PROMPT).not.toContain('Use only `console.log`')
+  })
+
+  test('still demands raw code with no markdown fences', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('ONLY the JavaScript code')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('no markdown code fences')
+  })
+
+  test('tells the model to degrade gracefully instead of faking missing APIs', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('HARD CONSTRAINTS')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('ReferenceError')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('DO NOT call or fake those APIs')
+  })
+
+  test('directs canvas/DOM drawing INTO the display() html string, not the cell', () => {
+    // The most common failure: a model writes document.createElement('canvas')
+    // in the cell (no DOM there) instead of inside the display() iframe.
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('INSIDE the display() html string')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('getContext')
+    // The drawing guidance is conditional now ("If the task needs to draw graphics"),
+    // so display() is not the default path (H7).
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('If the task needs to draw graphics')
+  })
+
+  test('defaults to plain output and reserves display() for explicit visual tasks (H7)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('By default, produce plain JavaScript')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('Call display() ONLY when the task explicitly asks')
+  })
+
+  test('caps reasoning so small models stop looping on trivial tasks (H7)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('at most 3 short paragraphs')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('stop reasoning and emit the code')
+  })
+
+  test('puts the hard constraints after the capabilities (trailing weight)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT.indexOf('HARD CONSTRAINTS')).toBeGreaterThan(
+      IN_BROWSER_SYSTEM_PROMPT.indexOf('display({'),
+    )
+  })
+})
+
+// A fake WebLLM engine whose stream models the real lock discipline: the engine
+// holds a lock for the whole generation and releases it only when the stream is
+// fully drained. If the generator abandons the stream early (e.g. `break`), the
+// `finally` never runs, `released` stays false, and the NEXT run would deadlock.
+function makeFakeEngine(chunks: string[]) {
+  let interrupted = false
+  const state = { released: false, interruptCalls: 0 }
+
+  async function* streamGen() {
+    try {
+      for (const text of chunks) {
+        // Once interrupted, the real engine stops emitting content and ends.
+        if (interrupted) return
+        yield { choices: [{ delta: { content: text } }] }
+      }
+    } finally {
+      // Mirrors WebLLM's `lock.release()` at the end of asyncGenerate.
+      state.released = true
+    }
+  }
+
+  const engine = {
+    chat: { completions: { create: vi.fn().mockResolvedValue(streamGen()) } },
+    interruptGenerate: vi.fn().mockImplementation(async () => {
+      interrupted = true
+      state.interruptCalls += 1
+    }),
+  }
+  return { engine, state }
+}
+
+// Engine that returns a DIFFERENT full response per `create()` call, so the
+// auto-repair retry (TARDIS-168) can be exercised. Each response is the model's
+// complete output; the fake splits it into one-token-ish chunks.
+function makeMultiResponseEngine(responses: string[]) {
+  const calls: ChatMessage[][] = []
+  let i = 0
+
+  async function* streamFor(text: string) {
+    for (const piece of text.split(' ')) {
+      yield { choices: [{ delta: { content: piece + ' ' } }] }
+    }
+  }
+
+  const engine = {
+    chat: {
+      completions: {
+        create: vi.fn().mockImplementation(async ({ messages }: { messages: ChatMessage[] }) => {
+          calls.push(messages)
+          const text = responses[Math.min(i, responses.length - 1)]
+          i += 1
+          return streamFor(text)
+        }),
+      },
+    },
+    interruptGenerate: vi.fn().mockResolvedValue(undefined),
+  }
+  return { engine, calls, createMock: engine.chat.completions.create }
+}
+
+type ChatMessage = { role: string; content: string }
+
+describe('buildGenerator — sandbox auto-repair (TARDIS-168)', () => {
+  test('retries once when the cell code uses DOM, and accepts the clean rewrite', async () => {
+    const { engine, calls, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      "display({type:'html',value:'<svg></svg>'})",
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(createMock).toHaveBeenCalledTimes(2) // first + one repair
+    expect(result.code).toContain('display(')
+    expect(result.code).not.toContain('document')
+    expect(result.incomplete).toBe(false)
+    // The repair turn names the offending API to the model.
+    const repairTurn = calls[1].at(-1)?.content ?? ''
+    expect(repairTurn).toContain('createElement')
+  })
+
+  test('keeps the answer incomplete when the retry still violates the sandbox', async () => {
+    const { engine, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      'window.alert("still bad");', // retry is still forbidden
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(result.incomplete).toBe(true) // still violating → not inserted
+  })
+
+  test('does NOT retry clean code', async () => {
+    const { engine, createMock } = makeMultiResponseEngine(['const a = 1;'])
+    const result = await buildGenerator(engine as never)('make a constant')
+
+    expect(createMock).toHaveBeenCalledTimes(1) // no repair needed
+    expect(result.incomplete).toBe(false)
+    expect(result.code).toBe('const a = 1;')
+  })
+
+  test('passes sampling defaults (temperature + penalties) to create() (C2)', async () => {
+    const { engine, createMock } = makeMultiResponseEngine(['const a = 1;'])
+    await buildGenerator(engine as never)('make a constant')
+
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream: true,
+        max_tokens: 4096,
+        temperature: 0.3,
+        frequency_penalty: 0.7,
+        repetition_penalty: 1.15,
+      }),
+    )
+  })
+
+  test('tags the incomplete reason as violations after a failed repair (M2)', async () => {
+    const { engine } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      'window.alert("still bad");',
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(result.incomplete).toBe(true)
+    expect(result.reason).toBe('violations')
+  })
+
+  test('skips the repair pass when the user has hit Stop (M1)', async () => {
+    const { engine, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');", // pass 1 violates
+      "display({type:'html',value:'<svg></svg>'})", // would-be repair (must NOT run)
+    ])
+    // Simulate an active session the user already stopped.
+    startThinkingAction(null)
+    requestStopAction()
+
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    // No second stream: the user asked to abort, so the violating pass-1 answer
+    // is surfaced as incomplete instead of spending another full generation.
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(result.incomplete).toBe(true)
+
+    finishThinkingAction()
+    expect(thinkingSessionAtom()).toBeNull()
+  })
+})
+
+describe('buildGenerator — stream draining (TARDIS-168)', () => {
+  test('drains the stream to completion on a normal answer', async () => {
+    const { engine, state } = makeFakeEngine(['<think>ok</think>', 'const a = 1;'])
+    const result = await buildGenerator(engine as never)('do it')
+
+    expect(result.code).toBe('const a = 1;')
+    expect(result.incomplete).toBe(false)
+    // The stream ran to its end → the engine lock was released.
+    expect(state.released).toBe(true)
+    expect(state.interruptCalls).toBe(0)
+  })
+
+  test('on a runaway reasoning loop, interrupts ONCE and still drains the stream', async () => {
+    // A long unclosed <think> that blows the token budget: every chunk keeps the
+    // think open, so the budget guard trips. The fix must NOT break out of the
+    // loop — it must let the stream finish so the lock is released. The budget
+    // gate is reasoning-only (C1), so load a reasoning model id.
+    loadedModelIdAtom.set('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')
+    try {
+      const chunks = Array.from({ length: 4000 }, () => '<think>loop ')
+      const { engine, state } = makeFakeEngine(chunks)
+
+      const result = await buildGenerator(engine as never)('loop forever')
+
+      expect(result.incomplete).toBe(true) // no usable code
+      expect(result.reason).toBe('degenerate') // classified for the UI hint (M2)
+      expect(state.interruptCalls).toBe(1) // interrupted exactly once, not per-chunk
+      expect(state.released).toBe(true) // CRITICAL: lock released → next run won't deadlock
+    } finally {
+      loadedModelIdAtom.set(null)
+    }
+  })
+
+  test('destroys a wedged engine when the stream never ends after interrupt (H6)', async () => {
+    vi.useFakeTimers()
+    try {
+      // Engine whose stream keeps the think open past the budget, then HANGS:
+      // after the interrupt the next chunk never arrives (a wedged generation).
+      let interrupted = false
+      const unload = vi.fn(async () => undefined)
+      async function* wedged() {
+        // Enough chunks to blow IN_BROWSER_THINK_TOKEN_BUDGET (2048).
+        for (let i = 0; i < 2100; i++) {
+          if (interrupted) break
+          yield { choices: [{ delta: { content: '<think>loop ' } }] }
+        }
+        // Interrupt was raised but the engine wedges: block forever.
+        await new Promise<void>(() => {})
+        yield { choices: [{ delta: { content: 'never' } }] }
+      }
+      const engine = {
+        chat: { completions: { create: vi.fn().mockResolvedValue(wedged()) } },
+        interruptGenerate: vi.fn().mockImplementation(async () => {
+          interrupted = true
+        }),
+        unload,
+      }
+      engineAtom.set(engine as never)
+      // Budget gate is reasoning-only (C1) — use a reasoning model id.
+      loadedModelIdAtom.set('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')
+
+      const run = buildGenerator(engine as never)('loop forever')
+      // Let the 2100 buffered chunks drain (microtasks), tripping the budget and
+      // the interrupt, until the loop is parked on the wedged next() + watchdog.
+      await vi.advanceTimersByTimeAsync(0)
+      // Fire the post-interrupt drain watchdog (5s).
+      await vi.advanceTimersByTimeAsync(5000)
+      const result = await run
+
+      expect(result.incomplete).toBe(true)
+      expect(engine.interruptGenerate).toHaveBeenCalledTimes(1)
+      // Wedged engine destroyed and the slot cleared so the UI asks for a reload.
+      expect(unload).toHaveBeenCalledTimes(1)
+      expect(engineAtom()).toBeNull()
+      expect(loadedModelIdAtom()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      engineAtom.set(null)
+      loadedModelIdAtom.set(null)
+    }
+  })
+
+  test('destroys a wedged engine after a USER Stop, not just a budget cap (H6)', async () => {
+    // The budget path is reasoning-only and the catalog ships no reasoning model,
+    // so the user Stop is the live interrupt path — it must arm the watchdog too.
+    // Non-reasoning model: the only thing that can interrupt here is the Stop.
+    vi.useFakeTimers()
+    try {
+      const unload = vi.fn(async () => undefined)
+      // A stream that emits a couple of code chunks, then HANGS (the engine
+      // ignored the user Stop) — next() never resolves again.
+      async function* wedgedAfterStop() {
+        yield { choices: [{ delta: { content: 'const a' } }] }
+        yield { choices: [{ delta: { content: ' = 1' } }] }
+        await new Promise<void>(() => {})
+        yield { choices: [{ delta: { content: ';' } }] }
+      }
+      const engine = {
+        chat: { completions: { create: vi.fn().mockResolvedValue(wedgedAfterStop()) } },
+        interruptGenerate: vi.fn().mockResolvedValue(undefined), // engine ignores it (wedged)
+        unload,
+      }
+      engineAtom.set(engine as never)
+      loadedModelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC') // NOT reasoning
+      // Open a session and request Stop — exactly what the Stop button does.
+      startThinkingAction(null)
+      requestStopAction()
+
+      const run = buildGenerator(engine as never)('anything')
+      await vi.advanceTimersByTimeAsync(0) // let the loop observe stopRequested
+      await vi.advanceTimersByTimeAsync(5000) // fire the post-interrupt watchdog
+      await run
+
+      // The point of the test: the watchdog was ARMED by the user Stop (there is
+      // no budgetHit on a non-reasoning model) and tore down the wedged engine,
+      // instead of the loop hanging forever on next(). (Whatever partial code
+      // arrived before the hang is irrelevant here.)
+      expect(unload).toHaveBeenCalledTimes(1)
+      expect(engineAtom()).toBeNull()
+      expect(loadedModelIdAtom()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      engineAtom.set(null)
+      loadedModelIdAtom.set(null)
+      thinkingSessionAtom.set(null)
+    }
+  })
+})

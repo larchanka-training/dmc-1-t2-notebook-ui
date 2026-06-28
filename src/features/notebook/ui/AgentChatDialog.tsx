@@ -104,6 +104,9 @@ export const AgentChatDialog = reatomComponent(() => {
             <Tooltip>
               <TooltipTrigger
                 render={
+                  // The in-browser run closes this dialog up front and streams
+                  // into the notebook's ThinkingBlock, which owns the Stop
+                  // control (TARDIS-168) — so this button never needs a Stop state.
                   <Button
                     variant="outline"
                     onClick={doSendInBrowser}

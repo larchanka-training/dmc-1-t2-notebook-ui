@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
 import { OutputView } from './OutputView'
 import type { OutputItem } from '../runtime/types'
 
@@ -55,6 +55,32 @@ describe('OutputView — order preservation', () => {
   test('renders nothing for an empty list', () => {
     const { container } = render(<OutputView items={[]} />)
     expect(container.firstChild).toBeNull()
+  })
+})
+
+describe('OutputView — stalled HTML output recovers on re-run (TARDIS-168)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  test('a new HTML output mounts a fresh frame after the previous one stalled', () => {
+    const { container, rerender } = render(
+      <OutputView items={[{ type: 'html', html: '<b>loop</b>' }]} />,
+    )
+    expect(container.querySelector('iframe')).not.toBeNull()
+
+    // No heartbeat ever arrives → the watchdog declares the frame stalled and
+    // drops the iframe in favour of the "output stopped" notice.
+    act(() => {
+      vi.advanceTimersByTime(3_000)
+    })
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(container.textContent).toMatch(/did not respond/i)
+
+    // Re-running the cell with different HTML must revive the output: the `key`
+    // on OutputFrame changes, mounting a fresh instance with a clean lifecycle.
+    rerender(<OutputView items={[{ type: 'html', html: '<b>fixed</b>' }]} />)
+    expect(container.querySelector('iframe')).not.toBeNull()
+    expect(container.textContent ?? '').not.toMatch(/did not respond/i)
   })
 })
 

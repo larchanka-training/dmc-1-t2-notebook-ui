@@ -96,58 +96,59 @@ if (!generator) return // guard: no model loaded
 const prompt = cell.code()
 if (!prompt.trim()) return // guard: empty cell
 
-// Pre-capture Reatom context BEFORE the first await
-const insertResult = wrap((code: string) => {
-  const newCell = addCell(cellId)
-  updateCellCode(newCell.id, code)
-  focusCell(newCell.id)
-  enterEdit(newCell.id)
-})
-
-const code = await wrap(generator(prompt)) // calls the injected generator
-insertResult(code) // insert the result into the notebook
+// runInBrowserGeneration owns the shared lifecycle: single-flight guard, the
+// live ThinkingBlock, per-cell busy/error state, Stop, and the try/finally.
+await wrap(
+  runInBrowserGeneration(generator, fullPrompt, cellId, {
+    onStarted: () => {
+      /* mark THIS cell busy, clear its previous error */
+    },
+    onInsert: (code) => {
+      const newCell = addCell(cellId)
+      updateCellCode(newCell.id, code)
+      focusCell(newCell.id)
+      enterEdit(newCell.id)
+    },
+    onError: (err) => {
+      /* record a per-cell error on this row */
+    },
+    onSettled: () => {
+      /* clear the busy cell id */
+    },
+  }),
+)
 ```
 
-The **pre-capture** of `insertResult` is critical — see [architecture.md](./architecture.md#pre-capture-wrap-pattern).
+The `wrap()` around `runInBrowserGeneration` is critical — the callbacks fire across the generator's internal `await` boundaries (the WebLLM stream), so the Reatom context must be restored. See [architecture.md](./architecture.md#pre-capture-wrap-pattern). The Ask-agent dialog (`agentSendInBrowserAction`) goes through the **same** helper; the only difference is the error path (it omits `onError`, so a failure keeps the in-notebook failure block instead of a per-cell error).
 
-### Step 4 — The generator calls the LLM
+### Step 4 — The generator streams the LLM (`buildGenerator` → `streamOnce`)
 
-`generator` is the function injected via `codeGeneratorAtom`. It was built by the bridge in `pages/notebook/model/codeGeneratorBridge.ts`:
+`generator` is the function injected via `codeGeneratorAtom`, built by the bridge in `pages/notebook/model/codeGeneratorBridge.ts`. It returns a structured result, **not** a bare string:
 
 ```ts
-engine.chat.completions.create({
-  messages: [
-    {
-      role: 'system',
-      content:
-        'You are a JavaScript code generator. Return ONLY the JavaScript code — no markdown code fences, no explanation.',
-    },
-    { role: 'user', content: prompt },
-  ],
-  stream: false,
-})
+type InBrowserGenerateResult = {
+  code: string // the final code, ready to insert (empty when none)
+  thinking: string // chain-of-thought text, for the live ThinkingBlock
+  incomplete: boolean // true when no usable code was produced
+  reason?: 'degenerate' | 'empty' | 'unparseable' | 'violations'
+}
 ```
 
-This is a blocking (non-streaming) call. The model runs entirely in the browser. Depending on model and hardware this takes 1–10 seconds.
+Under the hood `streamOnce` runs a **streaming** completion (`stream: true`) with `IN_BROWSER_SYSTEM_PROMPT`, the `max_tokens` backstop and sampling defaults (`temperature` / `repetition_penalty` / `frequency_penalty`). Each chunk is fed to `splitThinkAndCode` (`reasoningParser.ts`) which separates the `<think>…</think>` monologue from the code; the reasoning streams live into the `ThinkingBlock` with a token counter and a **Stop** button. For reasoning models a think-token budget interrupts a runaway reason-without-code stream.
 
-### Step 5 — Strip markdown fences
+### Step 5 — Validate, then auto-repair once if needed
 
-The raw LLM output sometimes wraps code in fences like ` ```js ... ``` `. The bridge strips them:
+The extracted code is checked by `codeValidation.ts`: `isParseableJs` (a parse, no execution) and `detectSandboxViolations` (an AST walk that flags DOM/network/timers/`getContext` in the cell and ES-module syntax). Markdown fences are stripped as part of the split. If the code parses but reaches for a forbidden API, the bridge runs **one** corrective pass naming the exact offenders; if that still violates (or the answer is unparseable/empty), the result is marked `incomplete` and **nothing is inserted** — a broken cell is worse than a clear failure.
 
-````ts
-raw
-  .replace(/```(?:javascript|js|typescript|ts)?\n?/gi, '')
-  .replace(/```/g, '')
-  .trim()
-````
+### Step 6 — Insert the code cell (or surface the failure)
 
-### Step 6 — Insert the code cell
-
-`insertResult(code)` fires and:
+On a usable result `onInsert(code)` fires and:
 
 1. Calls `addCell(cellId)` — inserts a new `code` cell directly below the text cell.
 2. Calls `updateCellCode(newCell.id, code)` — writes the generated JS.
 3. Calls `focusCell` + `enterEdit` — moves the cursor there so the user can immediately edit or run.
+
+When the result is `incomplete`, no cell is inserted; the `ThinkingBlock` shows a reason-specific recovery hint (or just closes quietly if the user pressed Stop).
 
 ### Step 7 — User reviews and runs
 
@@ -157,20 +158,21 @@ The generated code cell appears below the prompt. The user can edit it and press
 
 ## Prompt structure
 
-When you click the bot button the model receives exactly **two messages** — nothing else:
+When you click the bot button the model receives **two messages**:
 
 ```
-[system]  You are a JavaScript code generator. Return ONLY the JavaScript
-          code — no markdown code fences, no explanation, no comments unless asked.
+[system]  IN_BROWSER_SYSTEM_PROMPT — describes the QuickJS/Web-Worker sandbox
+          (no DOM/network/timers/modules), the display() contract, the
+          plain-by-default output rule, and the trailing hard constraints.
 
-[user]    <the full text of your Text cell>
+[user]    [optional notebook context] + <the full text of your Text cell>
 ```
 
-**No other context is included**: no other cells, no notebook title, no chat history.
+The user message may be prefixed with **notebook context** (the cells above the prompt, per Epic 07 / §4.3) so the model can reference earlier declarations; with no context it is just the cell text. The Ask-agent dialog sends only the prompt text.
 
 ### Where the system prompt lives
 
-It is hardcoded as a string literal in [`src/pages/notebook/model/codeGeneratorBridge.ts`](../../src/pages/notebook/model/codeGeneratorBridge.ts) inside `buildGenerator`. If you want to change what the model is instructed to do (e.g. generate TypeScript instead of JavaScript, or always add JSDoc comments), edit that string.
+It is the exported constant `IN_BROWSER_SYSTEM_PROMPT` in [`src/pages/notebook/model/codeGeneratorBridge.ts`](../../src/pages/notebook/model/codeGeneratorBridge.ts). The sandbox surface it describes mirrors the runtime in `src/features/notebook/runtime/quickjs.ts`, which stays the source of truth — change them together. The same contract is documented in `docs/ai-architecture.md §4.5` (monorepo).
 
 ### The Playground has no system prompt
 
@@ -178,16 +180,16 @@ The chat in the LLM Playground (`sendMessageAction` in `src/features/web-llm/mod
 
 ### Writing effective prompts
 
-Because there is no surrounding context, prompts must be self-contained:
+Self-contained prompts always work; references to earlier cells work **when notebook context is included** (the toolbar generate prepends the cells above the prompt):
 
-| Prompt                                     | Works? | Why                                |
-| ------------------------------------------ | ------ | ---------------------------------- |
-| `function to sort array of objects by key` | ✅     | Self-contained                     |
-| `generate a debounce utility`              | ✅     | Self-contained                     |
-| `use the data from the previous cell`      | ❌     | Model has no access to other cells |
-| `add error handling to the above code`     | ❌     | No "above code" in the prompt      |
+| Prompt                                     | Works? | Why                                          |
+| ------------------------------------------ | ------ | -------------------------------------------- |
+| `function to sort array of objects by key` | ✅     | Self-contained                               |
+| `generate a debounce utility`              | ✅     | Self-contained                               |
+| `use the data from the previous cell`      | ⚠️     | Only when context is sent (toolbar generate) |
+| `add error handling to the above code`     | ⚠️     | Only when the earlier code is in context     |
 
-If you need the generated code to reference variables already in the notebook, include them in the text cell:
+When in doubt (or from the Ask-agent dialog, which sends only the prompt), make it self-contained by including the data in the text cell:
 
 ```
 given: const users = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}]
@@ -210,7 +212,6 @@ Streaming works by creating a streaming completion and iterating `for await (chu
 
 ## Current limitations
 
-- **No streaming in code generation** — the notebook generate call uses `stream: false`. Streaming would require incremental cell updates and is more complex to implement safely.
-- **Single shared engine** — `engineAtom` is a singleton. Loading a model in the Playground reuses the same engine in the notebook, and vice versa.
-- **No notebook context** — the generator only receives the text cell's content as the prompt. It does not see the surrounding code cells. Adding context would improve relevance significantly.
+- **Single shared engine** — `engineAtom` is a singleton. Loading a model in the Playground reuses the same engine in the notebook, and vice versa. Only one in-browser generation runs at a time (a model-level single-flight guard).
+- **Small local models are unreliable** — in the browser 4-bit quant a weak model can still emit broken or hallucinated code; the validator catches what it can (parse + sandbox-violation check) and refuses to insert it, but a syntactically valid hallucinated identifier only surfaces as a `ReferenceError` when the cell is run. The `DeepSeek-R1-Distill` family was dropped for this reason (see [models.md](./models.md)).
 - **WebGPU required for good performance** — without WebGPU the WASM fallback is much slower. Chrome 113+ and Edge 113+ have WebGPU enabled by default; Firefox and Safari have partial support.

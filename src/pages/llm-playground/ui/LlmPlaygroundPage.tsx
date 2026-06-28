@@ -15,6 +15,7 @@ import {
   loadModelAction,
   loadedModelIdAtom,
   loadProgressAtom,
+  loadingModelIdAtom,
   messagesAtom,
   modelIdAtom,
   sendMessageAction,
@@ -62,13 +63,16 @@ const LocalPanel = reatomComponent(() => {
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
   const progress = loadProgressAtom()
+  const loadingModelId = loadingModelIdAtom()
   const messages = messagesAtom()
   const streaming = streamingResponseAtom()
-  const isLoading = !loadModelAction.ready()
   const bottomRef = useRef<HTMLDivElement>(null)
   // TARDIS-167 (№5/№15/№16): same model-select treatment as the notebook LLM bar.
   const downloaded = new Set(downloadedModelIdsAtom())
   const isSelectedLoaded = !!engine && loadedModelId === modelId
+  // The picker stays enabled during a load; only the Load button for the model
+  // already loading is a no-op. Picking another model mid-load supersedes it (H5).
+  const isLoadingSelected = loadingModelId === modelId
   const actionLabel = isSelectedLoaded ? 'Reload' : 'Load'
   const actionHint = isSelectedLoaded
     ? 'Re-initialise the loaded model (clears its chat state)'
@@ -94,11 +98,13 @@ const LocalPanel = reatomComponent(() => {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Cpu className="size-4 shrink-0 text-muted-foreground" />
+          {/* C4 (TARDIS-168): green when a model is loaded/ready, grey otherwise. */}
+          <Cpu
+            className={cn('size-4 shrink-0', engine ? 'text-green-600' : 'text-muted-foreground')}
+          />
           <Select
             value={modelId}
             onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
-            disabled={isLoading}
           >
             <SelectTrigger className="h-8 flex-1 text-xs">
               <SelectValue />
@@ -120,6 +126,12 @@ const LocalPanel = reatomComponent(() => {
                         >
                           {m.id}
                         </span>
+                        {/* C3 (TARDIS-168): mark chain-of-thought models. */}
+                        {m.reasoning && (
+                          <span className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                            thinking
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
                         {m.size}
@@ -136,11 +148,11 @@ const LocalPanel = reatomComponent(() => {
                 <Button
                   size="sm"
                   variant={isSelectedLoaded ? 'outline' : 'default'}
-                  disabled={isLoading}
+                  disabled={isLoadingSelected}
                   onClick={wrap(() => loadModelAction())}
                   className="shrink-0 text-xs"
                 >
-                  {isLoading ? 'Loading…' : actionLabel}
+                  {isLoadingSelected ? 'Loading…' : actionLabel}
                 </Button>
               }
             />

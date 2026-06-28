@@ -6,12 +6,84 @@ import { enterEdit, focusCell } from './cellMode'
 import { buildNotebookContext, contextToPromptBlock } from './context-ai/contextBuilder'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { assembleGenerationContext, whenContextReady } from './context-ai/aiContext'
+import { runInBrowserGeneration } from './inBrowserThinking'
+
+// Generation budget for the In-browser tier (TARDIS-168), shared by the bridge
+// (enforces it) and the thinking UI (shows the counter denominator). WebLLM
+// streams one decode-step per chunk, so counting chunks == counting generated
+// tokens. `IN_BROWSER_MAX_TOKENS` is the hard backstop; once a reasoning model's
+// chain-of-thought passes `IN_BROWSER_THINK_TOKEN_BUDGET` without emitting any
+// code, the run is a degenerate loop and is aborted.
+export const IN_BROWSER_MAX_TOKENS = 4096
+export const IN_BROWSER_THINK_TOKEN_BUDGET = 2048
+
+// Sampling defaults for in-browser code generation (TARDIS-168 C2). The bridge
+// passes these to every `chat.completions.create`. A prompt alone can't stop a
+// small quantised model from collapsing into a self-confirming reasoning loop
+// ("looks good. yes, that works. all set." forever) on a trivial task — that is
+// a SAMPLING pathology, fixed by penalising repetition. Low temperature keeps
+// codegen deterministic; the repetition/frequency penalties break the loop.
+export const IN_BROWSER_TEMPERATURE = 0.3
+export const IN_BROWSER_REPETITION_PENALTY = 1.15
+export const IN_BROWSER_FREQUENCY_PENALTY = 0.7
+
+// Result of one in-browser generation. Reasoning models (DeepSeek-R1-Distill)
+// emit a `<think>…</think>` stream before the code; the bridge splits it so the
+// notebook only ever inserts `code`, surfaces `thinking` live, and can refuse to
+// insert when the model never produced runnable code (TARDIS-168).
+export interface InBrowserGenerateResult {
+  /** The final code after reasoning, ready to insert (empty when none). */
+  code: string
+  /** The chain-of-thought text, for the live "thinking" UI. */
+  thinking: string
+  /** True when no usable code was produced (still-thinking / degenerate / empty). */
+  incomplete: boolean
+  /**
+   * Why the result is incomplete (undefined when `incomplete` is false). Lets
+   * the UI show a specific recovery hint instead of one generic message, and
+   * gives logs a precise category (TARDIS-168 M2):
+   *   - `degenerate`  — reasoning ran past the think budget without emitting code;
+   *   - `empty`       — the model produced no code at all;
+   *   - `unparseable` — the code does not parse (cut off mid-statement);
+   *   - `violations`  — the code uses sandbox-forbidden APIs even after repair.
+   */
+  reason?: InBrowserIncompleteReason
+}
+
+export type InBrowserIncompleteReason = 'degenerate' | 'empty' | 'unparseable' | 'violations'
+
+/** Live progress emitted per streamed chunk: reasoning text + generated tokens. */
+export interface InBrowserProgress {
+  /** Cumulative chain-of-thought text so far. */
+  thinking: string
+  /** Number of tokens generated so far (one decode-step per stream chunk). */
+  tokens: number
+}
+
+/**
+ * In-browser generator contract. `onProgress` (when provided) is called per
+ * streamed chunk with the cumulative reasoning text and token count — the caller
+ * MUST pass a Reatom-`wrap`ped callback, since it fires across async
+ * (`for await`) boundaries.
+ */
+export type InBrowserGenerator = (
+  prompt: string,
+  onProgress?: (progress: InBrowserProgress) => void,
+) => Promise<InBrowserGenerateResult>
 
 // Dependency-injection slot: set by external code (pages/notebook) when a
 // local LLM engine is available. null means no in-browser generator is loaded.
-export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | null>(
+export const codeGeneratorAtom = atom<InBrowserGenerator | null>(null, 'notebook.codeGenerator')
+
+// DI slot for cancelling the active in-browser generation (TARDIS-168). Filled
+// by the same bridge as `codeGeneratorAtom` with `engine.interruptGenerate`, so
+// the notebook feature can stop a long run WITHOUT a forbidden import of the
+// web-llm feature. Calling it makes the generator's `for await` loop end; the
+// generator then returns whatever it produced so far (the caller decides whether
+// the partial code is usable). null when no engine is loaded.
+export const interruptInBrowserAtom = atom<(() => Promise<void>) | null>(
   null,
-  'notebook.codeGenerator',
+  'notebook.interruptInBrowser',
 )
 
 // Display-only mirror of the loaded model's id (TARDIS-167, review PR #88 r2).
@@ -21,6 +93,22 @@ export const codeGeneratorAtom = atom<((prompt: string) => Promise<string>) | nu
 // `NotebookHeader` can read the model name WITHOUT a forbidden cross-feature
 // import. null = no model loaded.
 export const loadedModelDisplayAtom = atom<string | null>(null, 'notebook.loadedModelDisplay')
+
+// Per-cell in-browser generation state (TARDIS-168). The `withAsync` action has
+// a SINGLE global `.ready()`/`.error()`, so reading those per row made the
+// spinner/Stop and the error appear on EVERY markdown cell at once. WebLLM runs
+// one generation at a time (a single engine, a global `interruptGenerate`), so
+// the "which cell is busy" state is one id, not a Set like the Cloud tier
+// (`cloudGeneratingCellIdsAtom`). Errors stay in a Map so a finished cell can
+// keep showing its own failure while another cell generates.
+export const inBrowserGeneratingCellIdAtom = atom<string | null>(
+  null,
+  'notebook.cells.inBrowserGeneratingCellId',
+)
+export const inBrowserGenerateErrorsAtom = atom<Map<string, Error>>(
+  new Map(),
+  'notebook.cells.inBrowserGenerateErrors',
+)
 
 export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const generator = codeGeneratorAtom()
@@ -52,15 +140,35 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const contextBlock = contextToPromptBlock(contextItems)
   const fullPrompt = contextBlock ? `${contextBlock}\n\n${prompt}` : prompt
 
-  // Pre-capture Reatom context before the async boundary — same pattern as
-  // sendMessageAction. After await wrap(externalPromise), context may be lost.
-  const insertResult = wrap((code: string) => {
-    const newCell = addCell(cellId)
-    updateCellCode(newCell.id, code)
-    focusCell(newCell.id)
-    enterEdit(newCell.id)
-  })
-
-  const code = await wrap(generator(fullPrompt))
-  insertResult(code)
+  // Toolbar tier: a live reasoning block anchored after the prompt cell, PLUS
+  // per-cell busy/error state so the spinner/Stop and any error render only on
+  // this row (not on every markdown cell). The shared helper owns the
+  // single-flight guard and the start/progress/finish/fail lifecycle; the
+  // handlers below are just this tier's side-effects (TARDIS-168 H1).
+  await wrap(
+    runInBrowserGeneration(generator, fullPrompt, cellId, {
+      onStarted: () => {
+        inBrowserGenerateErrorsAtom.set((m) => {
+          const next = new Map(m)
+          next.delete(cellId)
+          return next
+        })
+        inBrowserGeneratingCellIdAtom.set(cellId)
+      },
+      onInsert: (code) => {
+        const newCell = addCell(cellId)
+        updateCellCode(newCell.id, code)
+        focusCell(newCell.id)
+        enterEdit(newCell.id)
+      },
+      onError: (err) => {
+        inBrowserGenerateErrorsAtom.set((m) => {
+          const next = new Map(m)
+          next.set(cellId, err)
+          return next
+        })
+      },
+      onSettled: () => inBrowserGeneratingCellIdAtom.set(null),
+    }),
+  )
 }, 'notebook.cells.generateAndInsert').extend(withAsync())

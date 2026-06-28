@@ -11,12 +11,13 @@ All models are **MLC-compiled** — a format specifically built for browser exec
 | `Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC` | ~1 GB        | **Default for notebook.** Fast cold start, decent JS generation |
 | `Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC`   | ~2 GB        | Best code quality / size tradeoff                               |
 | `Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC`   | ~4.5 GB      | Best code quality overall                                       |
+| `Qwen2.5-7B-Instruct-q4f16_1-MLC`         | ~5 GB        | General-purpose 7B (non-coder)                                  |
 | `Llama-3.2-1B-Instruct-q4f32_1-MLC`       | ~0.8 GB      | Tiny, general-purpose, very fast                                |
 | `Llama-3.2-3B-Instruct-q4f32_1-MLC`       | ~2 GB        | General reasoning                                               |
 | `Llama-3.1-8B-Instruct-q4f32_1-MLC`       | ~5 GB        | Strong reasoning + code                                         |
+| `Llama-3.2-3B-Instruct-q4f16_1-MLC`       | ~1.82 GB     | General-purpose, lighter quant of the 3B                        |
 | `Phi-3.5-mini-instruct-q4f16_1-MLC`       | ~2.2 GB      | Microsoft model, compact                                        |
 | `Mistral-7B-Instruct-v0.3-q4f16_1-MLC`    | ~4.5 GB      | Solid all-rounder                                               |
-| `DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC` | ~4.5 GB      | Reasoning / chain-of-thought                                    |
 | `SmolLM2-1.7B-Instruct-q4f16_1-MLC`       | ~1 GB        | Ultra-light fallback                                            |
 
 The list lives in `src/features/web-llm/model/webLlm.ts` → `AVAILABLE_MODELS`.
@@ -35,7 +36,9 @@ The Qwen2.5-Coder series is purpose-trained on code. For most JS generation task
 
 ### For conversational use (Playground)
 
-General-purpose models like Llama-3.2-3B or Phi-3.5-mini work well for explaining code or general Q&A. DeepSeek-R1 is best if you need step-by-step reasoning.
+General-purpose models like Llama-3.2-3B, Qwen2.5-7B-Instruct or Phi-3.5-mini work well for explaining code or general Q&A.
+
+> **Note (TARDIS-168).** The `DeepSeek-R1-Distill` family was removed from the catalog. In the browser 4-bit quant these chain-of-thought models proved unusable for code generation — degenerate reasoning loops, emitting Python for a JS task, and fused-identifier hallucinations that pass a syntax check but throw at runtime. The reasoning infrastructure (the `<think>` parser, think-token budget, sampling defaults, the "thinking" picker badge) stays in place for a future CoT model that actually works in-browser.
 
 ---
 

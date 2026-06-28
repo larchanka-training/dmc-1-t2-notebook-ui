@@ -1,6 +1,6 @@
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Check, Cpu, Loader2 } from 'lucide-react'
+import { Brain, Check, Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
@@ -11,6 +11,7 @@ import {
   engineAtom,
   loadModelAction,
   loadedModelIdAtom,
+  loadingModelIdAtom,
   loadProgressAtom,
   modelIdAtom,
 } from '@/features/web-llm'
@@ -19,9 +20,14 @@ export const NotebookLlmBar = reatomComponent(() => {
   const engine = engineAtom()
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
+  const loadingModelId = loadingModelIdAtom()
   const progress = loadProgressAtom()
-  const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
+  // The SELECTED model is the one already loading → the button is a no-op. A
+  // DIFFERENT selection during a load is allowed: clicking it supersedes the
+  // in-flight load (H5). The picker itself stays enabled so the user can switch
+  // mid-load instead of being trapped until the current download finishes.
+  const isLoadingSelected = loadingModelId === modelId
   // TARDIS-167 (№5): models already downloaded into the browser are highlighted.
   const downloaded = new Set(downloadedModelIdsAtom())
   // TARDIS-167 (№15): "Reload" only makes sense when the SELECTED model is the one
@@ -44,11 +50,15 @@ export const NotebookLlmBar = reatomComponent(() => {
   return (
     <div className="border-b border-border bg-muted/30 px-6 py-2.5" data-test-id="llm-bar">
       <div className="flex items-center gap-3">
-        <Cpu className="size-4 shrink-0 text-muted-foreground" />
+        {/* C4 (TARDIS-168): green when a model is loaded and ready, grey while
+            loading or when none is loaded. `engine !== null` is the readiness
+            signal (it is cleared at the start of every load). */}
+        <Cpu
+          className={cn('size-4 shrink-0', engine ? 'text-green-600' : 'text-muted-foreground')}
+        />
         <Select
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
-          disabled={isLoading}
           data-test-id="llm-bar-select"
         >
           <SelectTrigger className="h-8 w-100 text-xs">
@@ -69,6 +79,15 @@ export const NotebookLlmBar = reatomComponent(() => {
                       <span className={cn('truncate', isDownloaded && 'font-medium text-primary')}>
                         {m.id}
                       </span>
+                      {/* C3 (TARDIS-168): mark chain-of-thought models. */}
+                      {m.reasoning && (
+                        <Brain
+                          className={cn(
+                            'size-4 shrink-0',
+                            isDownloaded && 'font-medium text-primary',
+                          )}
+                        />
+                      )}
                     </span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">{m.size}</span>
                   </span>
@@ -85,11 +104,11 @@ export const NotebookLlmBar = reatomComponent(() => {
                 onClick={wrap(() => {
                   loadModelAction()
                 })}
-                disabled={isLoading}
+                disabled={isLoadingSelected}
                 variant={isSelectedLoaded ? 'outline' : 'default'}
                 className="h-8 text-xs"
               >
-                {isLoading ? (
+                {isLoadingSelected ? (
                   <>
                     <Loader2 className="mr-1.5 size-3 animate-spin" />
                     Loading…

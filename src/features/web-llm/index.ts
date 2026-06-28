@@ -4,6 +4,7 @@ export {
   downloadedModelIdsAtom,
   loadedModelIdAtom,
   loadProgressAtom,
+  loadingModelIdAtom,
   loadModelAction,
   reconcileDownloadedModelsAction,
   normalizeWebLlmPersistedState,
@@ -12,5 +13,6 @@ export {
   sendMessageAction,
   AVAILABLE_MODELS,
   MODEL_CATALOG,
+  isReasoningModel,
 } from './model/webLlm'
 export type { ModelEntry } from './model/webLlm'
