@@ -21,6 +21,22 @@ describe('IN_BROWSER_SYSTEM_PROMPT', () => {
     }
   })
 
+  test('pins the only valid display() types and the value field (no type canvas)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("ONLY type 'html' or type 'image'")
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("there is no type 'canvas'")
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain("'value' field")
+  })
+
+  test('never tells the model to refuse a drawing task (graphics go via display)', () => {
+    // Regression: a trailing "use only console.log" line made the model answer
+    // "Cannot render pie chart without DOM/canvas" instead of using display().
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain(
+      'Charts, graphics, canvas and visualizations ARE supported',
+    )
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('NEVER refuse a drawing task')
+    expect(IN_BROWSER_SYSTEM_PROMPT).not.toContain('Use only `console.log`')
+  })
+
   test('still demands raw code with no markdown fences', () => {
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('ONLY the JavaScript code')
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('no markdown code fences')
@@ -37,7 +53,19 @@ describe('IN_BROWSER_SYSTEM_PROMPT', () => {
     // in the cell (no DOM there) instead of inside the display() iframe.
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('INSIDE the display() html string')
     expect(IN_BROWSER_SYSTEM_PROMPT).toContain('getContext')
-    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('Canvas example:')
+    // The drawing guidance is conditional now ("If the task needs to draw graphics"),
+    // so display() is not the default path (H7).
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('If the task needs to draw graphics')
+  })
+
+  test('defaults to plain output and reserves display() for explicit visual tasks (H7)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('By default, produce plain JavaScript')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('Call display() ONLY when the task explicitly asks')
+  })
+
+  test('caps reasoning so small models stop looping on trivial tasks (H7)', () => {
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('at most 3 short paragraphs')
+    expect(IN_BROWSER_SYSTEM_PROMPT).toContain('stop reasoning and emit the code')
   })
 
   test('puts the hard constraints after the capabilities (trailing weight)', () => {

@@ -368,11 +368,28 @@ function installDisplay(vm: QuickJSContext, sink: Sink): void {
   fn.dispose()
 }
 
+// `display()` types that are really just HTML content and render in the html
+// iframe. The canonical one is `html`; `canvas`/`svg` are common model slips.
+const HTML_DISPLAY_TYPES = new Set(['html', 'canvas', 'svg'])
+
 function displayPayloadToItem(payload: unknown): OutputItem | null {
   if (!payload || typeof payload !== 'object') return null
-  const p = payload as { type?: unknown; value?: unknown; mime?: unknown; data?: unknown }
-  if (p.type === 'html' && typeof p.value === 'string') {
-    return { type: 'html', html: p.value }
+  const p = payload as {
+    type?: unknown
+    value?: unknown
+    html?: unknown
+    mime?: unknown
+    data?: unknown
+  }
+  // Canonical form is { type: 'html', value }. Models routinely emit near-miss
+  // variants the contract never had: a made-up `type` that is really just HTML
+  // (`canvas`, `svg`) and/or an `html` field instead of `value`. SVG/canvas are
+  // plain HTML content and render fine in the html iframe, so map these onto the
+  // html case — a one-field slip renders instead of silently dropping the output
+  // (TARDIS-168). The prompt still teaches the single canonical form.
+  if (typeof p.type === 'string' && HTML_DISPLAY_TYPES.has(p.type)) {
+    const html = typeof p.value === 'string' ? p.value : typeof p.html === 'string' ? p.html : null
+    if (html !== null) return { type: 'html', html }
   }
   if (p.type === 'image' && typeof p.mime === 'string' && typeof p.data === 'string') {
     // Only well-known image MIME types are allowed — `<img>` shouldn't

@@ -15,9 +15,10 @@ export const MODEL_CATALOG: ModelEntry[] = [
   { id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC', size: '~0.8 GB' },
   { id: 'Llama-3.2-3B-Instruct-q4f32_1-MLC', size: '~2 GB' },
   { id: 'Llama-3.1-8B-Instruct-q4f32_1-MLC', size: '~5 GB' },
+  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', size: '~1.82 GB' },
   { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC', size: '~2.2 GB' },
   { id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', size: '~4.5 GB' },
-  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', size: '~4.3 GB' },
   { id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', size: '~1 GB' },
 ]
 

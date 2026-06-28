@@ -437,6 +437,26 @@ describe('kernel.run — display() API', () => {
     expect(r.items.some((it) => it.type === 'image')).toBe(false)
   })
 
+  test('display({ type: "canvas", html }) is tolerated and renders as html', async () => {
+    // Models frequently hallucinate a `type: 'canvas'` with an `html` field;
+    // the runtime maps both near-misses onto the html case (TARDIS-168).
+    const r = await runFresh('display({ type: "canvas", html: "<canvas id=\\"c\\"></canvas>" })')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'html', html: '<canvas id="c"></canvas>' })
+  })
+
+  test('display({ type: "svg", html }) is tolerated and renders as html', async () => {
+    // Models also emit `type: 'svg'`; SVG is plain HTML content (TARDIS-168).
+    const r = await runFresh('display({ type: "svg", html: "<svg><circle r=\\"5\\"/></svg>" })')
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({ type: 'html', html: '<svg><circle r="5"/></svg>' })
+  })
+
+  test('display({ type: "html", html }) accepts the html field alias', async () => {
+    const r = await runFresh('display({ type: "html", html: "<b>y</b>" })')
+    expect(r.items).toContainEqual({ type: 'html', html: '<b>y</b>' })
+  })
+
   test('display() with an unknown shape is silently ignored', async () => {
     const r = await runFresh('display({ type: "weird", whatever: 1 }); console.log("after")')
     expect(r.status).toBe('done')
