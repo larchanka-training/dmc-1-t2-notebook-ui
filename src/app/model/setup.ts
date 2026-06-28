@@ -23,7 +23,14 @@ import {
   startSlot,
 } from '@/features/notebook'
 import { startNotebookListCrossTabSync } from '@/features/notebook/model/notebookListCrossTab'
-import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
+import {
+  AVAILABLE_MODELS,
+  autoLoadModelAtom,
+  loadModelAction,
+  modelIdAtom,
+  normalizeWebLlmPersistedState,
+  reconcileDownloadedModelsAction,
+} from '@/features/web-llm'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
@@ -129,6 +136,13 @@ rootFrame.run(() => {
   // WebLLM cache was cleared/evicted, so the list highlight reflects the real
   // cache. Best-effort and self-contained — never blocks boot.
   void reconcileDownloadedModelsAction()
+  // TARDIS-181: auto-load the default model on start when the user opted in via
+  // Settings. Runs AFTER normalization so the flag + selected id are already
+  // sanitised. Gated on a valid catalogue id; best-effort (the action owns its
+  // own progress/error state and a sequence guard) — never blocks boot.
+  if (autoLoadModelAtom() && AVAILABLE_MODELS.includes(modelIdAtom())) {
+    void loadModelAction()
+  }
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order

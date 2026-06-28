@@ -60,6 +60,13 @@ export const modelIdAtom = atom(AVAILABLE_MODELS[1], 'webLlm.modelId').extend(
   withLocalStorage('webLlm.modelId'),
 )
 
+// TARDIS-181: when on, the selected `modelIdAtom` is loaded automatically on app
+// start (the Settings page exposes this). Default OFF: auto-loading pulls a
+// multi-GB model on boot, so it must be an explicit opt-in. Persisted per device.
+export const autoLoadModelAtom = atom(false, 'webLlm.autoLoadModel').extend(
+  withLocalStorage('webLlm.autoLoadModel'),
+)
+
 // TARDIS-167 (№5): ids of models downloaded into the browser. The real weights
 // live in WebLLM's Cache Storage; this localStorage list drives the UI highlight
 // and is kept honest two ways: appended after each successful `loadModelAction`,
@@ -103,6 +110,13 @@ export function normalizeWebLlmPersistedState(): void {
 
   if (!known.has(modelIdAtom())) {
     modelIdAtom.set(AVAILABLE_MODELS[1])
+  }
+
+  // A hand-edited / migrated record can hold a non-boolean here; coerce anything
+  // that isn't strictly `true` to `false` so the boot auto-load gate (and the
+  // Settings switch) never reads a garbage truthy value.
+  if (autoLoadModelAtom() !== true) {
+    if (autoLoadModelAtom() !== false) autoLoadModelAtom.set(false)
   }
 }
 

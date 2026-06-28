@@ -1,6 +1,7 @@
 export {
   engineAtom,
   modelIdAtom,
+  autoLoadModelAtom,
   downloadedModelIdsAtom,
   loadedModelIdAtom,
   loadProgressAtom,
