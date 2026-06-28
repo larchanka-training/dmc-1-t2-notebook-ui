@@ -76,7 +76,8 @@ runtime/transform.ts: publish top-level declarations to globalThis;
     │
     ▼
 runtime/quickjs.ts: kernel.run(transformedCode, { timeoutMs })
-    │  console + display already installed on the persistent VM
+    │  console, display, btoa/atob, TextEncoder/TextDecoder,
+    │  structuredClone already installed on the persistent VM
     │  setInterruptHandler(deadline OR SharedArrayBuffer stop flag)
     │  evalCode(`(async () => { ... })()`)  — scope lives in the VM
     │  await vm.resolvePromise

@@ -81,6 +81,22 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
     expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
   })
 
+  test('switching models unloads the previously loaded engine exactly once (TARDIS-168)', async () => {
+    // Happy-path device hygiene: load A, then load B. The old engine must be
+    // unload()-ed so its WebGPU device is freed (not just dropped on the floor).
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    await wrap(loadModelAction())
+    expect(unloadMock).not.toHaveBeenCalled() // nothing to free on the first load
+
+    modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    await wrap(loadModelAction())
+
+    // The first engine was released once; the new one stays live.
+    expect(unloadMock).toHaveBeenCalledTimes(1)
+    expect(peek(engineAtom)).not.toBeNull()
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+  })
+
   test('a failed load frees the engine and clears state so a retry starts clean (TARDIS-168)', async () => {
     modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
     // First attempt: reload rejects (a flaky download / transient WebGPU error).

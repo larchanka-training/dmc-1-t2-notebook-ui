@@ -138,11 +138,25 @@ export const loadModelAction = action(async () => {
   const seq = ++latestLoadSeq
   const modelId = modelIdAtom()
 
+  // Switching away from an already-loaded model: free its WebGPU device before
+  // building the new engine. The failed-load and superseded-load paths already
+  // unload; the plain happy path "load A, then load B" was the last gap — it
+  // dropped the old engine reference without unload(), leaking the device (on
+  // weak GPUs the next load then fails with a misleading adapter error).
+  // Captured SYNCHRONOUSLY at the start: a later superseded run reads `null`
+  // here (this run already cleared engineAtom), so the live engine is never
+  // double-unloaded (TARDIS-168).
+  const previousEngine = engineAtom()
+
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
   loadingModelIdAtom.set(modelId)
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
+
+  if (previousEngine) {
+    await wrap(Promise.resolve(previousEngine.unload()).catch(() => undefined))
+  }
 
   // Build the engine ourselves (instead of CreateMLCEngine) so we keep a handle
   // to it even when `reload()` throws. A failed load (a flaky weights download,

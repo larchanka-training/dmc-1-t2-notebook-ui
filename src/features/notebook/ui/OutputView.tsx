@@ -86,7 +86,12 @@ function SingleItem({ item }: { item: OutputItem }) {
         </div>
       )
     case 'html':
-      return <OutputFrame html={item.html} />
+      // Key on the HTML so a NEW output mounts a fresh OutputFrame instance,
+      // resetting its lifecycle (TARDIS-168). Without this a frame that stalled
+      // on an infinite loop stays stuck on the "output stopped" notice when the
+      // cell is re-run with fixed HTML — the stalled state drops the iframe, so
+      // the component can't revive itself from within.
+      return <OutputFrame key={item.html} html={item.html} />
     case 'image':
       return (
         <div className="px-4 py-3">
