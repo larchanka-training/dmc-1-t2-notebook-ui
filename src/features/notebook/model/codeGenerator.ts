@@ -6,12 +6,7 @@ import { enterEdit, focusCell } from './cellMode'
 import { buildNotebookContext, contextToPromptBlock } from './context-ai/contextBuilder'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { assembleGenerationContext, whenContextReady } from './context-ai/aiContext'
-import {
-  startThinkingAction,
-  updateThinkingAction,
-  finishThinkingAction,
-  failThinkingAction,
-} from './inBrowserThinking'
+import { runInBrowserGeneration } from './inBrowserThinking'
 
 // Generation budget for the In-browser tier (TARDIS-168), shared by the bridge
 // (enforces it) and the thinking UI (shows the counter denominator). WebLLM
@@ -103,23 +98,6 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const prompt = cell.code()
   if (!prompt.trim()) return
 
-  // Mark THIS cell as generating and clear its previous error, so the spinner /
-  // Stop button and any error render only on this row (not all markdown cells).
-  inBrowserGenerateErrorsAtom.set((m) => {
-    const next = new Map(m)
-    next.delete(cellId)
-    return next
-  })
-  inBrowserGeneratingCellIdAtom.set(cellId)
-  const stopGenerating = wrap(() => inBrowserGeneratingCellIdAtom.set(null))
-  const onError = wrap((err: Error) => {
-    inBrowserGenerateErrorsAtom.set((m) => {
-      const next = new Map(m)
-      next.set(cellId, err)
-      return next
-    })
-  })
-
   // Assemble notebook context (Epic 07 / #116) — cells ABOVE this prompt cell,
   // §4.3 — and prepend it to the prompt so the model sees the surrounding cells
   // / declared globals.
@@ -140,39 +118,35 @@ export const generateAndInsertCodeAction = action(async (cellId: string) => {
   const contextBlock = contextToPromptBlock(contextItems)
   const fullPrompt = contextBlock ? `${contextBlock}\n\n${prompt}` : prompt
 
-  // Pre-capture Reatom context before the async boundary — same pattern as
-  // sendMessageAction. After await wrap(externalPromise), context may be lost.
-  const insertResult = wrap((code: string) => {
-    const newCell = addCell(cellId)
-    updateCellCode(newCell.id, code)
-    focusCell(newCell.id)
-    enterEdit(newCell.id)
-  })
-  // Live reasoning block anchored right after the prompt cell (TARDIS-168).
-  startThinkingAction(cellId)
-  const onProgress = wrap((p: { thinking: string; tokens: number }) =>
-    updateThinkingAction(p.thinking, p.tokens),
+  // Toolbar tier: a live reasoning block anchored after the prompt cell, PLUS
+  // per-cell busy/error state so the spinner/Stop and any error render only on
+  // this row (not on every markdown cell). The shared helper owns the
+  // single-flight guard and the start/progress/finish/fail lifecycle; the
+  // handlers below are just this tier's side-effects (TARDIS-168 H1).
+  await wrap(
+    runInBrowserGeneration(generator, fullPrompt, cellId, {
+      onStarted: () => {
+        inBrowserGenerateErrorsAtom.set((m) => {
+          const next = new Map(m)
+          next.delete(cellId)
+          return next
+        })
+        inBrowserGeneratingCellIdAtom.set(cellId)
+      },
+      onInsert: (code) => {
+        const newCell = addCell(cellId)
+        updateCellCode(newCell.id, code)
+        focusCell(newCell.id)
+        enterEdit(newCell.id)
+      },
+      onError: (err) => {
+        inBrowserGenerateErrorsAtom.set((m) => {
+          const next = new Map(m)
+          next.set(cellId, err)
+          return next
+        })
+      },
+      onSettled: () => inBrowserGeneratingCellIdAtom.set(null),
+    }),
   )
-  const finish = wrap(() => finishThinkingAction())
-  const fail = wrap(() => failThinkingAction())
-
-  try {
-    const result = await wrap(generator(fullPrompt, onProgress))
-    if (result.incomplete) {
-      // Reasoning loop / empty answer: keep the "couldn't generate" notice in the
-      // ThinkingBlock, insert nothing (a half-baked cell is worse than failure).
-      fail()
-      return
-    }
-    finish()
-    insertResult(result.code)
-  } catch (err) {
-    // An engine-level failure (not a clean "incomplete"): record it for THIS
-    // cell and drop the thinking block so the row's error message takes over.
-    finish()
-    onError(err as Error)
-    throw err
-  } finally {
-    stopGenerating()
-  }
 }, 'notebook.cells.generateAndInsert').extend(withAsync())

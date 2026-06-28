@@ -48,6 +48,46 @@ describe('generateAndInsertCodeAction — per-cell state (TARDIS-168)', () => {
     expect(cellsAtom().length).toBe(countBefore + 1)
   })
 
+  test('refuses a second concurrent generation while one is active (single-flight, H1)', async () => {
+    const first = addMarkdownCell('first')
+    const second = addMarkdownCell('second')
+    const countBefore = cellsAtom().length
+    let calls = 0
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+
+    act(() => {
+      codeGeneratorAtom.set(() => async () => {
+        calls += 1
+        await gate // hold the first run open so the second one races it
+        return { code: 'const x = 1', thinking: '', incomplete: false }
+      })
+    })
+
+    let firstRun!: Promise<void>
+    await act(async () => {
+      firstRun = generateAndInsertCodeAction(first.id)
+      // Second trigger WHILE the first is still streaming — must be refused.
+      await generateAndInsertCodeAction(second.id)
+    })
+
+    // Only the first run started; the second was rejected by the guard.
+    expect(calls).toBe(1)
+    expect(inBrowserGeneratingCellIdAtom()).toBe(first.id)
+
+    await act(async () => {
+      release()
+      await firstRun
+    })
+
+    // Exactly one cell inserted (from the first run), busy id cleared.
+    expect(calls).toBe(1)
+    expect(cellsAtom().length).toBe(countBefore + 1)
+    expect(inBrowserGeneratingCellIdAtom()).toBeNull()
+  })
+
   test('records an engine error against the originating cell only', async () => {
     const cell = addMarkdownCell('boom')
     act(() => {

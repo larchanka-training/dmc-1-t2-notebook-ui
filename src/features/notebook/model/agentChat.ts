@@ -5,12 +5,7 @@ import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
 import { codeGeneratorAtom } from './codeGenerator'
-import {
-  startThinkingAction,
-  updateThinkingAction,
-  finishThinkingAction,
-  failThinkingAction,
-} from './inBrowserThinking'
+import { runInBrowserGeneration } from './inBrowserThinking'
 
 // The cell id after which to insert when the agent responds.
 // undefined means append at the end of the notebook.
@@ -65,43 +60,26 @@ export const agentSendInBrowserAction = action(async (prompt: string) => {
   if (!generator) return
   const afterId = agentInsertAfterIdAtom()
 
-  const insertCell = wrap((code: string) => {
-    const newCell = addCell(afterId, 'code')
-    updateCellCode(newCell.id, code)
-    focusCell(newCell.id)
-    enterEdit(newCell.id)
-  })
   // Close the dialog (and its blurred overlay) up front — unlike the Cloud tier,
   // the in-browser run streams a live reasoning block into the NOTEBOOK flow, so
   // the modal would otherwise sit on top of it (TARDIS-168). Both the live
   // thinking and a failure are surfaced by the in-notebook ThinkingBlock, not
   // the dialog, so there is nothing left for the modal to show.
   agentChatOpenAtom.set(false)
-  // Live reasoning block: anchored after the insert target, or at the notebook
-  // end when the dialog was opened below all cells (afterId null).
-  startThinkingAction(afterId ?? null)
-  const onProgress = wrap((p: { thinking: string; tokens: number }) =>
-    updateThinkingAction(p.thinking, p.tokens),
-  )
-  const finish = wrap(() => finishThinkingAction())
-  const fail = wrap(() => failThinkingAction())
 
-  try {
-    const result = await wrap(generator(prompt, onProgress))
-    if (result.incomplete) {
-      // The model never produced runnable code — surface the failure in the
-      // ThinkingBlock (with its Dismiss action) and insert nothing.
-      fail()
-      return
-    }
-    finish()
-    insertCell(result.code)
-  } catch (err) {
-    // An engine-level throw (WebGPU loss, OOM, …) is NOT a clean "incomplete":
-    // without this the ThinkingBlock would hang forever on "Thinking…" with a
-    // dead Stop button. Surface it as a failure so the block resolves, then
-    // rethrow so `agentSendInBrowserAction.error()` still reflects it.
-    fail()
-    throw err
-  }
+  // Agent tier: live reasoning block anchored after the insert target (or the
+  // notebook end when afterId is null). No per-cell error channel here — omitting
+  // onError makes the shared helper KEEP the failed block visible on an engine
+  // throw (its Dismiss action), instead of resolving to a per-row error. The
+  // helper's single-flight guard refuses a second concurrent run (TARDIS-168 H1).
+  await wrap(
+    runInBrowserGeneration(generator, prompt, afterId ?? null, {
+      onInsert: (code) => {
+        const newCell = addCell(afterId, 'code')
+        updateCellCode(newCell.id, code)
+        focusCell(newCell.id)
+        enterEdit(newCell.id)
+      },
+    }),
+  )
 }, 'notebook.agentChat.sendInBrowser').extend(withAsync())
