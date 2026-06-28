@@ -40,6 +40,7 @@ import {
   shortcutsOpenAtom,
 } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
+import { sidebarDisplayNameAtom } from '@/features/settings'
 import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
@@ -104,7 +105,7 @@ const AuthSection = reatomComponent(() => {
     )
   }
 
-  const label = user.displayName ?? user.email ?? 'Account'
+  const label = sidebarDisplayNameAtom()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
