@@ -124,4 +124,31 @@ describe('toMarkdown', () => {
     const md = toMarkdown(toJSON([], { ...meta, title: 'Заметка 🚀' }))
     expect(md).toBe('# Заметка 🚀\n')
   })
+
+  test('grows the fence past any backtick run inside a code cell', () => {
+    // Code cell contains a ``` sequence (e.g. a literal markdown snippet);
+    // a 3-tick fence would close prematurely, so we expect 4 ticks.
+    const json = toJSON(
+      [
+        reatomCell(
+          'const md = "```js\\nx\\n```"',
+          'code',
+          '55555555-5555-5555-5555-555555555555',
+          1,
+        ),
+      ],
+      meta,
+    )
+    expect(toMarkdown(json)).toBe(
+      '# My notebook\n\n````javascript\nconst md = "```js\\nx\\n```"\n````\n',
+    )
+  })
+
+  test('uses 5-tick fence when content contains a 4-tick run', () => {
+    const json = toJSON(
+      [reatomCell('````', 'code', '66666666-6666-6666-6666-666666666666', 1)],
+      meta,
+    )
+    expect(toMarkdown(json)).toBe('# My notebook\n\n`````javascript\n````\n`````\n')
+  })
 })

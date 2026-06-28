@@ -51,11 +51,25 @@ const DEFAULT_TITLE = 'Untitled notebook'
 // renderers (GitHub, VS Code) syntax-highlight automatically.
 const CODE_FENCE_LANG = 'javascript'
 
+// CommonMark §4.5: a fenced block is closed by the first line containing a
+// fence of the same character that is at least as long as the opening one.
+// So picking a fence longer than the longest run of backticks inside the
+// content keeps user code (e.g. a markdown-snippet inside a code cell)
+// from prematurely terminating the block.
+function pickFence(content: string): string {
+  let longest = 0
+  for (const match of content.matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length)
+  }
+  return '`'.repeat(Math.max(3, longest + 1))
+}
+
 function codeCellToMarkdown(content: string): string {
   // Strip a single trailing newline so the closing fence is not preceded by a
   // blank line; the join('\n\n') below already separates cells.
   const trimmed = content.endsWith('\n') ? content.slice(0, -1) : content
-  return '```' + CODE_FENCE_LANG + '\n' + trimmed + '\n```'
+  const fence = pickFence(trimmed)
+  return fence + CODE_FENCE_LANG + '\n' + trimmed + '\n' + fence
 }
 
 /**
@@ -64,6 +78,9 @@ function codeCellToMarkdown(content: string): string {
  * - Title becomes the first H1 (`# <title>`).
  * - Markdown cells are emitted as-is (GFM passthrough).
  * - Code cells are wrapped in a fenced block with a `javascript` language hint.
+ *   The fence length is dynamic — picked one backtick longer than the longest
+ *   backtick run inside the cell — so code that itself contains ``` does not
+ *   accidentally terminate the block (CommonMark §4.5).
  * - Cells are separated by a single blank line; the document ends with a
  *   trailing newline so POSIX tools treat it as a well-formed text file.
  *
