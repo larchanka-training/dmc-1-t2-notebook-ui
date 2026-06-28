@@ -45,24 +45,32 @@ function stripFences(text: string): string {
  */
 export function splitThinkAndCode(raw: string): ReasoningSplit {
   const openIdx = raw.indexOf(THINK_OPEN)
+  const lastCloseIdx = raw.lastIndexOf(THINK_CLOSE)
 
   // No reasoning markers at all → the whole response is the answer.
-  if (openIdx === -1) {
+  if (openIdx === -1 && lastCloseIdx === -1) {
     return { thinking: '', code: stripFences(raw), thinkOpen: false }
   }
 
-  const lastCloseIdx = raw.lastIndexOf(THINK_CLOSE)
-
-  // Opened but never closed → still thinking; no usable code yet.
-  if (lastCloseIdx === -1 || lastCloseIdx < openIdx) {
+  // A <think> with no matching </think> after it → still thinking, no code yet.
+  // (Covers both the plain unclosed case and the degenerate `</think>…<think>…`
+  // where the only close precedes the open.)
+  if (openIdx !== -1 && (lastCloseIdx === -1 || lastCloseIdx < openIdx)) {
     const thinking = raw.slice(openIdx + THINK_OPEN.length)
     return { thinking: thinking.trim(), code: '', thinkOpen: true }
   }
 
-  // Thinking = between the first <think> and the last </think>, with any inner
-  // tags removed so nested/repeated pairs don't show up as literal markers.
+  // Closed reasoning. Thinking spans from just after the opening <think> — or
+  // from the very start when the model omitted it: a reasoning model whose
+  // prompt template already emitted <think> (DeepSeek-R1-Distill) streams ONLY
+  // the closing </think>, so without this its whole monologue would fall into
+  // `code` and fail to parse (TARDIS-168 H4). Thinking runs to the LAST
+  // </think>; the tail after it is the code. Inner repeated tags are stripped so
+  // nested/repeated pairs don't leak into the displayed reasoning. Any preamble
+  // before the first <think> is intentionally dropped (not reasoning, not code).
+  const thinkStart = openIdx === -1 ? 0 : openIdx + THINK_OPEN.length
   const thinking = raw
-    .slice(openIdx + THINK_OPEN.length, lastCloseIdx)
+    .slice(thinkStart, lastCloseIdx)
     .split(THINK_OPEN)
     .join('')
     .split(THINK_CLOSE)

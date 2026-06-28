@@ -33,6 +33,23 @@ describe('splitThinkAndCode', () => {
     expect(r.thinking).toContain('second')
   })
 
+  test('handles a closing tag with no opening tag (R1-Distill template, H4)', () => {
+    // The prompt template already emitted <think>, so the stream begins with the
+    // reasoning prose and only the closing </think> arrives.
+    const r = splitThinkAndCode('I will add two numbers.</think>const a = 1 + 1;')
+    expect(r.thinkOpen).toBe(false)
+    expect(r.code).toBe('const a = 1 + 1;')
+    expect(r.thinking).toBe('I will add two numbers.')
+  })
+
+  test('drops a preamble before the first think tag (not reasoning, not code)', () => {
+    const r = splitThinkAndCode('noise<think>real reasoning</think>const a = 1;')
+    expect(r.code).toBe('const a = 1;')
+    expect(r.thinking).toBe('real reasoning')
+    expect(r.thinking).not.toContain('noise')
+    expect(r.code).not.toContain('noise')
+  })
+
   test('strips markdown fences the model wraps around the code', () => {
     const r = splitThinkAndCode('<think>ok</think>```js\nconst a = 1;\n```')
     expect(r.code).toBe('const a = 1;')
