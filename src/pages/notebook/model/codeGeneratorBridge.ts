@@ -50,6 +50,12 @@ async function streamOnce(
   onProgress: ((p: { thinking: string; tokens: number }) => void) | undefined,
   tokenOffset: number,
   isReasoning: boolean,
+  // Synchronous "did the user press Stop?" probe. MUST be pre-`wrap`ped by the
+  // caller while the Reatom frame is still alive (like `onProgress`): calling
+  // `wrap()` HERE, inside the loop after the stream's unwrapped awaits, captures
+  // a dead frame and throws "missing async stack" — which escapes the loop
+  // WITHOUT draining the stream and leaks the WebLLM lock (TARDIS-168).
+  isStopRequested: () => boolean,
 ): Promise<{ raw: string; tokens: number }> {
   const stream = await engine.chat.completions.create({
     messages,
@@ -99,11 +105,10 @@ async function streamOnce(
     // session). The budget path is reasoning-only and the catalog currently
     // ships no reasoning model, so the user Stop is the live interrupt path —
     // it MUST arm the watchdog too, or a wedged engine after Stop hangs forever
-    // (TARDIS-168 H6). Read the session flag under `wrap` (atom read after an
-    // await must restore the Reatom frame — same reason as the wraps below).
-    const stopRequested =
-      !interrupted && (await wrap(async () => thinkingSessionAtom()?.stopRequested))
-    if (stopRequested) interrupted = true
+    // (TARDIS-168 H6). `isStopRequested` is the caller's pre-wrapped probe, so
+    // reading it here is a plain synchronous call — no fresh `wrap` (which would
+    // capture a dead frame after the stream's awaits) and no extra await.
+    if (!interrupted && isStopRequested()) interrupted = true
     const nextPromise = iterator.next()
     const next =
       budgetHit || interrupted
@@ -216,6 +221,11 @@ export function buildGenerator(
   // the id read here matches the engine this generator was built for.
   const isReasoning = isReasoningModel(loadedModelIdAtom())
   return async (prompt, onProgress) => {
+    // Pre-`wrap` the Stop probe ONCE here, while the Reatom frame is alive, so
+    // streamOnce can call it synchronously across the stream's await boundaries
+    // (same pattern as onProgress). Building it inside the stream loop instead
+    // throws "missing async stack" and leaks the WebLLM lock (TARDIS-168).
+    const isStopRequested = wrap(() => thinkingSessionAtom()?.stopRequested === true)
     // Pass 1.
     // DO NOT REMOVE THIS `wrap` (TARDIS-168). streamOnce does external (WebLLM)
     // I/O with internal unwrapped awaits; without wrap the continuation runs
@@ -233,6 +243,7 @@ export function buildGenerator(
         onProgress,
         0,
         isReasoning,
+        isStopRequested,
       ),
     )
     const { thinking, code, thinkOpen } = splitThinkAndCode(first.raw)
@@ -247,7 +258,8 @@ export function buildGenerator(
       // M1 (TARDIS-168): if the user already hit Stop during pass 1, do NOT spend
       // a second full stream on auto-repair. The user asked to abort, so surface
       // the (still-violating) pass-1 result as incomplete instead of running on.
-      if (violations.length > 0 && thinkingSessionAtom()?.stopRequested) {
+      // `isStopRequested` is the pre-wrapped probe (safe to call after the await).
+      if (violations.length > 0 && isStopRequested()) {
         return reportIncomplete({ code, thinking, reason: 'violations', violations })
       }
       if (violations.length > 0) {
@@ -265,6 +277,7 @@ export function buildGenerator(
             onProgress,
             first.tokens,
             isReasoning,
+            isStopRequested,
           ),
         )
         const repaired = splitThinkAndCode(second.raw)
