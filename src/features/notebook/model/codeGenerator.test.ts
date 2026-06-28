@@ -7,7 +7,7 @@ import {
   inBrowserGeneratingCellIdAtom,
   inBrowserGenerateErrorsAtom,
 } from './codeGenerator'
-import { thinkingSessionAtom } from './inBrowserThinking'
+import { thinkingSessionAtom, requestStopAction } from './inBrowserThinking'
 
 afterEach(() => {
   act(() => {
@@ -103,6 +103,26 @@ describe('generateAndInsertCodeAction — per-cell state (TARDIS-168)', () => {
     expect(inBrowserGenerateErrorsAtom().get(cell.id)?.message).toBe('engine exploded')
     // A different cell is unaffected — the error is not global.
     expect(inBrowserGenerateErrorsAtom().get('other-cell')).toBeUndefined()
+    expect(inBrowserGeneratingCellIdAtom()).toBeNull()
+  })
+
+  test('a user Stop closes the block quietly instead of showing a model failure', async () => {
+    const cell = addMarkdownCell('loop')
+    act(() => {
+      codeGeneratorAtom.set(() => async () => {
+        // Model is interrupted by the user: it returns incomplete (no code) but
+        // the session is flagged stopRequested. This must NOT read as a failure.
+        requestStopAction()
+        return { code: '', thinking: 'partial', incomplete: true }
+      })
+    })
+
+    await act(async () => {
+      await generateAndInsertCodeAction(cell.id)
+    })
+
+    // Block closed (finish), not left in the accusatory 'failed' phase.
+    expect(thinkingSessionAtom()).toBeNull()
     expect(inBrowserGeneratingCellIdAtom()).toBeNull()
   })
 })

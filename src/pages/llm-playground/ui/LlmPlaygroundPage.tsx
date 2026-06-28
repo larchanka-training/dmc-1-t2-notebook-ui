@@ -15,6 +15,7 @@ import {
   loadModelAction,
   loadedModelIdAtom,
   loadProgressAtom,
+  loadingModelIdAtom,
   messagesAtom,
   modelIdAtom,
   sendMessageAction,
@@ -62,13 +63,16 @@ const LocalPanel = reatomComponent(() => {
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
   const progress = loadProgressAtom()
+  const loadingModelId = loadingModelIdAtom()
   const messages = messagesAtom()
   const streaming = streamingResponseAtom()
-  const isLoading = !loadModelAction.ready()
   const bottomRef = useRef<HTMLDivElement>(null)
   // TARDIS-167 (№5/№15/№16): same model-select treatment as the notebook LLM bar.
   const downloaded = new Set(downloadedModelIdsAtom())
   const isSelectedLoaded = !!engine && loadedModelId === modelId
+  // The picker stays enabled during a load; only the Load button for the model
+  // already loading is a no-op. Picking another model mid-load supersedes it (H5).
+  const isLoadingSelected = loadingModelId === modelId
   const actionLabel = isSelectedLoaded ? 'Reload' : 'Load'
   const actionHint = isSelectedLoaded
     ? 'Re-initialise the loaded model (clears its chat state)'
@@ -98,7 +102,6 @@ const LocalPanel = reatomComponent(() => {
           <Select
             value={modelId}
             onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
-            disabled={isLoading}
           >
             <SelectTrigger className="h-8 flex-1 text-xs">
               <SelectValue />
@@ -136,11 +139,11 @@ const LocalPanel = reatomComponent(() => {
                 <Button
                   size="sm"
                   variant={isSelectedLoaded ? 'outline' : 'default'}
-                  disabled={isLoading}
+                  disabled={isLoadingSelected}
                   onClick={wrap(() => loadModelAction())}
                   className="shrink-0 text-xs"
                 >
-                  {isLoading ? 'Loading…' : actionLabel}
+                  {isLoadingSelected ? 'Loading…' : actionLabel}
                 </Button>
               }
             />

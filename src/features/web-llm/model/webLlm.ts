@@ -19,6 +19,7 @@ export const MODEL_CATALOG: ModelEntry[] = [
   { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', size: '~1.82 GB' },
   { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC', size: '~2.2 GB' },
   { id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', size: '~4.5 GB' },
+  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB' },
   { id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', size: '~1 GB' },
 ]
 
@@ -88,6 +89,13 @@ export const messagesAtom = atom<ChatMessage[]>([], 'webLlm.messages')
 
 export const streamingResponseAtom = atom('', 'webLlm.streamingResponse')
 
+// Id of the model currently being loaded (null when idle). Lets the model picker
+// stay ENABLED during a load and the Load button switch targets mid-load: the
+// user can pick another model and start it, superseding the in-flight load via
+// the H5 sequence guard above (TARDIS-168). Without this the UI couldn't tell
+// which model the spinner belongs to.
+export const loadingModelIdAtom = atom<string | null>(null, 'webLlm.loadingModelId')
+
 // Monotonic load token (TARDIS-168 H5). Each `loadModelAction` run claims the
 // next value; only the run whose token still equals `latestLoadSeq` may publish
 // its engine, drive the progress bar, or reset the shared atoms. When the user
@@ -104,6 +112,7 @@ export const loadModelAction = action(async () => {
 
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
+  loadingModelIdAtom.set(modelId)
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
 
@@ -161,8 +170,11 @@ export const loadModelAction = action(async () => {
     throw err
   } finally {
     // Stop the spinner only for the current run; a stale run finishing later must
-    // not clear the live load's progress.
-    if (seq === latestLoadSeq) loadProgressAtom.set(null)
+    // not clear the live load's progress (nor the loading-id of the winner).
+    if (seq === latestLoadSeq) {
+      loadProgressAtom.set(null)
+      loadingModelIdAtom.set(null)
+    }
   }
 }, 'webLlm.loadModel').extend(withAsync())
 

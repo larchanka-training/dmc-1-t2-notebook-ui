@@ -4,6 +4,7 @@ export {
   downloadedModelIdsAtom,
   loadedModelIdAtom,
   loadProgressAtom,
+  loadingModelIdAtom,
   loadModelAction,
   reconcileDownloadedModelsAction,
   normalizeWebLlmPersistedState,

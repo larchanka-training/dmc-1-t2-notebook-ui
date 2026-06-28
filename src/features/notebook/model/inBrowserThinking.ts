@@ -154,9 +154,15 @@ export async function runInBrowserGeneration(
   try {
     const result = await wrap(generator(prompt, onProgress))
     if (result.incomplete) {
-      // No usable code (still-thinking / degenerate / empty): keep the failed
-      // notice, insert nothing — a half-baked cell is worse than a clear failure.
-      fail()
+      // No usable code. Distinguish WHY (TARDIS-168): a user-requested Stop is
+      // not a model failure — the user chose to abort, so just close the block
+      // quietly instead of accusing the model with "couldn't generate runnable
+      // code". A genuine degenerate/empty result keeps the failed notice.
+      if (thinkingSessionAtom()?.stopRequested) {
+        finish()
+      } else {
+        fail()
+      }
       return true
     }
     finish()

@@ -11,6 +11,7 @@ import {
   engineAtom,
   loadModelAction,
   loadedModelIdAtom,
+  loadingModelIdAtom,
   loadProgressAtom,
   modelIdAtom,
 } from '@/features/web-llm'
@@ -19,9 +20,14 @@ export const NotebookLlmBar = reatomComponent(() => {
   const engine = engineAtom()
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
+  const loadingModelId = loadingModelIdAtom()
   const progress = loadProgressAtom()
-  const isLoading = !loadModelAction.ready()
   const loadError = loadModelAction.error()
+  // The SELECTED model is the one already loading → the button is a no-op. A
+  // DIFFERENT selection during a load is allowed: clicking it supersedes the
+  // in-flight load (H5). The picker itself stays enabled so the user can switch
+  // mid-load instead of being trapped until the current download finishes.
+  const isLoadingSelected = loadingModelId === modelId
   // TARDIS-167 (№5): models already downloaded into the browser are highlighted.
   const downloaded = new Set(downloadedModelIdsAtom())
   // TARDIS-167 (№15): "Reload" only makes sense when the SELECTED model is the one
@@ -48,7 +54,6 @@ export const NotebookLlmBar = reatomComponent(() => {
         <Select
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
-          disabled={isLoading}
           data-test-id="llm-bar-select"
         >
           <SelectTrigger className="h-8 w-100 text-xs">
@@ -85,11 +90,11 @@ export const NotebookLlmBar = reatomComponent(() => {
                 onClick={wrap(() => {
                   loadModelAction()
                 })}
-                disabled={isLoading}
+                disabled={isLoadingSelected}
                 variant={isSelectedLoaded ? 'outline' : 'default'}
                 className="h-8 text-xs"
               >
-                {isLoading ? (
+                {isLoadingSelected ? (
                   <>
                     <Loader2 className="mr-1.5 size-3 animate-spin" />
                     Loading…

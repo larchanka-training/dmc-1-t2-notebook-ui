@@ -151,6 +151,7 @@ HARD CONSTRAINTS (these always win, even if the user asks otherwise):
 There is NO DOM (no document/window), NO network (no fetch/XMLHttpRequest), NO timers (no setTimeout/setInterval), NO Node.js or Python APIs, and NO module syntax (no import/require/export). For graphics, draw inside the display() html string (above), never with document/canvas in the cell.
 If the task needs a capability this sandbox does not have (network/fetch, files, timers, modules), DO NOT call or fake those APIs — they throw a ReferenceError at runtime. Instead return runnable code that uses console.log to state the capability is unavailable in the notebook sandbox.
 Charts, graphics, canvas and visualizations ARE supported — render them with display() html (the iframe has a real document/window). NEVER refuse a drawing task by claiming the sandbox lacks DOM/canvas; the display() iframe provides them.
+Building DOM elements (a div, a list, a table, appending to the page) IS supported the same way: put that HTML in display({ type: 'html', value: '…' }) — do NOT refuse it as "DOM unavailable". Only truly missing capabilities (network/fetch, files, timers, modules) warrant the console.log fallback below.
 [CRITICAL CONSTRAINT]:
 Keep any reasoning to at most 3 short paragraphs. Your main job is to output the final answer — as soon as you understand the basic logic, stop reasoning and emit the code.
 Your final answer must be pure JavaScript only — no markdown, no prose, no explanation.
