@@ -3,6 +3,7 @@ import {
   IN_BROWSER_MAX_TOKENS,
   interruptInBrowserAtom,
   type InBrowserGenerator,
+  type InBrowserIncompleteReason,
 } from './codeGenerator'
 
 // Live "thinking" session for the In-browser reasoning models (TARDIS-168).
@@ -32,6 +33,9 @@ export interface ThinkingSession {
   stopRequested: boolean
   /** `thinking` while the model runs; `failed` when it produced no usable code. */
   phase: ThinkingPhase
+  /** Why it failed (set with `phase: 'failed'`) — drives a specific recovery
+   *  hint instead of one generic message (TARDIS-168 M2). */
+  failureReason?: InBrowserIncompleteReason
 }
 
 // Single active session: only one in-browser generation runs at a time. WebLLM
@@ -89,11 +93,12 @@ export const finishThinkingAction = action(() => {
   thinkingSessionAtom.set(null)
 }, 'notebook.inBrowserThinking.finish')
 
-/** Mark the session failed (model produced no runnable code) — keep it visible. */
-export const failThinkingAction = action(() => {
+/** Mark the session failed (model produced no runnable code) — keep it visible.
+ *  `reason` (when known) drives a specific recovery hint in the UI (M2). */
+export const failThinkingAction = action((reason?: InBrowserIncompleteReason) => {
   const session = thinkingSessionAtom()
   if (!session) return
-  thinkingSessionAtom.set({ ...session, phase: 'failed' })
+  thinkingSessionAtom.set({ ...session, phase: 'failed', failureReason: reason })
 }, 'notebook.inBrowserThinking.fail')
 
 /** Dismiss a failed block (user acknowledged the "couldn't generate" notice). */
@@ -145,7 +150,7 @@ export async function runInBrowserGeneration(
     updateThinkingAction(p.thinking, p.tokens),
   )
   const finish = wrap(() => finishThinkingAction())
-  const fail = wrap(() => failThinkingAction())
+  const fail = wrap((reason?: InBrowserIncompleteReason) => failThinkingAction(reason))
   const insert = wrap(handlers.onInsert)
   const onError = handlers.onError ? wrap(handlers.onError) : undefined
   const settled = handlers.onSettled ? wrap(handlers.onSettled) : undefined
@@ -161,7 +166,7 @@ export async function runInBrowserGeneration(
       if (thinkingSessionAtom()?.stopRequested) {
         finish()
       } else {
-        fail()
+        fail(result.reason)
       }
       return true
     }

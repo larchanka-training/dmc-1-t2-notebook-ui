@@ -28,7 +28,19 @@ export interface InBrowserGenerateResult {
   thinking: string
   /** True when no usable code was produced (still-thinking / degenerate / empty). */
   incomplete: boolean
+  /**
+   * Why the result is incomplete (undefined when `incomplete` is false). Lets
+   * the UI show a specific recovery hint instead of one generic message, and
+   * gives logs a precise category (TARDIS-168 M2):
+   *   - `degenerate`  — reasoning ran past the think budget without emitting code;
+   *   - `empty`       — the model produced no code at all;
+   *   - `unparseable` — the code does not parse (cut off mid-statement);
+   *   - `violations`  — the code uses sandbox-forbidden APIs even after repair.
+   */
+  reason?: InBrowserIncompleteReason
 }
+
+export type InBrowserIncompleteReason = 'degenerate' | 'empty' | 'unparseable' | 'violations'
 
 /** Live progress emitted per streamed chunk: reasoning text + generated tokens. */
 export interface InBrowserProgress {

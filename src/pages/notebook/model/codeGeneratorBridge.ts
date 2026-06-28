@@ -3,9 +3,12 @@ import {
   codeGeneratorAtom,
   loadedModelDisplayAtom,
   interruptInBrowserAtom,
+  thinkingSessionAtom,
 } from '@/features/notebook'
 import {
   type InBrowserGenerator,
+  type InBrowserGenerateResult,
+  type InBrowserIncompleteReason,
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
 } from '@/features/notebook'
@@ -157,6 +160,24 @@ Keep any reasoning to at most 3 short paragraphs. Your main job is to output the
 Your final answer must be pure JavaScript only — no markdown, no prose, no explanation.
 For a non-visual result, output it with console.log or a trailing expression; for a visual/graphical result, output it with display() as described above.`
 
+// Centralise the incomplete-result path (TARDIS-168 M2): log WHY the generation
+// failed (degenerate loop / empty / unparseable / sandbox violations) so a
+// developer debugging "the model won't generate" has a precise category, then
+// return the typed result the UI turns into a specific recovery hint. We log the
+// reason + offending API names only — never the prompt or the generated code —
+// so no user content leaks into the console.
+function reportIncomplete(args: {
+  code: string
+  thinking: string
+  reason: InBrowserIncompleteReason
+  violations?: string[]
+}): InBrowserGenerateResult {
+  const { code, thinking, reason, violations } = args
+  const detail = violations && violations.length > 0 ? ` [${violations.join(', ')}]` : ''
+  console.warn(`in-browser generation incomplete: ${reason}${detail}`)
+  return { code, thinking, incomplete: true, reason }
+}
+
 export function buildGenerator(
   engine: NonNullable<ReturnType<typeof engineAtom>>,
 ): InBrowserGenerator {
@@ -180,6 +201,12 @@ export function buildGenerator(
     // answer is handled below, and a clean answer needs no second round.
     if (!thinkOpen && code.length > 0 && isParseableJs(code)) {
       const violations = detectSandboxViolations(code)
+      // M1 (TARDIS-168): if the user already hit Stop during pass 1, do NOT spend
+      // a second full stream on auto-repair. The user asked to abort, so surface
+      // the (still-violating) pass-1 result as incomplete instead of running on.
+      if (violations.length > 0 && thinkingSessionAtom()?.stopRequested) {
+        return reportIncomplete({ code, thinking, reason: 'violations', violations })
+      }
       if (violations.length > 0) {
         const second = await streamOnce(
           engine,
@@ -205,19 +232,29 @@ export function buildGenerator(
           return { code: repaired.code, thinking: repaired.thinking, incomplete: false }
         }
         // Retry didn't fix it → the (still-violating) code is not usable.
-        return { code, thinking, incomplete: true }
+        return reportIncomplete({
+          code,
+          thinking,
+          reason: 'violations',
+          violations: detectSandboxViolations(repaired.code),
+        })
       }
     }
 
     // "Usable" code = a finished answer (closed think, produced code) that parses
     // and is sandbox-clean. A budget-aborted loop, an unclosed think, an empty
-    // answer, or code cut off mid-statement all stay incomplete.
-    const incomplete =
-      thinkOpen ||
-      code.length === 0 ||
-      !isParseableJs(code) ||
-      detectSandboxViolations(code).length > 0
-    return { code, thinking, incomplete }
+    // answer, or code cut off mid-statement all stay incomplete — classify which.
+    const reason: InBrowserIncompleteReason | undefined = thinkOpen
+      ? 'degenerate'
+      : code.length === 0
+        ? 'empty'
+        : !isParseableJs(code)
+          ? 'unparseable'
+          : detectSandboxViolations(code).length > 0
+            ? 'violations'
+            : undefined
+    if (reason) return reportIncomplete({ code, thinking, reason })
+    return { code, thinking, incomplete: false }
   }
 }
 

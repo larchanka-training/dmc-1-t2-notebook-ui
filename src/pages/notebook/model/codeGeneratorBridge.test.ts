@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from 'vitest'
 import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
+import {
+  thinkingSessionAtom,
+  startThinkingAction,
+  requestStopAction,
+  finishThinkingAction,
+} from '@/features/notebook'
 import { IN_BROWSER_SYSTEM_PROMPT, buildGenerator } from './codeGeneratorBridge'
 
 describe('IN_BROWSER_SYSTEM_PROMPT', () => {
@@ -174,6 +180,37 @@ describe('buildGenerator — sandbox auto-repair (TARDIS-168)', () => {
     expect(result.incomplete).toBe(false)
     expect(result.code).toBe('const a = 1;')
   })
+
+  test('tags the incomplete reason as violations after a failed repair (M2)', async () => {
+    const { engine } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');",
+      'window.alert("still bad");',
+    ])
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    expect(result.incomplete).toBe(true)
+    expect(result.reason).toBe('violations')
+  })
+
+  test('skips the repair pass when the user has hit Stop (M1)', async () => {
+    const { engine, createMock } = makeMultiResponseEngine([
+      "const c=document.createElement('canvas');", // pass 1 violates
+      "display({type:'html',value:'<svg></svg>'})", // would-be repair (must NOT run)
+    ])
+    // Simulate an active session the user already stopped.
+    startThinkingAction(null)
+    requestStopAction()
+
+    const result = await buildGenerator(engine as never)('draw an svg')
+
+    // No second stream: the user asked to abort, so the violating pass-1 answer
+    // is surfaced as incomplete instead of spending another full generation.
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(result.incomplete).toBe(true)
+
+    finishThinkingAction()
+    expect(thinkingSessionAtom()).toBeNull()
+  })
 })
 
 describe('buildGenerator — stream draining (TARDIS-168)', () => {
@@ -198,6 +235,7 @@ describe('buildGenerator — stream draining (TARDIS-168)', () => {
     const result = await buildGenerator(engine as never)('loop forever')
 
     expect(result.incomplete).toBe(true) // no usable code
+    expect(result.reason).toBe('degenerate') // classified for the UI hint (M2)
     expect(state.interruptCalls).toBe(1) // interrupted exactly once, not per-chunk
     expect(state.released).toBe(true) // CRITICAL: lock released → next run won't deadlock
   })

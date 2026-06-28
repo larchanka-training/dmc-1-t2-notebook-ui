@@ -66,4 +66,14 @@ describe('ThinkingBlock', () => {
     await user.click(screen.getByRole('button', { name: /dismiss/i }))
     expect(thinkingSessionAtom()).toBeNull()
   })
+
+  test('shows a reason-specific recovery hint on failure (M2)', () => {
+    act(() => {
+      startThinkingAction(null)
+      failThinkingAction('degenerate')
+    })
+    render(<ThinkingBlock />)
+    // The degenerate-loop hint, not the generic "try rephrasing" fallback.
+    expect(screen.getByText(/kept reasoning without finishing/i)).toBeInTheDocument()
+  })
 })

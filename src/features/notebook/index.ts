@@ -136,6 +136,7 @@ export {
 export type {
   InBrowserGenerator,
   InBrowserGenerateResult,
+  InBrowserIncompleteReason,
   InBrowserProgress,
 } from './model/codeGenerator'
 export { cloudGenerateAndInsertCodeAction } from './model/cloudCodeGenerator'

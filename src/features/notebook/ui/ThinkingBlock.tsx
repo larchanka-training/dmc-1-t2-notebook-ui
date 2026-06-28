@@ -9,6 +9,24 @@ import {
   dismissThinkingAction,
   requestStopAction,
 } from '../model/inBrowserThinking'
+import type { InBrowserIncompleteReason } from '../model/codeGenerator'
+
+// Map a failure category to a specific recovery hint (TARDIS-168 M2). A precise
+// nudge beats the old one-size-fits-all "try rephrasing" for every failure.
+function failureReasonHint(reason: InBrowserIncompleteReason | undefined): string {
+  switch (reason) {
+    case 'degenerate':
+      return 'The model kept reasoning without finishing. Try a simpler prompt or another model.'
+    case 'empty':
+      return 'The model returned no code. Try rephrasing the request or another model.'
+    case 'unparseable':
+      return 'The model produced code that does not parse. Try regenerating or another model.'
+    case 'violations':
+      return 'The model kept using APIs unavailable in the notebook sandbox. Try another model.'
+    default:
+      return 'Try rephrasing, simplifying the request, or switching to another model.'
+  }
+}
 
 /**
  * Live "thinking" block for the In-browser reasoning models (TARDIS-168).
@@ -35,6 +53,7 @@ export const ThinkingBlock = reatomComponent(() => {
 
   if (!session) return null
   const isFailed = session.phase === 'failed'
+  const failureHint = failureReasonHint(session.failureReason)
 
   return (
     <div
@@ -92,9 +111,7 @@ export const ThinkingBlock = reatomComponent(() => {
         // A distinct destructive-tinted callout, set off from the grey reasoning
         // above so the recovery hint reads as guidance, not more model thinking.
         <div className="mt-2.5 flex items-center justify-between gap-3 rounded-[calc(var(--radius-cell)-4px)] border border-destructive/30 bg-destructive/10 px-2.5 py-2">
-          <p className="text-[13px] font-medium text-foreground">
-            Try rephrasing, simplifying the request, or switching to another model.
-          </p>
+          <p className="text-[13px] font-medium text-foreground">{failureHint}</p>
           <Button
             variant="outline"
             size="sm"
