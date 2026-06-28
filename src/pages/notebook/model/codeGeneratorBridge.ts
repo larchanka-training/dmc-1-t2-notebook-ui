@@ -201,10 +201,12 @@ export function buildGenerator(
   const isReasoning = isReasoningModel(loadedModelIdAtom())
   return async (prompt, onProgress) => {
     // Pass 1.
-    // `wrap` the stream so the Reatom frame is RESTORED after the await: streamOnce
-    // does external (WebLLM) I/O with internal unwrapped awaits, so without this
-    // the continuation runs outside the frame and a later atom read
-    // (thinkingSessionAtom() below) throws "missing async stack" (TARDIS-168).
+    // DO NOT REMOVE THIS `wrap` (TARDIS-168). streamOnce does external (WebLLM)
+    // I/O with internal unwrapped awaits; without wrap the continuation runs
+    // outside the Reatom frame and the atom read below (thinkingSessionAtom())
+    // throws "missing async stack". This only reproduces in the real Reatom
+    // action with a real stream — the fake engines in tests have no unwrapped
+    // awaits — so removing it will NOT fail any unit test, only break at runtime.
     const first = await wrap(
       streamOnce(
         engine,
@@ -233,7 +235,8 @@ export function buildGenerator(
         return reportIncomplete({ code, thinking, reason: 'violations', violations })
       }
       if (violations.length > 0) {
-        // Same wrap rationale as pass 1: keep the frame for the post-await checks.
+        // Same wrap rationale as pass 1 — DO NOT REMOVE: keep the Reatom frame for
+        // the post-await atom reads. Not covered by a unit test (see pass 1).
         const second = await wrap(
           streamOnce(
             engine,
@@ -260,13 +263,10 @@ export function buildGenerator(
         ) {
           return { code: repaired.code, thinking: repaired.thinking, incomplete: false }
         }
-        // Retry didn't fix it → the (still-violating) code is not usable.
-        return reportIncomplete({
-          code,
-          thinking,
-          reason: 'violations',
-          violations: detectSandboxViolations(repaired.code),
-        })
+        // Retry didn't fix it → the (still-violating) code is not usable. We
+        // keep pass 1's code (what the user saw), so log pass 1's violations too
+        // — logging the retry's offenders next to pass 1's code would mismatch.
+        return reportIncomplete({ code, thinking, reason: 'violations', violations })
       }
     }
 

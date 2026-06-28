@@ -264,6 +264,36 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
 
     expect(agentChatOpenAtom()).toBe(false)
   })
+
+  test('keeps the dialog open and does not start a second run while one is active', async () => {
+    // TARDIS-168: single-flight would refuse a concurrent run anyway; closing the
+    // dialog first would silently drop the prompt. So with an active thinking
+    // session the action bails BEFORE closing — the prompt stays recoverable.
+    const generator = vi.fn().mockResolvedValue({ code: 'x', thinking: '', incomplete: false })
+
+    await act(async () => {
+      codeGeneratorAtom.set(() => generator)
+      agentChatOpenAtom.set(true)
+      agentInsertAfterIdAtom.set(undefined)
+      // Simulate a generation already in flight.
+      thinkingSessionAtom.set({
+        afterCellId: null,
+        thinking: '',
+        tokens: 0,
+        maxTokens: 4096,
+        stopRequested: false,
+        phase: 'thinking',
+      })
+      await agentSendInBrowserAction('second prompt while busy')
+    })
+
+    expect(generator).not.toHaveBeenCalled()
+    expect(agentChatOpenAtom()).toBe(true) // dialog stays open, prompt not lost
+
+    act(() => {
+      thinkingSessionAtom.set(null)
+    })
+  })
 })
 
 describe('AgentChatDialog — cloud generate action (model level)', () => {

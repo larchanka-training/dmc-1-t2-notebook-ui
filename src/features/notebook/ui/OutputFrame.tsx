@@ -99,9 +99,10 @@ export function OutputFrame({ html }: OutputFrameProps) {
     const handler = (event: MessageEvent) => {
       if (event.source !== ref.current?.contentWindow) return
       const data = event.data as { kind?: string; height?: number; nonce?: string } | null
-      // Drop pings that don't carry this frame's nonce: a re-executed user
-      // script can't forge it (it lives in the shell IIFE closure), and a stale
-      // frame mid-teardown can't move the live one.
+      // Drop pings that don't carry this frame's nonce: rejects a stale frame's
+      // late messages and accidental re-pings. Not forgery-proof (the nonce is
+      // readable from the shell <script> in the DOM) — defense-in-depth, with the
+      // height clamp + watchdog as the real guards against a hostile script.
       if (
         data?.kind === 'iframe-resize' &&
         data.nonce === nonce &&
@@ -231,8 +232,11 @@ function buildSrcDoc(userHtml: string, nonce: string): string {
   // never add siblings to the shell <script>. innerHTML does not run <script>
   // tags, so we re-create them (the contract supports a <canvas> + drawing
   // <script>). The heartbeat/resize closure carries a per-frame nonce the
-  // parent checks, so a re-executed user script can't forge a liveness ping
-  // (the nonce stays local to the IIFE, out of the global scope user code sees).
+  // parent checks. This is defense-in-depth, NOT a hard barrier: the nonce is
+  // not in the global scope, but it sits as text in the shell <script> the
+  // re-executed user code can still read from the DOM. It reliably rejects
+  // accidental re-pings and stale-frame messages; against a hostile script the
+  // real guards are the height clamp (MIN/MAX) and the heartbeat watchdog.
   return `<!doctype html>
 <html style="margin:0; min-height:0;">
 <head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${IFRAME_CSP}"></head>

@@ -5,7 +5,7 @@ import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
 import { codeGeneratorAtom } from './codeGenerator'
-import { runInBrowserGeneration } from './inBrowserThinking'
+import { runInBrowserGeneration, thinkingSessionAtom } from './inBrowserThinking'
 
 // The cell id after which to insert when the agent responds.
 // undefined means append at the end of the notebook.
@@ -58,6 +58,11 @@ export const agentSendAction = action(async (prompt: string) => {
 export const agentSendInBrowserAction = action(async (prompt: string) => {
   const generator = codeGeneratorAtom()
   if (!generator) return
+  // Bail BEFORE closing the dialog if a generation is already running: the
+  // single-flight guard would refuse this run anyway, and closing first would
+  // drop the user's prompt with no feedback. Keep the dialog open so they can
+  // retry once the active run finishes (TARDIS-168).
+  if (thinkingSessionAtom()?.phase === 'thinking') return
   const afterId = agentInsertAfterIdAtom()
 
   // Close the dialog (and its blurred overlay) up front — unlike the Cloud tier,
