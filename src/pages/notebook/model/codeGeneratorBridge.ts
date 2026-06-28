@@ -201,15 +201,21 @@ export function buildGenerator(
   const isReasoning = isReasoningModel(loadedModelIdAtom())
   return async (prompt, onProgress) => {
     // Pass 1.
-    const first = await streamOnce(
-      engine,
-      [
-        { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
-        { role: 'user', content: prompt },
-      ],
-      onProgress,
-      0,
-      isReasoning,
+    // `wrap` the stream so the Reatom frame is RESTORED after the await: streamOnce
+    // does external (WebLLM) I/O with internal unwrapped awaits, so without this
+    // the continuation runs outside the frame and a later atom read
+    // (thinkingSessionAtom() below) throws "missing async stack" (TARDIS-168).
+    const first = await wrap(
+      streamOnce(
+        engine,
+        [
+          { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        onProgress,
+        0,
+        isReasoning,
+      ),
     )
     const { thinking, code, thinkOpen } = splitThinkAndCode(first.raw)
 
@@ -227,17 +233,20 @@ export function buildGenerator(
         return reportIncomplete({ code, thinking, reason: 'violations', violations })
       }
       if (violations.length > 0) {
-        const second = await streamOnce(
-          engine,
-          [
-            { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: code },
-            { role: 'user', content: buildRepairInstruction(violations, code) },
-          ],
-          onProgress,
-          first.tokens,
-          isReasoning,
+        // Same wrap rationale as pass 1: keep the frame for the post-await checks.
+        const second = await wrap(
+          streamOnce(
+            engine,
+            [
+              { role: 'system', content: IN_BROWSER_SYSTEM_PROMPT },
+              { role: 'user', content: prompt },
+              { role: 'assistant', content: code },
+              { role: 'user', content: buildRepairInstruction(violations, code) },
+            ],
+            onProgress,
+            first.tokens,
+            isReasoning,
+          ),
         )
         const repaired = splitThinkAndCode(second.raw)
         // Accept the retry only if it is a real improvement: parseable and no
