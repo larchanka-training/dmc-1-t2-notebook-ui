@@ -31,6 +31,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
 
+// Random per-frame token. crypto.randomUUID is available in the DOM env; the
+// Math.random fallback keeps older test runners happy. Kept out of render (it is
+// impure) — called only inside effects / lazy state initialisers.
+function makeNonce(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
 const MIN_HEIGHT = 80
 const MAX_HEIGHT = 600
 
@@ -71,6 +78,16 @@ export function OutputFrame({ html }: OutputFrameProps) {
   // single spoofed ping followed by an infinite loop can't keep it alive
   // forever (the loop stops the heartbeat and the window elapses).
   useEffect(() => {
+    const iframe = ref.current
+    if (!iframe) return
+    // Per-frame nonce tying liveness pings to THIS srcDoc (TARDIS-168 M4).
+    // Generated here (not in render, where randomness is impure) and closed over
+    // by both the srcDoc shell and the message handler, so they always agree and
+    // a stale frame's late messages carry a different nonce.
+    const nonce = makeNonce()
+    // Assign srcdoc imperatively so the nonce in the document and in the handler
+    // come from the same place; rebuilding on every `html` change reloads it.
+    iframe.srcdoc = buildSrcDoc(html, nonce)
     // Start the clock at mount: a frame that never pings at all (e.g. it
     // blocks before the shell script runs) must still trip the timeout.
     let lastPing = Date.now()
@@ -81,8 +98,15 @@ export function OutputFrame({ html }: OutputFrameProps) {
     let frameId: number | null = null
     const handler = (event: MessageEvent) => {
       if (event.source !== ref.current?.contentWindow) return
-      const data = event.data as { kind?: string; height?: number } | null
-      if (data?.kind === 'iframe-resize' && typeof data.height === 'number') {
+      const data = event.data as { kind?: string; height?: number; nonce?: string } | null
+      // Drop pings that don't carry this frame's nonce: a re-executed user
+      // script can't forge it (it lives in the shell IIFE closure), and a stale
+      // frame mid-teardown can't move the live one.
+      if (
+        data?.kind === 'iframe-resize' &&
+        data.nonce === nonce &&
+        typeof data.height === 'number'
+      ) {
         // Heartbeat is updated on EVERY ping (cheap, before any early return)
         // so the liveness window stays accurate even for no-op resizes.
         lastPing = Date.now()
@@ -147,11 +171,13 @@ export function OutputFrame({ html }: OutputFrameProps) {
           Stop and timeout may not stop them.
         </span>
       </div>
+      {/* srcdoc is assigned imperatively in the effect (with a per-frame nonce);
+          re-keyed on `html` so React rebuilds the element for a fresh document. */}
       <iframe
+        key={html}
         ref={ref}
         title="cell-html-output"
         sandbox="allow-scripts"
-        srcDoc={buildSrcDoc(html)}
         className="block w-full rounded border border-border bg-background"
         style={{ height }}
       />
@@ -184,23 +210,57 @@ const IFRAME_CSP =
  * iframe's event loop is turning it keeps pinging; a wedged thread (infinite
  * loop) stops, and the parent tears the frame down.
  */
-function buildSrcDoc(userHtml: string): string {
+/**
+ * Embed an arbitrary string as a JS string literal that cannot break out of the
+ * surrounding <script>. JSON.stringify handles quotes/newlines/backslashes;
+ * escaping every `<` to its unicode form additionally neutralises `</script>`
+ * and `<!--`, the two sequences the HTML parser would otherwise treat as the
+ * end of the script element. This is what lets us hand the user HTML to the
+ * shell as DATA instead of inlining it into the markup (TARDIS-168 M4).
+ */
+function toScriptStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
+function buildSrcDoc(userHtml: string, nonce: string): string {
+  // M4 (TARDIS-168): the user HTML is NOT inlined into the markup anymore.
+  // Inlining let a model's `</main></body>` or stray <script> escape the
+  // #output-root wrapper and clobber the shell's sizing/heartbeat script.
+  // Instead the shell owns the whole document and assigns the user HTML to
+  // root.innerHTML, so it is structurally confined inside #output-root and can
+  // never add siblings to the shell <script>. innerHTML does not run <script>
+  // tags, so we re-create them (the contract supports a <canvas> + drawing
+  // <script>). The heartbeat/resize closure carries a per-frame nonce the
+  // parent checks, so a re-executed user script can't forge a liveness ping
+  // (the nonce stays local to the IIFE, out of the global scope user code sees).
   return `<!doctype html>
 <html style="margin:0; min-height:0;">
 <head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${IFRAME_CSP}"></head>
 <body style="margin:0; min-height:0;">
-<main id="output-root" style="padding:8px; font-family: system-ui, sans-serif;">
-${userHtml}
-</main>
+<main id="output-root" style="padding:8px; font-family: system-ui, sans-serif;"></main>
 <script>
-  const root = document.getElementById('output-root');
-  const post = () => parent.postMessage({
-    kind: 'iframe-resize',
-    height: Math.max(root.scrollHeight, root.offsetHeight),
-  }, '*');
-  post();
-  new ResizeObserver(post).observe(root);
-  setInterval(post, ${HEARTBEAT_INTERVAL_MS});
+  (function () {
+    const NONCE = ${toScriptStringLiteral(nonce)};
+    const USER_HTML = ${toScriptStringLiteral(userHtml)};
+    const root = document.getElementById('output-root');
+    root.innerHTML = USER_HTML;
+    // innerHTML-inserted <script> tags are inert; re-create them so a
+    // <canvas> + drawing <script> in display() html still runs.
+    for (const old of root.querySelectorAll('script')) {
+      const s = document.createElement('script');
+      for (const attr of old.attributes) s.setAttribute(attr.name, attr.value);
+      s.textContent = old.textContent;
+      old.replaceWith(s);
+    }
+    const post = () => parent.postMessage({
+      kind: 'iframe-resize',
+      nonce: NONCE,
+      height: Math.max(root.scrollHeight, root.offsetHeight),
+    }, '*');
+    post();
+    new ResizeObserver(post).observe(root);
+    setInterval(post, ${HEARTBEAT_INTERVAL_MS});
+  })();
 </script>
 </body>
 </html>`
