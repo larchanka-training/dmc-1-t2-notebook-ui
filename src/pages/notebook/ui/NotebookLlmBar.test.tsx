@@ -24,22 +24,19 @@ describe('NotebookLlmBar — model capabilities UI (TARDIS-168 C3/C4)', () => {
     expect(cpuReady?.getAttribute('class')).toContain('text-green-600')
   })
 
-  test('renders a "thinking" badge for reasoning models only', () => {
+  test('shows no "thinking" badge while the catalog has no reasoning models', () => {
     render(<NotebookLlmBar />)
-    // The trigger is collapsed; the badge count in the (open) content equals the
-    // number of reasoning models in the catalog. Radix renders items lazily, so
-    // assert on the catalog-derived expectation instead of opening the listbox.
-    const reasoningCount = MODEL_CATALOG.filter((m) => m.reasoning).length
-    expect(reasoningCount).toBeGreaterThan(0)
-    // The selected value (first model) is not reasoning, so no badge in the trigger.
+    // The R1-Distill family was dropped (TARDIS-168), so no catalog model is
+    // flagged reasoning and the badge never renders.
+    expect(MODEL_CATALOG.some((m) => m.reasoning)).toBe(false)
     expect(screen.queryByText('thinking')).not.toBeInTheDocument()
   })
 
-  test('isReasoningModel matches the catalog flag', () => {
-    const reasoning = MODEL_CATALOG.find((m) => m.reasoning)
-    const plain = MODEL_CATALOG.find((m) => !m.reasoning)
-    expect(isReasoningModel(reasoning?.id)).toBe(true)
-    expect(isReasoningModel(plain?.id)).toBe(false)
+  test('isReasoningModel detects the DeepSeek-R1 family by name, not plain models', () => {
+    // Intrinsic to the R1 family even though it is not in the current catalog.
+    expect(isReasoningModel('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')).toBe(true)
+    const plain = MODEL_CATALOG[0]
+    expect(isReasoningModel(plain.id)).toBe(false)
     expect(isReasoningModel(null)).toBe(false)
     expect(isReasoningModel('not-in-catalog')).toBe(false)
   })

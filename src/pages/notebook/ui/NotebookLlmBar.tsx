@@ -1,6 +1,6 @@
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Check, Cpu, Loader2 } from 'lucide-react'
+import { Brain, Check, Cpu, Loader2 } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
@@ -80,7 +80,14 @@ export const NotebookLlmBar = reatomComponent(() => {
                         {m.id}
                       </span>
                       {/* C3 (TARDIS-168): mark chain-of-thought models. */}
-                      {m.reasoning && <Cpu className={cn('size-2 shrink-0', 'text-green-600')} />}
+                      {m.reasoning && (
+                        <Brain
+                          className={cn(
+                            'size-4 shrink-0',
+                            isDownloaded && 'font-medium text-primary',
+                          )}
+                        />
+                      )}
                     </span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">{m.size}</span>
                   </span>

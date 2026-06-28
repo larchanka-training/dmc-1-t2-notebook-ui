@@ -18,27 +18,37 @@ export const MODEL_CATALOG: ModelEntry[] = [
   { id: 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC', size: '~1 GB' },
   { id: 'Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC', size: '~2 GB' },
   { id: 'Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC', size: '~4.5 GB' },
-  { id: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', size: '~4.3 GB' },
+  { id: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', size: '~5 GB' },
   { id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC', size: '~0.8 GB' },
   { id: 'Llama-3.2-3B-Instruct-q4f32_1-MLC', size: '~2 GB' },
   { id: 'Llama-3.1-8B-Instruct-q4f32_1-MLC', size: '~5 GB' },
   { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', size: '~1.82 GB' },
   { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC', size: '~2.2 GB' },
   { id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC', size: '~4.5 GB' },
-  { id: 'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC', size: '~4.5 GB', reasoning: true },
   { id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', size: '~1 GB' },
 ]
+// NOTE (TARDIS-168): the DeepSeek-R1-Distill family was dropped from the catalog
+// after manual testing — in the browser 4-bit quant it hallucinates broken JS
+// (emits Python, fuses identifiers like `consoleieving`, runs degenerate
+// reasoning loops), which neither the prompt nor sampling penalties fix. The
+// reasoning infrastructure (flag + budget + badge) stays for a future CoT model
+// that actually works.
 
-// Curated set of reasoning-model ids, derived from the catalog flag. Used to
-// decide whether to apply the think-token budget / reasoning prompt cap and to
-// show the "thinking" badge (TARDIS-168 C1/C3).
+// Reasoning (chain-of-thought) detection (TARDIS-168 C1/C3). Two sources:
+//   1. an explicit per-model `reasoning: true` flag in the catalog, and
+//   2. the DeepSeek-R1 family by name — it ALWAYS streams <think>…</think>, an
+//      intrinsic property independent of whether the id is in our catalog (so
+//      the think-budget logic stays correct if such a model is ever loaded).
+// Drives the think-token budget / reasoning cap and the "thinking" picker badge.
 export const REASONING_MODEL_IDS = new Set(
   MODEL_CATALOG.filter((m) => m.reasoning).map((m) => m.id),
 )
 
-/** Whether a model id is a curated reasoning (chain-of-thought) model. */
+const REASONING_ID_PATTERN = /DeepSeek-R1/i
+
+/** Whether a model id is a reasoning (chain-of-thought) model. */
 export function isReasoningModel(id: string | null | undefined): boolean {
-  return !!id && REASONING_MODEL_IDS.has(id)
+  return !!id && (REASONING_MODEL_IDS.has(id) || REASONING_ID_PATTERN.test(id))
 }
 
 export const AVAILABLE_MODELS = MODEL_CATALOG.map((m) => m.id)
