@@ -1,6 +1,6 @@
 import { atom, action, wrap } from '@reatom/core'
 import {
-  IN_BROWSER_MAX_TOKENS,
+  effectiveMaxTokensAtom,
   interruptInBrowserAtom,
   type InBrowserGenerator,
   type InBrowserIncompleteReason,
@@ -61,7 +61,7 @@ export const startThinkingAction = action((afterCellId: string | null): boolean 
     afterCellId,
     thinking: '',
     tokens: 0,
-    maxTokens: IN_BROWSER_MAX_TOKENS,
+    maxTokens: effectiveMaxTokensAtom(),
     stopRequested: false,
     phase: 'thinking',
   })
