@@ -44,6 +44,33 @@ describe('kernel.run — happy path', () => {
     expect(r.items).toContainEqual({ type: 'stdout', text: 'note' })
   })
 
+  test('kernel boots and installs every injected global (bootstrap smoke, M5)', async () => {
+    // The base64 / text-codec / structuredClone polyfills are in-VM bootstrap
+    // STRINGS eval'd at kernel start (they can't cross the emscripten boundary).
+    // A syntax error in any one throws from createKernel and takes down the WHOLE
+    // kernel — not just that helper — and the strings are invisible to
+    // ESLint/tsc. This guard fails loudly if a polyfill stops installing
+    // (TARDIS-168 M5).
+    // `console` is an object (its methods are functions); the rest are callables.
+    const globals: Array<[name: string, kind: string]> = [
+      ['console', 'object'],
+      ['display', 'function'],
+      ['btoa', 'function'],
+      ['atob', 'function'],
+      ['TextEncoder', 'function'],
+      ['TextDecoder', 'function'],
+      ['structuredClone', 'function'],
+    ]
+    const r = await runFresh(
+      `console.log([${globals.map(([g]) => `typeof ${g}`).join(',')}].join(","))`,
+    )
+    expect(r.status).toBe('done')
+    expect(r.items).toContainEqual({
+      type: 'stdout',
+      text: globals.map(([, kind]) => kind).join(','),
+    })
+  })
+
   test('top-level await is supported', async () => {
     const r = await runFresh('const v = await Promise.resolve(42); console.log(v)')
     expect(r.status).toBe('done')
@@ -825,7 +852,10 @@ describe('kernel.run — base64 globals (btoa / atob)', () => {
   test('btoa on a code point > 0xFF throws INSIDE the cell, not the host', async () => {
     const r = await runFresh('btoa("\u2603")') // snowman — outside Latin-1
     expect(r.status).toBe('error')
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+    // Assert the SPECIFIC error (TG7): a bare "some error" would also pass if a
+    // broken bootstrap string threw a SyntaxError, masking a real regression.
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('InvalidCharacterError')
   })
 
   test('atob rejects a "=" in the middle instead of silently truncating', async () => {
@@ -833,7 +863,8 @@ describe('kernel.run — base64 globals (btoa / atob)', () => {
     // do not decode just the prefix before it.
     const r = await runFresh('atob("YQ==YQ==")')
     expect(r.status).toBe('error')
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('InvalidCharacterError')
   })
 
   test('atob accepts forgiving trailing padding (length multiple of 4)', async () => {
@@ -883,7 +914,10 @@ describe('kernel.run — text codecs (TextEncoder / TextDecoder)', () => {
   test('TextDecoder rejects an unsupported encoding label', async () => {
     const r = await runFresh('new TextDecoder("utf-16")')
     expect(r.status).toBe('error')
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+    // Specific error (TG7): the constructor throws RangeError per WHATWG, not a
+    // generic failure that a broken bootstrap would also produce.
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('RangeError')
   })
 
   test('TextDecoder maps malformed UTF-8 to the replacement char U+FFFD', async () => {
@@ -962,7 +996,10 @@ describe('kernel.run — structuredClone', () => {
   test('throws on a value that cannot be cloned (a function)', async () => {
     const r = await runFresh('structuredClone({ fn: () => 1 })')
     expect(r.status).toBe('error')
-    expect(r.items.some((it) => it.type === 'error')).toBe(true)
+    // Specific error (TG7): the platform name is DataCloneError, asserted so a
+    // SyntaxError from a broken clone bootstrap can't pass as "some error".
+    const err = r.items.find((it) => it.type === 'error')
+    expect(err?.type === 'error' && err.name).toBe('DataCloneError')
   })
 
   test('an uncloneable value throws with the platform error name (DataCloneError)', async () => {
