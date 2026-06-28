@@ -84,4 +84,42 @@ describe('detectSandboxViolations', () => {
     // Sanity: shadow-skip must not blind the detector to genuine host use.
     expect(detectSandboxViolations('const el = document.body;')).toEqual(['document'])
   })
+
+  test('flags a computed-member forbidden method (bracket-notation bypass, H2)', () => {
+    // `el['getContext']` is identical to `el.getContext` and must be caught.
+    expect(detectSandboxViolations("const ctx = el['getContext']('2d');")).toEqual(['getContext'])
+  })
+
+  test('flags a forbidden global reached through globalThis/self/window', () => {
+    expect(detectSandboxViolations('globalThis.fetch("/x");')).toEqual(['fetch'])
+    expect(detectSandboxViolations("self['document'].body;")).toEqual(['document'])
+  })
+
+  test('does NOT flag a string-literal computed key that is not a forbidden name', () => {
+    expect(detectSandboxViolations('const o = {}; o["foo"] = 1;')).toEqual([])
+  })
+
+  test('flags the newly covered browser globals/methods', () => {
+    expect(detectSandboxViolations('const u = URL.createObjectURL(blob);')).toEqual([
+      'createObjectURL',
+    ])
+    expect(detectSandboxViolations('const img = new Image();')).toEqual(['Image'])
+  })
+
+  test('flags ES import declarations (no module loader in the cell, H3)', () => {
+    expect(detectSandboxViolations('import { x } from "y"; console.log(x);')).toEqual(['import'])
+  })
+
+  test('flags ES export declarations (H3)', () => {
+    expect(detectSandboxViolations('export const a = 1;')).toEqual(['export'])
+  })
+
+  test('flags dynamic import() and import.meta (H3)', () => {
+    expect(detectSandboxViolations('const m = await import("x");')).toEqual(['import'])
+    expect(detectSandboxViolations('const u = import.meta.url;')).toEqual(['import.meta'])
+  })
+
+  test('still catches a forbidden ref nested inside an export (H3)', () => {
+    expect(detectSandboxViolations('export const a = fetch("/x");')).toEqual(['export', 'fetch'])
+  })
 })

@@ -72,6 +72,7 @@ function buildRepairInstruction(violations: string[], previousCode: string): str
   return [
     `Your previous answer used these APIs that DO NOT exist in the notebook cell: ${violations.join(', ')}.`,
     'The cell runs in QuickJS with NO document/window/canvas and no network.',
+    'It has NO ES module syntax either — never use import/export/import()/import.meta.',
     'Rewrite it so it runs as-is. If it draws graphics, return ONLY a single',
     "display({ type: 'html', value: '<svg>…</svg>' }) (or a <canvas> + <script> inside the html string) —",
     'all DOM/canvas calls must live INSIDE that html string, never in the cell.',
