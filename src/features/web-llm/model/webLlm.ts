@@ -203,12 +203,14 @@ export const loadModelAction = action(async () => {
     // unload() may itself reject on a broken engine — swallow that and rethrow
     // the ORIGINAL load error for the UI (`loadModelAction.error()`).
     await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
-    // Only the current run owns the shared atoms; a superseded run must not wipe
-    // the winner's engine/id on its own late failure.
-    if (seq === latestLoadSeq) {
-      engineAtom.set(null)
-      loadedModelIdAtom.set(null)
-    }
+    // A superseded run's failure is nobody's problem: a newer load already won,
+    // its orphan engine is unloaded above, and the shared atoms belong to the
+    // winner. Re-throwing would surface a stale "load failed" on `loadModelAction
+    // .error()` ON TOP of the model that actually loaded fine — so swallow it
+    // and only the current run touches the atoms / rethrows (TARDIS-168).
+    if (seq !== latestLoadSeq) return
+    engineAtom.set(null)
+    loadedModelIdAtom.set(null)
     throw err
   } finally {
     // Stop the spinner only for the current run; a stale run finishing later must

@@ -178,12 +178,21 @@ export async function createKernel(options: KernelOptions = {}): Promise<Kernel>
   // Items array is rebound per-run, but console / display capture it via
   // this mutable ref so we only have to install them once.
   const sink: Sink = { items: [], bytes: 0, count: 0, budgetHit: false, trailingWasPromise: false }
-  installConsole(vm, sink)
-  installDisplay(vm, sink)
-  installBase64(vm)
-  installTextCodecs(vm)
-  installStructuredClone(vm)
-  installTrailingMarker(vm, sink)
+  // The base64/codec/structuredClone installers eval in-VM bootstrap strings and
+  // THROW if any fails to install. Dispose the freshly allocated context before
+  // re-throwing, otherwise a bootstrap failure leaks the WASM QuickJSContext on
+  // this (loud) error path (TARDIS-168).
+  try {
+    installConsole(vm, sink)
+    installDisplay(vm, sink)
+    installBase64(vm)
+    installTextCodecs(vm)
+    installStructuredClone(vm)
+    installTrailingMarker(vm, sink)
+  } catch (e) {
+    vm.dispose()
+    throw e
+  }
 
   return {
     async run(code, runOptions = {}): Promise<RuntimeResult> {

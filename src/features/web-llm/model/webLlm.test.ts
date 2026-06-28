@@ -153,6 +153,38 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
     expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
     expect(peek(engineAtom)).not.toBeNull()
   })
+
+  test('a superseded load that FAILS late does not surface its error over the winner (TARDIS-168)', async () => {
+    // First load hangs, then rejects; a second load wins in between. The stale
+    // failure must be swallowed — not re-thrown onto the shared loadModelAction
+    // .error(), which would show "load failed" on top of a model that loaded fine.
+    let rejectFirst!: (e: Error) => void
+    const firstReload = new Promise<void>((_, reject) => {
+      rejectFirst = reject
+    })
+    const firstUnload = vi.fn(async () => undefined)
+    vi.mocked(webllm.MLCEngine)
+      .mockImplementationOnce(function () {
+        return { reload: vi.fn(() => firstReload), unload: firstUnload }
+      } as never)
+      .mockImplementationOnce(function () {
+        return { reload: vi.fn(async () => undefined), unload: vi.fn(async () => undefined) }
+      } as never)
+
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    const firstRun = wrap(loadModelAction())
+    modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    await wrap(loadModelAction()) // winner
+
+    // Stale load now fails — it must resolve WITHOUT throwing (error swallowed).
+    rejectFirst(new Error('stale GPU error'))
+    await expect(firstRun).resolves.toBeUndefined()
+
+    // The orphan engine was freed, and the winner's state is untouched.
+    expect(firstUnload).toHaveBeenCalledTimes(1)
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    expect(peek(engineAtom)).not.toBeNull()
+  })
 })
 
 describe('reconcileDownloadedModelsAction (TARDIS-167 №5, review PR #88)', () => {
