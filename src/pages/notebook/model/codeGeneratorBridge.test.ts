@@ -309,4 +309,50 @@ describe('buildGenerator — stream draining (TARDIS-168)', () => {
       loadedModelIdAtom.set(null)
     }
   })
+
+  test('destroys a wedged engine after a USER Stop, not just a budget cap (H6)', async () => {
+    // The budget path is reasoning-only and the catalog ships no reasoning model,
+    // so the user Stop is the live interrupt path — it must arm the watchdog too.
+    // Non-reasoning model: the only thing that can interrupt here is the Stop.
+    vi.useFakeTimers()
+    try {
+      const unload = vi.fn(async () => undefined)
+      // A stream that emits a couple of code chunks, then HANGS (the engine
+      // ignored the user Stop) — next() never resolves again.
+      async function* wedgedAfterStop() {
+        yield { choices: [{ delta: { content: 'const a' } }] }
+        yield { choices: [{ delta: { content: ' = 1' } }] }
+        await new Promise<void>(() => {})
+        yield { choices: [{ delta: { content: ';' } }] }
+      }
+      const engine = {
+        chat: { completions: { create: vi.fn().mockResolvedValue(wedgedAfterStop()) } },
+        interruptGenerate: vi.fn().mockResolvedValue(undefined), // engine ignores it (wedged)
+        unload,
+      }
+      engineAtom.set(engine as never)
+      loadedModelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC') // NOT reasoning
+      // Open a session and request Stop — exactly what the Stop button does.
+      startThinkingAction(null)
+      requestStopAction()
+
+      const run = buildGenerator(engine as never)('anything')
+      await vi.advanceTimersByTimeAsync(0) // let the loop observe stopRequested
+      await vi.advanceTimersByTimeAsync(5000) // fire the post-interrupt watchdog
+      await run
+
+      // The point of the test: the watchdog was ARMED by the user Stop (there is
+      // no budgetHit on a non-reasoning model) and tore down the wedged engine,
+      // instead of the loop hanging forever on next(). (Whatever partial code
+      // arrived before the hang is irrelevant here.)
+      expect(unload).toHaveBeenCalledTimes(1)
+      expect(engineAtom()).toBeNull()
+      expect(loadedModelIdAtom()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      engineAtom.set(null)
+      loadedModelIdAtom.set(null)
+      thinkingSessionAtom.set(null)
+    }
+  })
 })

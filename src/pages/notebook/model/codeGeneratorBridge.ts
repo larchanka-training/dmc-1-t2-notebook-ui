@@ -70,6 +70,10 @@ async function streamOnce(
   // `tokenOffset` carries the first pass's count so a retry keeps counting up.
   let tokens = 0
   let budgetHit = false
+  // True once a user Stop has been observed for this stream (latched): from then
+  // on the watchdog bounds every `next()` so a Stop that the engine ignores
+  // can't hang the loop forever (TARDIS-168 H6).
+  let interrupted = false
   // Manual iteration (not `for await`) so we can put a bounded timeout on each
   // `next()` ONCE we've asked the engine to stop — see the watchdog below.
   const iterator = stream[Symbol.asyncIterator]()
@@ -89,10 +93,22 @@ async function streamOnce(
     // (`unload()` frees the WebGPU device AND makes the leaked lock moot — the
     // whole engine is gone) and drop `engineAtom` so the UI asks for a reload
     // instead of hanging on "Thinking…" forever.
+    //
+    // An interrupt is raised by EITHER the think-budget cap below (`budgetHit`)
+    // OR a user Stop (`requestStopAction` → `interruptGenerate`, flagged on the
+    // session). The budget path is reasoning-only and the catalog currently
+    // ships no reasoning model, so the user Stop is the live interrupt path —
+    // it MUST arm the watchdog too, or a wedged engine after Stop hangs forever
+    // (TARDIS-168 H6). Read the session flag under `wrap` (atom read after an
+    // await must restore the Reatom frame — same reason as the wraps below).
+    const stopRequested =
+      !interrupted && (await wrap(async () => thinkingSessionAtom()?.stopRequested))
+    if (stopRequested) interrupted = true
     const nextPromise = iterator.next()
-    const next = budgetHit
-      ? await withDrainTimeout(nextPromise, POST_INTERRUPT_DRAIN_MS)
-      : await nextPromise
+    const next =
+      budgetHit || interrupted
+        ? await withDrainTimeout(nextPromise, POST_INTERRUPT_DRAIN_MS)
+        : await nextPromise
     if (next === DRAIN_TIMED_OUT) {
       await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
       await wrap(async () => {
