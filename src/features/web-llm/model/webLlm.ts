@@ -88,7 +88,18 @@ export const messagesAtom = atom<ChatMessage[]>([], 'webLlm.messages')
 
 export const streamingResponseAtom = atom('', 'webLlm.streamingResponse')
 
+// Monotonic load token (TARDIS-168 H5). Each `loadModelAction` run claims the
+// next value; only the run whose token still equals `latestLoadSeq` may publish
+// its engine, drive the progress bar, or reset the shared atoms. When the user
+// picks another model mid-load (or double-clicks), the older run is superseded:
+// it silently unloads its now-orphan engine instead of clobbering the winner —
+// which would otherwise leave the app on the wrong model AND leak a WebGPU
+// device. A plain module counter is enough: actions run on one JS thread, so
+// `++latestLoadSeq` is atomic between awaits.
+let latestLoadSeq = 0
+
 export const loadModelAction = action(async () => {
+  const seq = ++latestLoadSeq
   const modelId = modelIdAtom()
 
   engineAtom.set(null)
@@ -105,14 +116,27 @@ export const loadModelAction = action(async () => {
   // `catch` so a retry starts clean, and always clear the loader in `finally`
   // (TARDIS-168).
   const engine = new webllm.MLCEngine({
-    // initProgressCallback is called by WebLLM outside Reatom context — must wrap
+    // initProgressCallback is called by WebLLM outside Reatom context — must wrap.
+    // Ignore progress from a superseded load so a slow older run can't drive the
+    // bar after the user already kicked off a newer one.
     initProgressCallback: wrap((report: webllm.InitProgressReport) => {
-      loadProgressAtom.set({ progress: report.progress, text: report.text })
+      if (seq === latestLoadSeq) {
+        loadProgressAtom.set({ progress: report.progress, text: report.text })
+      }
     }),
   })
 
   try {
     await wrap(engine.reload(modelId))
+
+    // A newer load started while this one was initialising → this engine is an
+    // orphan. Drop its WebGPU device and leave the shared atoms to the winner;
+    // publishing here would point the app at the stale model and leak the live
+    // engine (TARDIS-168 H5).
+    if (seq !== latestLoadSeq) {
+      await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
+      return
+    }
 
     // Set the loaded id BEFORE the engine (review PR #88 r3): the code-generator
     // bridge subscribes to `engineAtom` and reads `loadedModelIdAtom()` inside the
@@ -128,12 +152,17 @@ export const loadModelAction = action(async () => {
     // unload() may itself reject on a broken engine — swallow that and rethrow
     // the ORIGINAL load error for the UI (`loadModelAction.error()`).
     await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
-    engineAtom.set(null)
-    loadedModelIdAtom.set(null)
+    // Only the current run owns the shared atoms; a superseded run must not wipe
+    // the winner's engine/id on its own late failure.
+    if (seq === latestLoadSeq) {
+      engineAtom.set(null)
+      loadedModelIdAtom.set(null)
+    }
     throw err
   } finally {
-    // Always stop the spinner, on success and on failure alike.
-    loadProgressAtom.set(null)
+    // Stop the spinner only for the current run; a stale run finishing later must
+    // not clear the live load's progress.
+    if (seq === latestLoadSeq) loadProgressAtom.set(null)
   }
 }, 'webLlm.loadModel').extend(withAsync())
 

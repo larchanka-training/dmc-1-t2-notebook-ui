@@ -100,6 +100,43 @@ describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
     expect(peek(engineAtom)).not.toBeNull()
     expect(peek(loadedModelIdAtom)).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
   })
+
+  test('a superseded concurrent load unloads its engine and does not clobber the winner (H5)', async () => {
+    // First load hangs on reload(); a second load starts and finishes first.
+    let releaseFirst!: () => void
+    const firstReload = new Promise<void>((r) => {
+      releaseFirst = r
+    })
+    // Two engine instances so we can tell which one gets published / unloaded.
+    const firstUnload = vi.fn(async () => undefined)
+    const secondUnload = vi.fn(async () => undefined)
+    vi.mocked(webllm.MLCEngine)
+      .mockImplementationOnce(function () {
+        return { reload: vi.fn(() => firstReload), unload: firstUnload }
+      } as never)
+      .mockImplementationOnce(function () {
+        return { reload: vi.fn(async () => undefined), unload: secondUnload }
+      } as never)
+
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    const firstRun = wrap(loadModelAction())
+    // Second load supersedes the first while it is still initialising.
+    modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    await wrap(loadModelAction())
+
+    // Winner published; spinner cleared by the winner.
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    expect(peek(engineAtom)).not.toBeNull()
+    expect(secondUnload).not.toHaveBeenCalled()
+
+    // Now let the stale first load finish: it must unload its orphan engine and
+    // leave the winner's atoms untouched.
+    releaseFirst()
+    await firstRun
+    expect(firstUnload).toHaveBeenCalledTimes(1)
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    expect(peek(engineAtom)).not.toBeNull()
+  })
 })
 
 describe('reconcileDownloadedModelsAction (TARDIS-167 №5, review PR #88)', () => {

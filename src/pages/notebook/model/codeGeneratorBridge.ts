@@ -1,3 +1,4 @@
+import { wrap } from '@reatom/core'
 import {
   codeGeneratorAtom,
   loadedModelDisplayAtom,
@@ -13,6 +14,25 @@ import { splitThinkAndCode } from './reasoningParser'
 import { isParseableJs, detectSandboxViolations } from './codeValidation'
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+
+// After we ask the engine to stop (budget cap or user Stop), the stream should
+// emit its final chunk and end almost immediately. If it doesn't within this
+// window the generation is wedged — we stop waiting rather than hang the UI on
+// "Thinking…" forever (TARDIS-168 H6).
+const POST_INTERRUPT_DRAIN_MS = 5000
+
+const DRAIN_TIMED_OUT = Symbol('drain-timed-out')
+
+// Resolve with the promise, or with DRAIN_TIMED_OUT if `ms` elapses first. The
+// timer is cleared when the promise wins so a healthy stream leaves no pending
+// timeout behind.
+function withDrainTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof DRAIN_TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<typeof DRAIN_TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(DRAIN_TIMED_OUT), ms)
+  })
+  return Promise.race([p.then((v) => v).finally(() => clearTimeout(timer)), timeout])
+}
 
 // One streamed generation pass: drains the WebLLM stream, surfaces reasoning +
 // token progress, and enforces the think-token budget. Returns the raw model
@@ -37,8 +57,40 @@ async function streamOnce(
   // `tokenOffset` carries the first pass's count so a retry keeps counting up.
   let tokens = 0
   let budgetHit = false
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta.content ?? ''
+  // Manual iteration (not `for await`) so we can put a bounded timeout on each
+  // `next()` ONCE we've asked the engine to stop — see the watchdog below.
+  const iterator = stream[Symbol.asyncIterator]()
+  for (;;) {
+    // CRITICAL (lock safety): while the engine is running normally we DO NOT
+    // `break`/`return` early. WebLLM holds a per-model lock for the whole
+    // generation and releases it only when its async generator runs to
+    // completion; abandoning the iterator early calls its `.return()` before
+    // that release, leaking the lock so the NEXT `create()` blocks forever
+    // (a dead loader, a frozen Stop). So on a budget/stop we raise the
+    // interrupt flag and keep draining — the engine sees it, ends, and emits
+    // its final chunk, releasing the lock cleanly.
+    //
+    // H6 watchdog: a wedged engine might never end the stream even after the
+    // interrupt. Once we've interrupted, bound each `next()` by a timeout; if it
+    // trips, the generation is unrecoverable, so we destroy the engine
+    // (`unload()` frees the WebGPU device AND makes the leaked lock moot — the
+    // whole engine is gone) and drop `engineAtom` so the UI asks for a reload
+    // instead of hanging on "Thinking…" forever.
+    const nextPromise = iterator.next()
+    const next = budgetHit
+      ? await withDrainTimeout(nextPromise, POST_INTERRUPT_DRAIN_MS)
+      : await nextPromise
+    if (next === DRAIN_TIMED_OUT) {
+      await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
+      await wrap(async () => {
+        engineAtom.set(null)
+        loadedModelIdAtom.set(null)
+      })()
+      break
+    }
+    if (next.done) break
+
+    const delta = next.value.choices[0]?.delta.content ?? ''
     if (delta) tokens += 1
     raw += delta
     const partial = splitThinkAndCode(raw)
@@ -46,17 +98,8 @@ async function streamOnce(
       lastThinking = partial.thinking
       onProgress?.({ thinking: partial.thinking, tokens: tokenOffset + tokens })
     }
-    // Kill a runaway reasoning loop: still thinking, no code, over budget.
-    //
-    // CRITICAL: ask the engine to stop but DO NOT `break` out of the stream.
-    // WebLLM holds a per-model lock for the whole generation and releases it
-    // only when its async generator runs to completion; bailing early with
-    // `break` calls the generator's `.return()` before that release, leaking
-    // the lock so the NEXT `create()` blocks forever on `lock.acquire()` (a
-    // dead loader, a frozen Stop). Instead we raise the interrupt flag once and
-    // let the loop drain: the engine's own loop sees the flag, stops, and emits
-    // its final chunk — releasing the lock cleanly. A user Stop works the same
-    // way (interruptInBrowserAtom → interruptGenerate).
+    // Kill a runaway reasoning loop: still thinking, no code, over budget. Raise
+    // the interrupt once (never per chunk) and let the loop keep draining.
     if (!budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
       budgetHit = true
       void engine.interruptGenerate()

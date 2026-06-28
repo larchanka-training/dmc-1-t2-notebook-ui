@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
+import { engineAtom, loadedModelIdAtom } from '@/features/web-llm'
 import { IN_BROWSER_SYSTEM_PROMPT, buildGenerator } from './codeGeneratorBridge'
 
 describe('IN_BROWSER_SYSTEM_PROMPT', () => {
@@ -199,5 +200,53 @@ describe('buildGenerator — stream draining (TARDIS-168)', () => {
     expect(result.incomplete).toBe(true) // no usable code
     expect(state.interruptCalls).toBe(1) // interrupted exactly once, not per-chunk
     expect(state.released).toBe(true) // CRITICAL: lock released → next run won't deadlock
+  })
+
+  test('destroys a wedged engine when the stream never ends after interrupt (H6)', async () => {
+    vi.useFakeTimers()
+    try {
+      // Engine whose stream keeps the think open past the budget, then HANGS:
+      // after the interrupt the next chunk never arrives (a wedged generation).
+      let interrupted = false
+      const unload = vi.fn(async () => undefined)
+      async function* wedged() {
+        // Enough chunks to blow IN_BROWSER_THINK_TOKEN_BUDGET (2048).
+        for (let i = 0; i < 2100; i++) {
+          if (interrupted) break
+          yield { choices: [{ delta: { content: '<think>loop ' } }] }
+        }
+        // Interrupt was raised but the engine wedges: block forever.
+        await new Promise<void>(() => {})
+        yield { choices: [{ delta: { content: 'never' } }] }
+      }
+      const engine = {
+        chat: { completions: { create: vi.fn().mockResolvedValue(wedged()) } },
+        interruptGenerate: vi.fn().mockImplementation(async () => {
+          interrupted = true
+        }),
+        unload,
+      }
+      engineAtom.set(engine as never)
+      loadedModelIdAtom.set('some-model')
+
+      const run = buildGenerator(engine as never)('loop forever')
+      // Let the 2100 buffered chunks drain (microtasks), tripping the budget and
+      // the interrupt, until the loop is parked on the wedged next() + watchdog.
+      await vi.advanceTimersByTimeAsync(0)
+      // Fire the post-interrupt drain watchdog (5s).
+      await vi.advanceTimersByTimeAsync(5000)
+      const result = await run
+
+      expect(result.incomplete).toBe(true)
+      expect(engine.interruptGenerate).toHaveBeenCalledTimes(1)
+      // Wedged engine destroyed and the slot cleared so the UI asks for a reload.
+      expect(unload).toHaveBeenCalledTimes(1)
+      expect(engineAtom()).toBeNull()
+      expect(loadedModelIdAtom()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      engineAtom.set(null)
+      loadedModelIdAtom.set(null)
+    }
   })
 })
