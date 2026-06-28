@@ -19,7 +19,9 @@ describe('exportNotebook', () => {
       return 'blob:mock'
     })
     URL.revokeObjectURL = vi.fn()
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
       capturedFilename = this.download
     })
   })
