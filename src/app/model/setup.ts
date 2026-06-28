@@ -23,14 +23,8 @@ import {
   startSlot,
 } from '@/features/notebook'
 import { startNotebookListCrossTabSync } from '@/features/notebook/model/notebookListCrossTab'
-import {
-  AVAILABLE_MODELS,
-  autoLoadModelAtom,
-  loadModelAction,
-  modelIdAtom,
-  normalizeWebLlmPersistedState,
-  reconcileDownloadedModelsAction,
-} from '@/features/web-llm'
+import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
+import { startSettingsSync } from '@/features/settings'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 
@@ -127,22 +121,21 @@ rootFrame.run(() => {
   // one session, and clear it on sign-out (#135) — the list resource does not
   // track the user itself, so a stale/foreign list would otherwise linger.
   startNotebookListSync()
-  // TARDIS-167 (review PR #88 r3): sanitise localStorage-restored model state
-  // (drop garbage/stale ids, reset a phantom selected id) SYNCHRONOUSLY before
-  // any component reads it — otherwise `new Set(downloadedModelIdsAtom())` could
-  // throw on a corrupt record and crash the page render.
+  // TARDIS-167 (review PR #88 r3): sanitise the DEVICE-GLOBAL downloaded-models
+  // list SYNCHRONOUSLY before any component reads it — otherwise
+  // `new Set(downloadedModelIdsAtom())` could throw on a corrupt record and
+  // crash the page render.
   normalizeWebLlmPersistedState()
   // TARDIS-167 (№5, review PR #88): drop persisted "downloaded" model ids whose
   // WebLLM cache was cleared/evicted, so the list highlight reflects the real
   // cache. Best-effort and self-contained — never blocks boot.
   void reconcileDownloadedModelsAction()
-  // TARDIS-181: auto-load the default model on start when the user opted in via
-  // Settings. Runs AFTER normalization so the flag + selected id are already
-  // sanitised. Gated on a valid catalogue id; best-effort (the action owns its
-  // own progress/error state and a sequence guard) — never blocks boot.
-  if (autoLoadModelAtom() && AVAILABLE_MODELS.includes(modelIdAtom())) {
-    void loadModelAction()
-  }
+  // TARDIS-181: per-user settings sync. Hydrates the 5 settings atoms from the
+  // signed-in user's namespaced record (creating it with defaults on first
+  // sign-in), persists edits back per user, resets to defaults on sign-out, and
+  // performs the opt-in model auto-load once the user's settings are applied.
+  // Subscribing here makes it react to the session restored just above.
+  startSettingsSync()
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order

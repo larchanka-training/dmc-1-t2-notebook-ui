@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { peek } from '@reatom/core'
-import { readPersistRecord } from '@/shared/lib/persist'
 import { userAtom } from '@/entities/session'
 import { displayNameAtom, sidebarDisplayNameAtom } from './settings'
 
@@ -19,11 +18,8 @@ describe('displayNameAtom (TARDIS-181 device-local display name)', () => {
     expect(peek(displayNameAtom)).toBe('Лора')
   })
 
-  test('is persisted to localStorage via withLocalStorage', () => {
-    displayNameAtom.set('Лора')
-    // withLocalStorage writes a `{ data }` record under the atom's storage key.
-    expect(readPersistRecord<string>('settings.displayName')).toBe('Лора')
-  })
+  // Persistence is no longer self-contained on the atom: it is namespaced per
+  // user by the settings sync layer (see userSettings.test.ts / settingsSync).
 })
 
 describe('sidebarDisplayNameAtom (computed fallback chain)', () => {

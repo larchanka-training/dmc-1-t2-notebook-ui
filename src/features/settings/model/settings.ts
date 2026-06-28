@@ -1,18 +1,17 @@
-import { atom, computed, withLocalStorage } from '@reatom/core'
+import { atom, computed } from '@reatom/core'
 import { userAtom } from '@/entities/session'
 
-// Device-local user settings (TARDIS-181, in-browser only). Persisted to
-// localStorage via Reatom — read reactively from components, so plain
-// `withLocalStorage` is enough (same pattern as themeModeAtom).
+// Per-user settings (TARDIS-181, in-browser only). These are namespaced by
+// `user.id` (see `userSettings.ts` + `settingsSync.ts`): a plain in-memory atom
+// hydrated/persisted under `settings:<userId>`, NOT self-persisted — so two
+// accounts on the same browser never see each other's values.
 
 /**
  * Display name shown in the sidebar. A purely local override: the server's
  * `User.displayName` is read-only (no write endpoint, `null` in prod), so the
  * editable name lives here. Empty string means "unset" → fall back to email.
  */
-export const displayNameAtom = atom('', 'settings.displayName').extend(
-  withLocalStorage('settings.displayName'),
-)
+export const displayNameAtom = atom('', 'settings.displayName')
 
 /**
  * The name to render for the signed-in user: the local display name when set,

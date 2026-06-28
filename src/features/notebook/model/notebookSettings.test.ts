@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { peek } from '@reatom/core'
-import { readPersistRecord } from '@/shared/lib/persist'
 import {
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
@@ -30,15 +29,9 @@ describe('raw tunable token-limit atoms (TARDIS-181)', () => {
     expect(peek(thinkTokenBudgetAtom)).toBe(2048)
   })
 
-  test('inBrowserMaxTokensAtom persists its value to localStorage', () => {
-    inBrowserMaxTokensAtom.set(4000)
-    expect(readPersistRecord<number>('notebook.settings.inBrowserMaxTokens')).toBe(4000)
-  })
-
-  test('thinkTokenBudgetAtom persists its value to localStorage', () => {
-    thinkTokenBudgetAtom.set(1000)
-    expect(readPersistRecord<number>('notebook.settings.thinkTokenBudget')).toBe(1000)
-  })
+  // These atoms are no longer self-persisted: their value is namespaced per
+  // user by the settings sync layer (see settingsSync). The clamp behaviour the
+  // generation path relies on is covered by the effective* views below.
 })
 
 describe('effectiveMaxTokensAtom (clamped generation view)', () => {
