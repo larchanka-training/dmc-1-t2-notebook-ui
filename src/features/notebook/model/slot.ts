@@ -445,11 +445,17 @@ async function openResolvedNotebook(
  * save / hung fetch cannot strand the lock (CL-3).
  */
 export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome> => {
+  // Capture the signed-in owner id SYNCHRONOUSLY, before any await (TARDIS-183):
+  // the last-opened write below runs AFTER `await runExclusive`, where the Reatom
+  // frame is off the stack under production clearStack() — a cold `userAtom()`
+  // read there throws `missing async stack`. Reading it up-front (in-frame) and
+  // reusing the captured value keeps the write frame-safe.
+  const ownerId = userAtom()?.id
   if (id === activeNotebookIdAtom()) {
     // Clicking the already-open notebook still counts as "this is what I'm on"
     // (TARDIS-183). Persisting it keeps last-opened correct even when no slot
     // switch happens. No-op for the floor id (guarded inside writeLastOpenedId).
-    writeLastOpenedId(userAtom()?.id, id)
+    writeLastOpenedId(ownerId, id)
     return 'already'
   }
 
@@ -532,8 +538,9 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
   })
   if (!ran) return 'busy'
   // Record the last successful real transition into the slot (TARDIS-183), so
-  // the startup resolver can reopen it on the next boot. No-op for the floor id
-  // / signed-out (guarded inside writeLastOpenedId).
-  if (outcome === 'opened') writeLastOpenedId(userAtom()?.id, id)
+  // the startup resolver can reopen it on the next boot. Uses the `ownerId`
+  // captured up-front (frame-safe after the await). No-op for the floor id /
+  // signed-out (guarded inside writeLastOpenedId).
+  if (outcome === 'opened') writeLastOpenedId(ownerId, id)
   return outcome
 }, 'notebook.openInSlot')
