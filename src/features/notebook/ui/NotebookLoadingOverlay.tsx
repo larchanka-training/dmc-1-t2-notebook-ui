@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/cn'
+import { Logo } from '@/shared/ui/logo'
 
 export function NotebookLoadingOverlay() {
   const skeleton = 'relative overflow-hidden rounded-[5px] bg-muted'
@@ -29,9 +30,7 @@ export function NotebookLoadingOverlay() {
       <div className="sticky top-1/2 mx-auto flex w-[min(348px,86%)] -translate-y-1/2 flex-col items-center rounded-[var(--radius-modal)] border border-border bg-card/95 px-9 py-8 text-center shadow-[var(--shadow-pop)]">
         <div className="relative mb-[18px] grid size-[72px] place-items-center">
           <div className="absolute inset-0 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
-          <div className="grid size-[52px] place-items-center rounded-[14px] bg-primary font-mono text-[21px] font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,black_8%,transparent)]">
-            JS
-          </div>
+          <Logo size={52} />
         </div>
         <div className="text-[17px] font-semibold tracking-[-0.01em]">
           Synchronization<span className="animate-pulse">...</span>

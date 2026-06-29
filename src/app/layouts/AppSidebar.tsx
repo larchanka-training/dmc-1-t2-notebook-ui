@@ -52,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
+import { Logo } from '@/shared/ui/logo'
 import {
   Sidebar,
   SidebarContent,
@@ -502,9 +503,7 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-border">
       <SidebarHeader className="h-[60px] flex-row items-center gap-2.5 border-b border-border px-4 py-0">
-        <span className="grid size-[30px] shrink-0 place-items-center rounded-[var(--radius-item)] bg-primary font-mono text-[15px] font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,black_8%,transparent)]">
-          JS
-        </span>
+        <Logo size={30} />
         <div className="min-w-0 leading-tight">
           <span className="block truncate text-base font-semibold tracking-tight">JS Notebook</span>
           <span className="block truncate text-xs font-normal text-muted-foreground">

@@ -15,6 +15,7 @@ import {
   sendCodeAction,
   tickCountdownAction,
 } from '../model/loginForm'
+import { Logo } from '@/shared/ui/logo'
 import { DevOtpBanner } from './DevOtpBanner'
 import { OtpInput } from './OtpInput'
 
@@ -154,9 +155,7 @@ export const LoginForm = reatomComponent(() => {
   return (
     <div className="w-full max-w-[400px] space-y-6">
       <div className="flex flex-col items-center gap-3 text-center">
-        <div className="grid size-11 place-items-center rounded-xl bg-primary font-mono text-[22px] font-semibold text-primary-foreground shadow-[var(--shadow-pop)]">
-          JS
-        </div>
+        <Logo size={64} />
         <h1 className="text-[26px] font-semibold tracking-tight">Sign in to JS Notebook</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
           {step === 1 ? (
