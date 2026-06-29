@@ -24,7 +24,7 @@ import {
 } from '@/features/notebook'
 import { startNotebookListCrossTabSync } from '@/features/notebook/model/notebookListCrossTab'
 import { normalizeWebLlmPersistedState, reconcileDownloadedModelsAction } from '@/features/web-llm'
-import { startSettingsSync } from '@/features/settings'
+import { startSettingsSync } from './settingsSync'
 import { handleSessionExpired } from './sessionExpiry'
 import { startCodeGeneratorBridge } from '@/pages/notebook/model/codeGeneratorBridge'
 

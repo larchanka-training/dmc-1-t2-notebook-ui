@@ -25,7 +25,7 @@ import {
   modelIdAtom,
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
-import { displayNameAtom } from './settings'
+import { displayNameAtom } from '@/features/settings'
 import { DEFAULT_USER_SETTINGS, readUserSettings, writeUserSettings } from './userSettings'
 import { startSettingsSync } from './settingsSync'
 

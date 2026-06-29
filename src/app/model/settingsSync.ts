@@ -1,4 +1,4 @@
-import { wrap } from '@reatom/core'
+import { isDeepEqual, wrap } from '@reatom/core'
 import { userAtom } from '@/entities/session'
 import {
   modelIdAtom,
@@ -7,7 +7,7 @@ import {
   AVAILABLE_MODELS,
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
-import { displayNameAtom } from './settings'
+import { displayNameAtom } from '@/features/settings'
 import {
   DEFAULT_USER_SETTINGS,
   ensureUserSettings,
@@ -23,7 +23,11 @@ import {
 //   - on sign-out: reset the atoms to defaults so the next user / the login
 //     screen never shows the previous account's values.
 //
-// Started once from `app/model/setup.ts` (like `startThemeSync`).
+// Lives in `app/model` (not `features/settings`) because it is orchestration: it
+// composes three features (auth/session, web-llm, notebook) + the settings
+// record. Cross-feature wiring belongs to the app layer; a feature must not
+// import a sibling feature. Started once from `app/model/setup.ts` (like
+// `startThemeSync`).
 
 // Snapshot the live atoms into a settings record (the persisted shape).
 function snapshot(): UserSettings {
@@ -55,18 +59,20 @@ export function startSettingsSync(): () => void {
   // signed out → writes are suppressed (the login screen's defaults are not
   // anyone's settings). Set on sign-in, cleared on sign-out.
   let currentUserId: string | null = null
-  // Echo guard: while `apply()` writes the atoms on sign-in/out, the write-back
-  // subscriptions must NOT persist those programmatic sets back (they'd just
-  // rewrite what we just read, and could clobber the record mid-apply).
-  let applying = false
+  // The record currently believed to be in storage for `currentUserId`. The
+  // write-back guard compares the live snapshot against THIS instead of a
+  // synchronous `applying` flag: Reatom atom subscriptions fire ASYNCHRONOUSLY
+  // (the tests await a macrotask after each `.set`), so a sync
+  // `applying = true … = false` window is already closed by the time `persist`
+  // runs — it never actually suppresses the echo. Comparing by value skips the
+  // sign-in echo reliably and stays correct even if `apply` later normalises
+  // values. Updated on apply (storage == applied record) AND after each write,
+  // so reverting an edit back to the stored value still persists correctly.
+  let lastSynced: UserSettings | null = null
 
   const applyRecord = (s: UserSettings) => {
-    applying = true
-    try {
-      apply(s)
-    } finally {
-      applying = false
-    }
+    apply(s)
+    lastSynced = snapshot()
   }
 
   // React to sign-in / sign-out / account switch. Wrapped so the async
@@ -100,10 +106,15 @@ export function startSettingsSync(): () => void {
   )
 
   // Persist any settings change to the CURRENT user's record. One handler per
-  // atom; all skip while signed out (no namespace) or mid-apply (echo).
+  // atom; skips while signed out (no namespace). The echo from `applyRecord`'s
+  // own `.set`s is skipped by value: if the live snapshot still equals the
+  // record we just applied, there is nothing new to write (idempotent).
   const persist = () => {
-    if (applying || currentUserId === null) return
-    writeUserSettings(currentUserId, snapshot())
+    if (currentUserId === null) return
+    const current = snapshot()
+    if (lastSynced !== null && isDeepEqual(current, lastSynced)) return
+    writeUserSettings(currentUserId, current)
+    lastSynced = current
   }
   const stops = [
     displayNameAtom.subscribe(persist),
