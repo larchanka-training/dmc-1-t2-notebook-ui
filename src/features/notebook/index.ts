@@ -94,6 +94,7 @@ export {
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
 export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'
+export { readLastOpenedId, writeLastOpenedId, resolveOwnedLastOpenedId } from './model/lastOpened'
 export {
   openNotebookInSlot,
   resetSlotToFloorForAccountChange,
