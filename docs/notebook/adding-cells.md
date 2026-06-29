@@ -202,7 +202,9 @@ Ideas for future additions:
 | -------------------------- | ---------------------------------------------------------------------------------- |
 | **Persist cells**          | Extend `cellsAtom` with `withLocalStorage` (or serialise atomized fields manually) |
 | **Cell output formatting** | Richer inspector for `result` items (collapsible trees, syntax highlighting)       |
-| **Export notebook**        | Serialise `cellsAtom()` to JSON and trigger a file download                        |
 
 > Markdown cells and shared scope between cells are already implemented — see
 > `kind: 'markdown'` and [How it works](./how-it-works.md).
+>
+> Notebook export (JSON / Markdown download) is also shipped — see
+> [Exporting a Notebook](./export.md).
