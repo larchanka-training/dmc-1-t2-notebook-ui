@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event'
 // appears in the pre-existing LlmPlaygroundPage.test.tsx. The assertions below
 // read the atom directly via `peek`, which is what the test verifies; silencing
 // the warning cleanly belongs to a shared test-harness change, not here.
-import { displayNameAtom } from '@/features/settings'
+import { displayNameAtom, startViewAtom } from '@/features/settings'
 import { autoLoadModelAtom } from '@/features/web-llm'
 import {
   IN_BROWSER_MAX_TOKENS,
@@ -38,6 +38,7 @@ afterEach(() => {
   autoLoadModelAtom.set(false)
   inBrowserMaxTokensAtom.set(IN_BROWSER_MAX_TOKENS)
   thinkTokenBudgetAtom.set(IN_BROWSER_THINK_TOKEN_BUDGET)
+  startViewAtom.set('last-opened')
   userAtom.set(null)
 })
 
@@ -47,7 +48,7 @@ describe('SettingsPage (TARDIS-181)', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
   })
 
-  test('renders all section titles, with two locked "Coming soon" sections', () => {
+  test('renders all section titles, with one locked "Coming soon" section', () => {
     render(<SettingsPage />)
 
     expect(screen.getByText('Display name')).toBeInTheDocument()
@@ -56,7 +57,8 @@ describe('SettingsPage (TARDIS-181)', () => {
     expect(screen.getByText('On start')).toBeInTheDocument()
     expect(screen.getByText('Passkey')).toBeInTheDocument()
 
-    expect(screen.getAllByText('Coming soon')).toHaveLength(2)
+    // TARDIS-183 unlocked "On start"; only Passkey stays "Coming soon".
+    expect(screen.getAllByText('Coming soon')).toHaveLength(1)
   })
 
   test('typing into the Display name input updates displayNameAtom', async () => {
@@ -72,13 +74,31 @@ describe('SettingsPage (TARDIS-181)', () => {
     const user = userEvent.setup()
     render(<SettingsPage />)
 
-    const toggle = screen.getByRole('switch')
+    // Two switches now exist (auto-load + On start); the auto-load one is first
+    // in DOM order (Default LLM model section precedes On start).
+    const toggle = screen.getAllByRole('switch')[0]
     expect(toggle).toBeEnabled()
     expect(peek(autoLoadModelAtom)).toBe(false)
 
     await user.click(toggle)
 
     expect(peek(autoLoadModelAtom)).toBe(true)
+  })
+
+  test('the On start switch toggles startViewAtom between last-opened and dashboard (TARDIS-183)', async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    // The On start switch is the last switch in DOM order.
+    const switches = screen.getAllByRole('switch')
+    const onStart = switches[switches.length - 1]
+    expect(peek(startViewAtom)).toBe('last-opened')
+
+    await user.click(onStart)
+    expect(peek(startViewAtom)).toBe('dashboard')
+
+    await user.click(onStart)
+    expect(peek(startViewAtom)).toBe('last-opened')
   })
 
   test('editing the Generation token limit input updates inBrowserMaxTokensAtom', async () => {
