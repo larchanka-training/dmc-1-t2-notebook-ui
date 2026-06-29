@@ -6,6 +6,7 @@ import {
   LogIn,
   LogOut,
   Info,
+  LayoutGrid,
   MoreHorizontal,
   MoreVertical,
   Pencil,
@@ -81,7 +82,11 @@ function initialsOf(label: string): string {
 // so navigation stays inside the deployed base path.
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
-const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '' }]
+const navMain: NavItem[] = [
+  { title: 'Notebook', icon: BookText, url: '' },
+  // TARDIS-183: the notebooks dashboard (start screen with all notebooks as cards).
+  { title: 'All notebooks', icon: LayoutGrid, url: 'dashboard' },
+]
 
 const navAi: NavItem[] = [{ title: 'LLM Playground', icon: Bot, url: 'llm-playground' }]
 
