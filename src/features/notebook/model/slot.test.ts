@@ -355,6 +355,25 @@ describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', 
     expect(urlAtom().pathname).not.toMatch(/dashboard$/)
     expect(h.startAutosave).not.toHaveBeenCalled()
   })
+
+  // TARDIS-183 (positive path — the flagship behaviour): startView=dashboard +
+  // no tombstone → after the account-change reset the user lands on /dashboard,
+  // with the slot armed underneath. Mirrors the boot path's `startup.showDashboard`
+  // branch, so this also guards the boot navigation it shares.
+  test('startView=dashboard routes to /dashboard when the new owner has a normal seed', async () => {
+    userAtom.set({ id: OWNER, email: 'a@b.c', displayName: null, roles: [] })
+    await notebookStorage.clearAll() // fresh device: loadNotebook seeds a notebook
+    // No tombstone → loadNotebook(true) writes a fresh welcome seed and arms the
+    // slot, bootSeedSuppressedAtom stays false.
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    setStartViewReader(() => 'dashboard')
+
+    await resetSlotToFloorForAccountChange()
+
+    // Landed on the dashboard (not Usage), and the slot is armed underneath.
+    expect(urlAtom().pathname).toMatch(/dashboard$/)
+    expect(h.startAutosave).toHaveBeenCalled()
+  })
 })
 
 describe('SWR re-open preserves an unsaved in-editor edit (M1/A3)', () => {
