@@ -92,6 +92,7 @@ export {
   canDeleteNotebooks,
   canCreateNotebook,
   MAX_NOTEBOOKS,
+  localNotebooksRevisionAtom,
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
 export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'

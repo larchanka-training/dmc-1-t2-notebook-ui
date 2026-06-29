@@ -1,5 +1,6 @@
 import {
   action,
+  atom,
   computed,
   log,
   peek,
@@ -59,6 +60,20 @@ notebookListResource.extend(
 )
 
 notebookListResource.data.extend(withRollback())
+
+// Revision bumped whenever the set of LOCAL (IndexedDB) notebooks changes in a
+// way the server list doesn't already reflect — currently a delete's local
+// cleanup. `listOwnedLocalNotebooks()` is a non-reactive storage snapshot, so a
+// `computed` that merges it (the dashboard) cannot re-run on its own when a
+// local copy is removed; reading this atom gives such consumers a reactive
+// dependency to recompute on. Plain counter — the value is meaningless, only its
+// change matters.
+export const localNotebooksRevisionAtom = atom(0, 'notebook.localNotebooksRevision')
+
+/** Bump the local-notebooks revision so dashboard-style merges recompute. */
+export function bumpLocalNotebooksRevision(): void {
+  localNotebooksRevisionAtom.set((n) => n + 1)
+}
 
 /**
  * Keep the sidebar list in step with the signed-in account (#135). The resource
@@ -566,4 +581,10 @@ export const deleteNotebookAction = action(async (id: string): Promise<void> => 
   } catch (error) {
     console.warn(`notebook.delete: local cleanup failed for ${id}; orphan may remain`, error)
   }
+  // The local copy is gone, but `listOwnedLocalNotebooks()` is a non-reactive
+  // snapshot — bump the revision so dashboard-style merges recompute and drop the
+  // deleted card (otherwise it lingers as a local-only row until the next
+  // unrelated recompute). TARDIS-183: deleting from the sidebar while on the
+  // dashboard must update the grid.
+  bumpLocalNotebooksRevision()
 }, 'notebook.list.delete').extend(withAsync(), withTransaction())

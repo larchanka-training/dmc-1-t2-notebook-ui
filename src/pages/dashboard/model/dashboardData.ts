@@ -4,6 +4,7 @@ import type { NotebookJSON } from '@/features/notebook/persistence/schema'
 import {
   activeNotebookIdAtom,
   listOwnedLocalNotebooks,
+  localNotebooksRevisionAtom,
   notebookListResource,
   notebookTitleAtom,
 } from '@/features/notebook'
@@ -96,6 +97,12 @@ export function mergeDashboardCards(
 export const dashboardNotebooksResource = computed(async () => {
   // Subscribe to the server list (hot — gated by the page's auth check).
   const serverRows = notebookListResource.data()
+  // `listOwnedLocalNotebooks()` is a non-reactive IndexedDB snapshot, so depend
+  // on the local-notebooks revision too: deleting a notebook from the sidebar
+  // removes its local copy AFTER the server row, with no reactive trigger of its
+  // own — reading the revision here makes this merge recompute and drop the
+  // deleted card instead of leaving it as a stale local-only row (TARDIS-183).
+  localNotebooksRevisionAtom()
   // Provably-owned local notebooks (seed + sync-state-owned), async storage read.
   const owned = await wrap(listOwnedLocalNotebooks())
   return mergeDashboardCards(serverRows, owned, activeNotebookIdAtom(), notebookTitleAtom())
