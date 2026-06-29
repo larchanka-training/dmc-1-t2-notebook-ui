@@ -1,7 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Clock } from 'lucide-react'
+import { Clock, Loader2 } from 'lucide-react'
 import { openNotebookInSlot } from '@/features/notebook'
 import { cn } from '@/shared/lib/cn'
 import { NOTEBOOK_PATH } from '@/shared/lib/paths'
@@ -42,14 +42,25 @@ function formatRelative(ms: number): string {
  * the sidebar's interactive rows.
  */
 export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) => {
+  // Local pending flag for THIS card only (the global `slotOpeningPhaseAtom` does
+  // not say which card is opening). Opening may go to the network (lazy
+  // `GET /notebooks/{id}`), so show a spinner + disable to signal progress and
+  // stop confused re-clicks. Concurrent opens are already safe (busy/superseded);
+  // this is UX only.
+  const [opening, setOpening] = useState(false)
   // Memoised (keyed by id) for a stable onClick identity across reatom
   // re-renders — same convention as DashboardPage's `onCreate`.
   const onOpen = useMemo(
     () =>
       wrap(async () => {
-        const outcome = await wrap(openNotebookInSlot(card.id))
-        if (outcome === 'opened' || outcome === 'already') {
-          urlAtom.set((url) => new URL(NOTEBOOK_PATH, url.origin), true)
+        setOpening(true)
+        try {
+          const outcome = await wrap(openNotebookInSlot(card.id))
+          if (outcome === 'opened' || outcome === 'already') {
+            urlAtom.set((url) => new URL(NOTEBOOK_PATH, url.origin), true)
+          }
+        } finally {
+          setOpening(false)
         }
       }),
     [card.id],
@@ -64,17 +75,22 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
     <button
       type="button"
       onClick={onOpen}
+      disabled={opening}
+      aria-busy={opening}
       className={cn(
         'group flex flex-col rounded-[var(--radius-card)] border border-border bg-card p-4 text-left',
         'transition-[box-shadow,border-color,transform] hover:-translate-y-px hover:border-[color-mix(in_oklch,var(--primary)_40%,var(--border))] hover:shadow-[var(--shadow-pop)] cursor-pointer',
+        opening && 'pointer-events-none opacity-70',
       )}
     >
-      {/* Title heading */}
+      {/* Title heading; a spinner replaces nothing but appears beside it while
+          the (possibly networked) open is in flight. */}
       <h3
-        className="truncate text-[15px] font-semibold tracking-[-0.01em] transition-colors group-hover:text-primary"
+        className="flex items-center gap-1.5 truncate text-[15px] font-semibold tracking-[-0.01em] transition-colors group-hover:text-primary"
         title={card.title}
       >
-        {card.title}
+        {opening ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : null}
+        <span className="truncate">{card.title}</span>
       </h3>
 
       {/* Cell count */}

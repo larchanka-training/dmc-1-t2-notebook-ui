@@ -68,8 +68,10 @@ export function mergeDashboardCards(
     })
   }
   // Synthetic floor card: the active notebook is in neither list (the unsynced
-  // welcome seed). Mirror `effectiveNotebookCount`'s floor rule, but dedupe
-  // strictly by id so a seed already merged above is never doubled.
+  // welcome seed). Same floor rule as `effectiveNotebookCount` in
+  // `features/notebook/model/notebookList.ts` (active id absent from the list ⇒
+  // it occupies one synthetic slot), but dedupe strictly by id so a seed already
+  // merged above is never doubled.
   if (!byId.has(activeId)) {
     byId.set(activeId, { id: activeId, title: activeTitle || FLOOR_TITLE_FALLBACK })
   }

@@ -183,21 +183,43 @@ boot (`migrateLegacySeedIfNeeded`).
 The boot/delete/seed rules form one contract; the slot id alone does not capture
 it.
 
-**Boot — which notebook opens.** Boot (`loadNotebook(pickNewest=true)`, called
-from `setup.ts` on reload and from `resetSlotToFloorForAccountChange` on first
-sign-in) opens the **newest notebook owned by the current user** by `createdAt`
-desc — not always the seed. "Owned" = the per-user seed, or a notebook whose
-`sync` partition records `ownerId === user.id` (a notebook without provable
-ownership is skipped, so a shared device never opens another account's local
-notebook). `pickNewest` is boot-only; `degrade`/`reset` slot transitions keep
-going to the seed floor (`loadNotebook()` without the flag).
+**Boot — which notebook opens (TARDIS-183).** Boot (`setup.ts` on reload, and
+`resetSlotToFloorForAccountChange` on first sign-in / account switch) first calls
+`resolveStartupTarget()` (`model/startupTarget.ts`), which decides two orthogonal
+things: which id to arm the slot on, and whether to show the dashboard.
+
+- **Which notebook.** On the default `startView = 'last-opened'` the slot is
+  armed on the user's **last-opened** notebook — `resolveOwnedLastOpenedId()`
+  (`model/lastOpened.ts`) reads the per-user key `notebook:lastOpened:<userId>`.
+  The slot id is set (`activeNotebookIdAtom.set(startup.notebookId)`) before
+  `loadNotebook(true)`, which then respects that explicit id instead of running
+  its own `pickNewest`. Only when there is no usable last-opened id does
+  `loadNotebook(true)` fall back to the **newest owned notebook** by `createdAt`
+  desc (or the seed). So the default reproduces the pre-183 "open a notebook"
+  behaviour only until the user opens something; after that, reload reopens the
+  last-opened notebook. `degrade`/`reset` slot transitions still go to the seed
+  floor (`loadNotebook()` without the flag).
+- **§11 on a shared device.** `resolveOwnedLastOpenedId` does NOT re-derive
+  ownership from sync-state. The per-user key is written only when _this_ user
+  opens a notebook, so it already proves ownership at write time; the resolver
+  only (1) requires a local copy to exist and (2) rejects a copy stamped with a
+  _different_ `ownerId` (a negative foreign-owner guard). A copy with no
+  sync-state (a server notebook just opened, never edited) passes — that is the
+  case the old `ownerId === user.id`-at-read-time check wrongly rejected.
+- **Dashboard.** `startView = 'dashboard'` additionally navigates to
+  `/dashboard` on top of the armed slot, but only when the entry URL is the app
+  root (a refresh/deep-link to another route is left alone), and at lower
+  priority than the tombstoned-seed → `/usage` recovery.
 
 **Empty local → server reconcile.** When local storage has no notebooks,
 `reconcileBootFromServer()` (`model/bootReconcile.ts`) runs BEFORE the slot loads:
 offline/empty list → seed path; non-empty list → pull the newest server notebook
-into storage (stamping `ownerId` + `remoteCreated` so the owner-scoped picker
-accepts it), and if the per-user seed id is **absent** from the server list, the
-seed was deleted on another device → set the tombstone locally.
+into storage, then stamp ownership via the shared
+`stampServerNotebookOwnerIfUnowned()` (`model/pull.ts`) — the SAME helper the
+open-into-slot path uses, so the owner-scoped picker accepts the pulled notebook
+and the ownership rule cannot drift between the two paths. If the per-user seed
+id is **absent** from the server list, the seed was deleted on another device →
+set the tombstone locally.
 
 **Server-side seed invariant.** In the normal signed-in UI flow, an account that has any server notebooks has had its per-user demo notebook persisted on the server at least once.
 The create button preserves this invariant: when the clean, never-synced per-user seed floor is open, `promoteSeedFloorIfUnsynced()` posts that seed first, and only then does `createNotebookAction()` create the new non-demo notebook.
