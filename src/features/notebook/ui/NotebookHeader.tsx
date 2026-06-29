@@ -10,6 +10,7 @@ import {
 } from '../model/notebook'
 import { renameListItem } from '../model/notebookList'
 import { loadedModelDisplayAtom } from '../model/codeGenerator'
+import { NotebookExportMenu } from './NotebookExportMenu'
 
 const PLACEHOLDER = 'Untitled notebook'
 
@@ -115,31 +116,36 @@ export const NotebookHeader = reatomComponent(() => {
         )}
       </div>
 
-      <h1
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-label="Notebook title"
-        data-placeholder={PLACEHOLDER}
-        spellCheck={false}
-        onFocus={beginEdit}
-        onInput={onInput}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            e.currentTarget.blur()
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            // Restore the pre-edit title, then drop focus (the follow-up blur
-            // re-commits the restored title, which is a no-op).
-            cancel()
-            e.currentTarget.blur()
-          }
-        }}
-        className="-mx-1.5 rounded-[var(--radius-item)] px-1.5 text-[32px] font-semibold leading-tight tracking-[-0.02em] outline-none transition-colors hover:bg-muted/60 focus:bg-muted/40 focus:ring-2 focus:ring-ring/40 empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)]"
-      />
+      <div className="flex items-start gap-2">
+        <h1
+          ref={ref}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-label="Notebook title"
+          data-placeholder={PLACEHOLDER}
+          spellCheck={false}
+          onFocus={beginEdit}
+          onInput={onInput}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              // Restore the pre-edit title, then drop focus (the follow-up blur
+              // re-commits the restored title, which is a no-op).
+              cancel()
+              e.currentTarget.blur()
+            }
+          }}
+          className="-mx-1.5 min-w-0 flex-1 rounded-[var(--radius-item)] px-1.5 text-[32px] font-semibold leading-tight tracking-[-0.02em] outline-none transition-colors hover:bg-muted/60 focus:bg-muted/40 focus:ring-2 focus:ring-ring/40 empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)]"
+        />
+        <div className="mt-2 shrink-0">
+          <NotebookExportMenu />
+        </div>
+      </div>
     </header>
   )
 }, 'NotebookHeader')
