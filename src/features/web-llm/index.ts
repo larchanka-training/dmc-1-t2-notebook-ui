@@ -1,11 +1,13 @@
 export {
   engineAtom,
   modelIdAtom,
+  autoLoadModelAtom,
   downloadedModelIdsAtom,
   loadedModelIdAtom,
   loadProgressAtom,
   loadingModelIdAtom,
   loadModelAction,
+  cancelModelLoad,
   reconcileDownloadedModelsAction,
   normalizeWebLlmPersistedState,
   messagesAtom,

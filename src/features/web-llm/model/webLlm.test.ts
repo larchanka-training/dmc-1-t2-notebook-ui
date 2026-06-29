@@ -48,7 +48,7 @@ afterEach(() => {
 })
 
 describe('webLlm model bookkeeping (TARDIS-167 №5)', () => {
-  test('modelIdAtom is persisted (withLocalStorage) so the choice survives reloads', () => {
+  test('modelIdAtom holds the selected model id (per-user persistence lives in settings)', () => {
     modelIdAtom.set('Phi-3.5-mini-instruct-q4f16_1-MLC')
     expect(peek(modelIdAtom)).toBe('Phi-3.5-mini-instruct-q4f16_1-MLC')
   })
@@ -236,21 +236,9 @@ describe('normalizeWebLlmPersistedState (TARDIS-167, review PR #88 r3)', () => {
     expect(peek(downloadedModelIdsAtom)).toEqual([])
   })
 
-  test('resets a phantom selected model id to the default', () => {
-    modelIdAtom.set('removed-from-catalogue')
-
-    normalizeWebLlmPersistedState()
-
-    expect(peek(modelIdAtom)).toBe(AVAILABLE_MODELS[1])
-  })
-
-  test('keeps a valid selected id untouched', () => {
-    modelIdAtom.set(AVAILABLE_MODELS[3])
-
-    normalizeWebLlmPersistedState()
-
-    expect(peek(modelIdAtom)).toBe(AVAILABLE_MODELS[3])
-  })
+  // The selected-model id is PER-USER now: a stale/phantom id is reset by the
+  // settings layer's `coerce` on sign-in (see userSettings.test.ts), not by
+  // `normalizeWebLlmPersistedState` (which only owns the device-global list).
 })
 
 describe('sendMessageAction placeholder branch', () => {

@@ -9,8 +9,8 @@ import {
   type InBrowserGenerator,
   type InBrowserGenerateResult,
   type InBrowserIncompleteReason,
-  IN_BROWSER_MAX_TOKENS,
-  IN_BROWSER_THINK_TOKEN_BUDGET,
+  effectiveMaxTokensAtom,
+  effectiveThinkTokenBudgetAtom,
   IN_BROWSER_TEMPERATURE,
   IN_BROWSER_REPETITION_PENALTY,
   IN_BROWSER_FREQUENCY_PENALTY,
@@ -50,6 +50,13 @@ async function streamOnce(
   onProgress: ((p: { thinking: string; tokens: number }) => void) | undefined,
   tokenOffset: number,
   isReasoning: boolean,
+  // Token budgets resolved (and clamped) by the caller while the Reatom frame is
+  // still alive (TARDIS-181) — same reason as `isStopRequested`: reading the
+  // settings atoms here, after the stream's unwrapped awaits, would throw
+  // "missing async stack". `maxTokens` caps the generation; `thinkBudget` caps a
+  // reasoning model's chain-of-thought.
+  maxTokens: number,
+  thinkBudget: number,
   // Synchronous "did the user press Stop?" probe. MUST be pre-`wrap`ped by the
   // caller while the Reatom frame is still alive (like `onProgress`): calling
   // `wrap()` HERE, inside the loop after the stream's unwrapped awaits, captures
@@ -60,7 +67,7 @@ async function streamOnce(
   const stream = await engine.chat.completions.create({
     messages,
     stream: true,
-    max_tokens: IN_BROWSER_MAX_TOKENS,
+    max_tokens: maxTokens,
     // Sampling defaults (TARDIS-168 C2): low temperature for deterministic
     // codegen + repetition/frequency penalties that break the self-confirming
     // reasoning loop a prompt alone can't stop.
@@ -138,7 +145,7 @@ async function streamOnce(
     // others; we additionally gate on `isReasoning` to make that explicit and
     // avoid clipping a non-reasoning model that legitimately emits a literal
     // "<think>" string in its output (TARDIS-168 C1).
-    if (isReasoning && !budgetHit && partial.thinkOpen && tokens > IN_BROWSER_THINK_TOKEN_BUDGET) {
+    if (isReasoning && !budgetHit && partial.thinkOpen && tokens > thinkBudget) {
       budgetHit = true
       void engine.interruptGenerate()
     }
@@ -226,6 +233,12 @@ export function buildGenerator(
     // (same pattern as onProgress). Building it inside the stream loop instead
     // throws "missing async stack" and leaks the WebLLM lock (TARDIS-168).
     const isStopRequested = wrap(() => thinkingSessionAtom()?.stopRequested === true)
+    // Resolve the user-tunable token budgets NOW (TARDIS-181), while the Reatom
+    // frame is alive — reading them after the stream's awaits would throw
+    // "missing async stack". Reading per-generation (not per-build) means a
+    // Settings change applies to the next run without reloading the model.
+    const maxTokens = effectiveMaxTokensAtom()
+    const thinkBudget = effectiveThinkTokenBudgetAtom()
     // Pass 1.
     // DO NOT REMOVE THIS `wrap` (TARDIS-168). streamOnce does external (WebLLM)
     // I/O with internal unwrapped awaits; without wrap the continuation runs
@@ -243,6 +256,8 @@ export function buildGenerator(
         onProgress,
         0,
         isReasoning,
+        maxTokens,
+        thinkBudget,
         isStopRequested,
       ),
     )
@@ -277,6 +292,8 @@ export function buildGenerator(
             onProgress,
             first.tokens,
             isReasoning,
+            maxTokens,
+            thinkBudget,
             isStopRequested,
           ),
         )

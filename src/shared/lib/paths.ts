@@ -13,3 +13,6 @@ export const appPath = (path = ''): string => base + path.replace(/^\//, '')
 
 /** Absolute in-app path of the login page, base included. */
 export const LOGIN_PATH = appPath('login')
+
+/** Absolute in-app path of the settings page, base included. */
+export const SETTINGS_PATH = appPath('settings')

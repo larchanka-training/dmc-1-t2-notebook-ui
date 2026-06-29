@@ -17,6 +17,7 @@ import {
   Trash2,
   CircleHelp,
   BookOpen,
+  Settings,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -39,6 +40,7 @@ import {
   shortcutsOpenAtom,
 } from '@/features/notebook'
 import { logoutAction } from '@/features/auth'
+import { sidebarDisplayNameAtom } from '@/features/settings'
 import { Avatar, AvatarFallback } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
@@ -50,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
+import { Logo } from '@/shared/ui/logo'
 import {
   Sidebar,
   SidebarContent,
@@ -63,7 +66,7 @@ import {
   SidebarMenuItem,
 } from '@/shared/ui/sidebar'
 import { cn } from '@/shared/lib/cn'
-import { LOGIN_PATH } from '@/shared/lib/paths'
+import { LOGIN_PATH, SETTINGS_PATH } from '@/shared/lib/paths'
 
 // Up to two initials for the identity-menu avatar: first letters of the first
 // two name words, else the first two characters of the label.
@@ -103,7 +106,7 @@ const AuthSection = reatomComponent(() => {
     )
   }
 
-  const label = user.displayName ?? user.email ?? 'Account'
+  const label = sidebarDisplayNameAtom()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -133,6 +136,11 @@ const AuthSection = reatomComponent(() => {
         align="start"
         className="w-[calc(var(--anchor-width)-12px)] min-w-0"
       >
+        <DropdownMenuItem render={<a href={SETTINGS_PATH} />}>
+          <Settings className="size-4" />
+          <span className="text-sm">Settings</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={wrap(async () => logoutAction())}>
           <LogOut className="size-4" />
           <div className="flex flex-col">
@@ -495,9 +503,7 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-border">
       <SidebarHeader className="h-[60px] flex-row items-center gap-2.5 border-b border-border px-4 py-0">
-        <span className="grid size-[30px] shrink-0 place-items-center rounded-[var(--radius-item)] bg-primary font-mono text-[15px] font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,black_8%,transparent)]">
-          JS
-        </span>
+        <Logo size={30} />
         <div className="min-w-0 leading-tight">
           <span className="block truncate text-base font-semibold tracking-tight">JS Notebook</span>
           <span className="block truncate text-xs font-normal text-muted-foreground">

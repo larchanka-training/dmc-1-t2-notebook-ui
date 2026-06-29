@@ -1,4 +1,4 @@
-import { atom, action, wrap } from '@reatom/core'
+import { atom, action, computed, wrap } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import type { LlmContextCell } from '@/shared/api'
 import { cellsAtom, addCell, updateCellCode } from './notebook'
@@ -16,6 +16,61 @@ import { runInBrowserGeneration } from './inBrowserThinking'
 // code, the run is a degenerate loop and is aborted.
 export const IN_BROWSER_MAX_TOKENS = 4096
 export const IN_BROWSER_THINK_TOKEN_BUDGET = 2048
+
+// User-tunable overrides for the two budgets above (TARDIS-181). The constants
+// stay as the DEFAULTS; these atoms let the Settings page raise/lower them.
+// Bounds keep a bad Settings input (or a hand-edited persisted record) from
+// disabling generation (0) or asking for an absurd run.
+export const MIN_IN_BROWSER_MAX_TOKENS = 256
+export const MAX_IN_BROWSER_MAX_TOKENS = 8192
+export const MIN_THINK_TOKEN_BUDGET = 256
+export const MAX_THINK_TOKEN_BUDGET = 8192
+
+// Round + clamp an arbitrary value into `[min, max]`; a non-finite value (NaN
+// from a cleared input, a garbage persisted record) falls back to the default.
+function clampTokenBudget(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+// Raw, user-facing settings (bound to the Settings inputs, kept as-is so a
+// half-typed value isn't fought by the field). These are PER-USER now: plain
+// in-memory atoms hydrated/persisted under `settings:<userId>` by the
+// `features/settings` sync controller, not self-persisted. Generation never
+// reads these directly — it reads the clamped `effective*` views below.
+export const inBrowserMaxTokensAtom = atom(
+  IN_BROWSER_MAX_TOKENS,
+  'notebook.settings.inBrowserMaxTokens',
+)
+
+export const thinkTokenBudgetAtom = atom(
+  IN_BROWSER_THINK_TOKEN_BUDGET,
+  'notebook.settings.thinkTokenBudget',
+)
+
+// Clamped views the generation path consumes — always a sane integer in range,
+// whatever the persisted/raw atom holds.
+export const effectiveMaxTokensAtom = computed(
+  () =>
+    clampTokenBudget(
+      inBrowserMaxTokensAtom(),
+      MIN_IN_BROWSER_MAX_TOKENS,
+      MAX_IN_BROWSER_MAX_TOKENS,
+      IN_BROWSER_MAX_TOKENS,
+    ),
+  'notebook.settings.effectiveMaxTokens',
+)
+
+export const effectiveThinkTokenBudgetAtom = computed(
+  () =>
+    clampTokenBudget(
+      thinkTokenBudgetAtom(),
+      MIN_THINK_TOKEN_BUDGET,
+      MAX_THINK_TOKEN_BUDGET,
+      IN_BROWSER_THINK_TOKEN_BUDGET,
+    ),
+  'notebook.settings.effectiveThinkTokenBudget',
+)
 
 // Sampling defaults for in-browser code generation (TARDIS-168 C2). The bridge
 // passes these to every `chat.completions.create`. A prompt alone can't stop a

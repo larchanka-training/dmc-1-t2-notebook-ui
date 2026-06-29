@@ -43,12 +43,15 @@ prefix:
 | `/components/custom` | `CustomComponentsPage` | `src/pages/custom-components/` |
 | `/about`             | `AboutPage`            | `src/pages/about/`             |
 | `/usage`             | `UsagePage`            | `src/pages/usage/`             |
+| `/settings`          | `SettingsPage`         | `src/pages/settings/`          |
 | `/llm-playground`    | `LlmPlaygroundPage`    | `src/pages/llm-playground/`    |
 | _any unknown URL_    | `NotFoundPage` (404)   | `src/pages/not-found/`         |
 
 `/about` and `/usage` are public (no `AuthRouteGuard`); the rest of the
-feature pages stay behind it. The 404 row is not a registered route — it is
-the root layout's fallback when no child route matches (see below).
+feature pages — including `/settings`, which holds per-user preferences
+namespaced by user id — stay behind it. The 404 row is not a registered
+route — it is the root layout's fallback when no child route matches (see
+below).
 
 ---
 
@@ -63,6 +66,7 @@ rootRoute (layout: true)                    src/app/model/routes.tsx
               ├── loginRoute       path: 'login'             → LoginPage
               ├── aboutRoute       path: 'about'             → AboutPage (public)
               ├── usageRoute       path: 'usage'             → UsagePage (public)
+              ├── settingsRoute    path: 'settings'          → SettingsPage (guarded)
               ├── llmPlaygroundRoute path: 'llm-playground'  → LlmPlaygroundPage
               ├── shadcnRoute      path: 'components/shadcn' → ShadcnComponentsPage
               └── customRoute     path: 'components/custom'  → CustomComponentsPage

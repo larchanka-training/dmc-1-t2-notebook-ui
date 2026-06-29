@@ -197,10 +197,13 @@ memory of users who may not have it. The model loads ONLY when the user clicks
 toolbar + "Ask agent") stay disabled with a "load a model first" tooltip, gated on
 `codeGeneratorAtom` being `null`.
 
-The selected model id and the set of already-downloaded model ids are persisted in
-`localStorage` (`modelIdAtom`, `downloadedModelIdsAtom`), so the choice and the
-"downloaded" highlight survive reloads. The downloaded list is reconciled against
-the real WebLLM Cache Storage on startup (`reconcileDownloadedModelsAction` →
+The selected model id is a PER-USER preference (TARDIS-181): `modelIdAtom` is a
+plain in-memory atom, hydrated/persisted under the signed-in user's settings
+namespace (`settings:<userId>`) by `features/settings`, so two accounts on one
+browser keep separate model choices. The set of already-downloaded model ids
+(`downloadedModelIdsAtom`) stays DEVICE-GLOBAL in `localStorage`, because it
+mirrors the WebLLM Cache Storage shared by every user of the browser; it is
+reconciled against the real cache on startup (`reconcileDownloadedModelsAction` →
 `webllm.hasModelInCache`), so an evicted/cleared model loses its highlight instead
 of showing a stale check.
 
