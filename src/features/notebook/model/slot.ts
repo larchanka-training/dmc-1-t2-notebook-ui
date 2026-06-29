@@ -28,7 +28,7 @@ import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
-import { pullServerNotebook } from './pull'
+import { pullServerNotebook, stampServerNotebookOwnerIfUnowned } from './pull'
 import { reconcileBootFromServer } from './bootReconcile'
 import { writeLastOpenedId } from './lastOpened'
 import { resolveStartupTarget } from './startupTarget'
@@ -494,7 +494,20 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
         outcome = 'superseded'
         return
       }
-      if (server) await wrap(pullServerNotebook(server))
+      if (server) {
+        await wrap(pullServerNotebook(server))
+        // TARDIS-183 blocker fix: stamp ownership so the just-opened server
+        // notebook counts as owned (`listOwnedLocalNotebooks`). Without this the
+        // startup resolver rejects it as the last-opened target on next boot and
+        // falls back to another notebook. Mirrors `bootReconcile`'s stamp; the
+        // `if (!existing)` guard inside keeps it §11-safe (no cross-account
+        // overwrite). Best-effort — a stamp failure must not fail the open.
+        try {
+          await wrap(stampServerNotebookOwnerIfUnowned(server))
+        } catch (stampError) {
+          console.warn('slot: failed to stamp pulled-notebook ownership', stampError)
+        }
+      }
 
       const target = await wrap(notebookStorage.get(id))
       if (!target) {

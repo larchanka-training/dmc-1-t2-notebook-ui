@@ -6,6 +6,7 @@ import { urlAtom } from '@reatom/core'
 import { userAtom } from '@/entities/session'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import { setSeedTombstone, clearSeedTombstone } from './seedTombstone'
+import { readLastOpenedId } from './lastOpened'
 import { setStartViewReader } from './startupTarget'
 import {
   bumpSlotGeneration,
@@ -94,6 +95,10 @@ afterEach(() => {
   vi.restoreAllMocks()
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
   slotOpeningPhaseAtom.set('idle')
+  // last-opened persists to localStorage (TARDIS-183) and userAtom carries over;
+  // clear both so per-test ownership/last-opened assertions don't leak.
+  localStorage.clear()
+  userAtom.set(null)
 })
 
 describe('openNotebookInSlot', () => {
@@ -127,6 +132,29 @@ describe('openNotebookInSlot', () => {
     expect(outcome).toBe('opened')
     expect(h.pullServerNotebook).not.toHaveBeenCalled() // no server doc to reconcile
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
+  })
+
+  // TARDIS-183: a successful open persists the id as the per-user last-opened, so
+  // the startup resolver reopens it next boot. This is the slot-level wiring of
+  // the feature; the primitives (`writeLastOpenedId`/`readLastOpenedId`) are unit-
+  // tested in lastOpened.test.ts, here we assert the slot actually calls them.
+  test('persists the opened id as the last-opened for the signed-in user', async () => {
+    userAtom.set({ id: 'owner-A', email: 'a@b.c', displayName: null, roles: [] })
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+
+    await openNotebookInSlot(SERVER_ID)
+
+    expect(readLastOpenedId('owner-A')).toBe(SERVER_ID)
+  })
+
+  test('does NOT persist last-opened when signed out', async () => {
+    userAtom.set(null)
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+
+    await openNotebookInSlot(SERVER_ID)
+
+    // No user → no per-user key to write under (writeLastOpenedId is a no-op).
+    expect(readLastOpenedId('owner-A')).toBeNull()
   })
 
   test('drains autosave BEFORE flipping the active id (no edit leaks under the new id)', async () => {

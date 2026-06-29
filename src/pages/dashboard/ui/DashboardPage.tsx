@@ -26,6 +26,20 @@ const NOTEBOOK_HREF = import.meta.env.BASE_URL
  * the resource cold on the login screen.
  */
 const DashboardPage = reatomComponent(() => {
+  // Hooks MUST run unconditionally on every render (Rules of Hooks), so `useMemo`
+  // comes BEFORE the `if (!user) return null` early-exit below. The lint rule
+  // can't see this — the component is an anonymous arrow inside `reatomComponent`
+  // — so the ordering is enforced by hand. Memoised so `onClick` identity is
+  // stable across the frequent reatom re-renders (one `wrap` callback, empty deps).
+  const onCreate = useMemo(
+    () =>
+      wrap(async () => {
+        const created = await wrap(createNotebookFlow())
+        if (created) urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
+      }),
+    [],
+  )
+
   const user = userAtom()
   if (!user) return null
 
@@ -37,17 +51,6 @@ const DashboardPage = reatomComponent(() => {
   // the slot controller sets and the sidebar shows, so a "dead" card click is
   // explained rather than silent.
   const openError = slotOpenErrorAtom()
-
-  // Memoised so `Button`/`onClick` identity is stable across the frequent
-  // reatom re-renders (one `wrap` callback, empty deps).
-  const onCreate = useMemo(
-    () =>
-      wrap(async () => {
-        const created = await wrap(createNotebookFlow())
-        if (created) urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
-      }),
-    [],
-  )
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -75,11 +78,10 @@ const DashboardPage = reatomComponent(() => {
           </p>
         ) : null}
 
-        {/* Loading vs loaded.
-            settled (the welcome seed guarantees a notebook — see
-            `mergeDashboardCards`'s floor row), so there is no empty-state: a
-            settled-but-empty list is unreachable. A brand-new user still has the
-            top-right "New notebook" action. */}
+        {/* Loading vs loaded. Once settled, the welcome seed guarantees a
+            notebook (see `mergeDashboardCards`'s floor row), so there is no
+            empty-state: a settled-but-empty list is unreachable. A brand-new
+            user still has the top-right "New notebook" action. */}
         {!settled ? (
           <div className={CARD_GRID} aria-busy="true" aria-label="Loading notebooks">
             {Array.from({ length: 6 }).map((_, i) => (
