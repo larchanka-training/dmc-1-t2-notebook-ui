@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Lock } from 'lucide-react'
-import { displayNameAtom } from '@/features/settings'
+import { displayNameAtom, startViewAtom } from '@/features/settings'
 import { modelIdAtom, autoLoadModelAtom, MODEL_CATALOG, AVAILABLE_MODELS } from '@/features/web-llm'
 import {
   inBrowserMaxTokensAtom,
@@ -208,6 +208,40 @@ const LimitsSection = reatomComponent(() => {
   )
 }, 'LimitsSection')
 
+// TARDIS-183: "On start" chooses what opens after sign-in. Two options (dashboard
+// vs the last notebook used) is a binary choice, so a Switch fits — same pattern
+// as "Auto-load this model on start". The atom is the reactive source for this
+// toggle; the startup resolver reads the persisted record directly (boot-time
+// async-hydration race), not this atom.
+const OnStartSection = reatomComponent(() => {
+  const startView = startViewAtom()
+  return (
+    <SettingsSection
+      title="On start"
+      description="Open the dashboard or the last notebook used on this device."
+    >
+      <label className="flex items-center gap-2.5 text-sm">
+        <Switch
+          checked={startView === 'dashboard'}
+          onCheckedChange={wrap((checked: boolean) =>
+            startViewAtom.set(checked ? 'dashboard' : 'last-opened'),
+          )}
+        />
+        {/* Name BOTH outcomes so the off-state isn't a guess: a Switch normally
+            reads as on/off, but here both positions are named modes. */}
+        <span>
+          Show the dashboard on start
+          <span className="block text-xs text-muted-foreground">
+            {startView === 'dashboard'
+              ? 'Opening the dashboard.'
+              : 'Opening the last notebook used on this device.'}
+          </span>
+        </span>
+      </label>
+    </SettingsSection>
+  )
+}, 'OnStartSection')
+
 export default function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-[720px] flex-col gap-5 px-6 pt-12 pb-24 sm:px-10">
@@ -222,11 +256,7 @@ export default function SettingsPage() {
       <DefaultModelSection />
       <LimitsSection />
 
-      <SettingsSection
-        title="On start"
-        description="Open the dashboard or the last notebook used on this device."
-        locked
-      />
+      <OnStartSection />
       <SettingsSection
         title="Passkey"
         description="Link this device for biometric sign-in and manage linked passkeys."

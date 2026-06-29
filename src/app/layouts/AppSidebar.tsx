@@ -6,6 +6,7 @@ import {
   LogIn,
   LogOut,
   Info,
+  LayoutGrid,
   MoreHorizontal,
   MoreVertical,
   Pencil,
@@ -81,7 +82,11 @@ function initialsOf(label: string): string {
 // so navigation stays inside the deployed base path.
 type NavItem = { title: string; icon: typeof BookText; url: string }
 
-const navMain: NavItem[] = [{ title: 'Notebook', icon: BookText, url: '' }]
+const navMain: NavItem[] = [
+  { title: 'Notebook', icon: BookText, url: '' },
+  // TARDIS-183: the notebooks dashboard (start screen with all notebooks as cards).
+  { title: 'All notebooks', icon: LayoutGrid, url: 'dashboard' },
+]
 
 const navAi: NavItem[] = [{ title: 'LLM Playground', icon: Bot, url: 'llm-playground' }]
 
@@ -136,12 +141,16 @@ const AuthSection = reatomComponent(() => {
         align="start"
         className="w-[calc(var(--anchor-width)-12px)] min-w-0"
       >
-        <DropdownMenuItem render={<a href={SETTINGS_PATH} />}>
+        <DropdownMenuItem render={<a href={SETTINGS_PATH} />} className="cursor-pointer">
           <Settings className="size-4" />
           <span className="text-sm">Settings</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={wrap(async () => logoutAction())}>
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={wrap(async () => logoutAction())}
+          className="cursor-pointer"
+        >
           <LogOut className="size-4" />
           <div className="flex flex-col">
             <span className="text-sm">Sign out</span>

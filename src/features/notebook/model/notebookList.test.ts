@@ -14,6 +14,7 @@ import {
   createNotebookFlow,
   promoteSeedFloorIfUnsynced,
   deleteNotebookAction,
+  localNotebooksRevisionAtom,
   notebookListResource,
   renameListItem,
   startNotebookListSync,
@@ -592,6 +593,20 @@ describe('deleteNotebookAction', () => {
     // Row stays removed and the seed is tombstoned.
     expect(peek(notebookListResource.data)).toEqual([listItem('keep', 'Keep me')])
     expect(await isSeedTombstoned()).toBe(true)
+  })
+
+  // TARDIS-183: deleting from the sidebar must update a dashboard open in another
+  // route. The dashboard merge reads a non-reactive IndexedDB snapshot, so delete
+  // bumps the local-notebooks revision to force that merge to recompute and drop
+  // the deleted card.
+  test('bumps the local-notebooks revision after deleting (dashboard recompute)', async () => {
+    vi.spyOn(notebookApi, 'remove').mockResolvedValue()
+    notebookListResource.data.set([listItem('keep', 'Keep me'), listItem(NB_ID, 'Doomed')])
+    const before = peek(localNotebooksRevisionAtom)
+
+    await deleteNotebookAction(NB_ID)
+
+    expect(peek(localNotebooksRevisionAtom)).toBeGreaterThan(before)
   })
 })
 

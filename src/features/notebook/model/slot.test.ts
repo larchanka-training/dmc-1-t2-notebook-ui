@@ -6,6 +6,8 @@ import { urlAtom } from '@reatom/core'
 import { userAtom } from '@/entities/session'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import { setSeedTombstone, clearSeedTombstone } from './seedTombstone'
+import { readLastOpenedId } from './lastOpened'
+import { setStartViewReader } from './startupTarget'
 import {
   bumpSlotGeneration,
   openNotebookInSlot,
@@ -93,6 +95,10 @@ afterEach(() => {
   vi.restoreAllMocks()
   activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
   slotOpeningPhaseAtom.set('idle')
+  // last-opened persists to localStorage (TARDIS-183) and userAtom carries over;
+  // clear both so per-test ownership/last-opened assertions don't leak.
+  localStorage.clear()
+  userAtom.set(null)
 })
 
 describe('openNotebookInSlot', () => {
@@ -126,6 +132,29 @@ describe('openNotebookInSlot', () => {
     expect(outcome).toBe('opened')
     expect(h.pullServerNotebook).not.toHaveBeenCalled() // no server doc to reconcile
     expect(activeNotebookIdAtom()).toBe(SERVER_ID)
+  })
+
+  // TARDIS-183: a successful open persists the id as the per-user last-opened, so
+  // the startup resolver reopens it next boot. This is the slot-level wiring of
+  // the feature; the primitives (`writeLastOpenedId`/`readLastOpenedId`) are unit-
+  // tested in lastOpened.test.ts, here we assert the slot actually calls them.
+  test('persists the opened id as the last-opened for the signed-in user', async () => {
+    userAtom.set({ id: 'owner-A', email: 'a@b.c', displayName: null, roles: [] })
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+
+    await openNotebookInSlot(SERVER_ID)
+
+    expect(readLastOpenedId('owner-A')).toBe(SERVER_ID)
+  })
+
+  test('does NOT persist last-opened when signed out', async () => {
+    userAtom.set(null)
+    getSpy.mockResolvedValue(doc(SERVER_ID))
+
+    await openNotebookInSlot(SERVER_ID)
+
+    // No user → no per-user key to write under (writeLastOpenedId is a no-op).
+    expect(readLastOpenedId('owner-A')).toBeNull()
   })
 
   test('drains autosave BEFORE flipping the active id (no edit leaks under the new id)', async () => {
@@ -313,6 +342,9 @@ describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', 
     await clearSeedTombstone()
     userAtom.set(null)
     await notebookStorage.clearAll()
+    localStorage.clear()
+    // Reset the injected startView reader to the default between tests.
+    setStartViewReader(() => 'last-opened')
   })
 
   test('navigates to /usage (Restore) and does NOT arm bindings when the new owner has a tombstoned seed and nothing to open', async () => {
@@ -333,6 +365,42 @@ describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', 
     // legacy floor, so the previous account's cells can't be saved/pushed).
     expect(h.startAutosave).not.toHaveBeenCalled()
     expect(h.startRemoteSync).not.toHaveBeenCalled()
+  })
+
+  // TARDIS-183 acceptance 7: the dashboard start view must NOT override the
+  // tombstoned-seed → Usage routing. bootSeedSuppressed has priority.
+  test('startView=dashboard does NOT route to the dashboard when the seed is tombstoned with no survivor', async () => {
+    userAtom.set({ id: OWNER, email: 'a@b.c', displayName: null, roles: [] })
+    await notebookStorage.clearAll()
+    await setSeedTombstone()
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    setStartViewReader(() => 'dashboard') // user prefers the dashboard…
+
+    await resetSlotToFloorForAccountChange()
+
+    // …but the suppressed-seed Restore path wins: Usage, not dashboard.
+    expect(urlAtom().pathname).toMatch(/usage$/)
+    expect(urlAtom().pathname).not.toMatch(/dashboard$/)
+    expect(h.startAutosave).not.toHaveBeenCalled()
+  })
+
+  // TARDIS-183 (positive path — the flagship behaviour): startView=dashboard +
+  // no tombstone → after the account-change reset the user lands on /dashboard,
+  // with the slot armed underneath. Mirrors the boot path's `startup.showDashboard`
+  // branch, so this also guards the boot navigation it shares.
+  test('startView=dashboard routes to /dashboard when the new owner has a normal seed', async () => {
+    userAtom.set({ id: OWNER, email: 'a@b.c', displayName: null, roles: [] })
+    await notebookStorage.clearAll() // fresh device: loadNotebook seeds a notebook
+    // No tombstone → loadNotebook(true) writes a fresh welcome seed and arms the
+    // slot, bootSeedSuppressedAtom stays false.
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    setStartViewReader(() => 'dashboard')
+
+    await resetSlotToFloorForAccountChange()
+
+    // Landed on the dashboard (not Usage), and the slot is armed underneath.
+    expect(urlAtom().pathname).toMatch(/dashboard$/)
+    expect(h.startAutosave).toHaveBeenCalled()
   })
 })
 

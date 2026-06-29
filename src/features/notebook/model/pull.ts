@@ -12,6 +12,7 @@
 
 import { wrap } from '@reatom/core'
 import type { notebook as notebookApi } from '@/shared/api'
+import { userAtom } from '@/entities/session'
 import { notebookStorage } from '../persistence/activeStorage'
 import { isNotebookJSON } from '../persistence/schema'
 import { serverNotebookToJSON } from './remoteSyncCore'
@@ -72,4 +73,41 @@ export async function pullServerNotebook(server: notebookApi.Notebook): Promise<
   // dirty-keep, not an overwrite.
   const result = await wrap(notebookStorage.putIfNewer(json, baseline?.updatedAt ?? null))
   return result.ok ? 'accepted' : 'kept-local-dirty'
+}
+
+/**
+ * Stamp a just-pulled server notebook with the current user's ownership
+ * sync-state, but ONLY when no sync-state exists yet (TARDIS-183 blocker fix).
+ *
+ * `pullServerNotebook` writes the document only, no sync-state. Ownership of a
+ * non-seed notebook lives solely in `NotebookSyncState.ownerId`
+ * (`listOwnedLocalNotebooks`), so a server notebook merely OPENED (never edited)
+ * stays "unowned" locally — and the startup resolver then rejects it as the
+ * last-opened target and falls back to another notebook. `bootReconcile` already
+ * stamps its pulled notebook for exactly this reason; this is the same stamp for
+ * the open-into-slot path, factored out so the two cannot drift.
+ *
+ * SAFETY (§11): the GET that produced this notebook ran under the current user's
+ * JWT and the server only returns that user's notebooks, so stamping it as theirs
+ * is provably correct. The `if (existing)` guard never overwrites another
+ * account's `ownerId` / `dirty` / tombstones — it only fills the gap where there
+ * is no sync-state at all. No-op when signed out (no owner to stamp).
+ */
+export async function stampServerNotebookOwnerIfUnowned(
+  server: notebookApi.Notebook,
+): Promise<void> {
+  const ownerId = userAtom()?.id
+  if (!ownerId) return
+  const existing = await wrap(notebookStorage.getSyncState(server.id))
+  if (existing) return
+  await wrap(
+    notebookStorage.putSyncState({
+      notebookId: server.id,
+      remoteCreated: true,
+      dirty: false,
+      deletedCells: [],
+      ownerId,
+      lastSyncedUpdatedAt: server.updatedAt,
+    }),
+  )
 }

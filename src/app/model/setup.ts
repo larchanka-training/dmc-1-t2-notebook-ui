@@ -1,8 +1,9 @@
 import { connectLogger, log, urlAtom, wrap } from '@reatom/core'
 import { rootFrame } from '@/setup'
 import { setAuthTokenGetter, setRefreshHandlers } from '@/shared/api'
-import { appPath } from '@/shared/lib/paths'
+import { appPath, DASHBOARD_PATH } from '@/shared/lib/paths'
 import { readPersistRecord } from '@/shared/lib/persist'
+import { readUserSettings } from './userSettings'
 import {
   accessTokenAtom,
   refreshTokenAtom,
@@ -15,10 +16,13 @@ import { startSessionCrossTabSync } from '@/entities/session/model/crossTabSync'
 import { startThemeSync } from '@/entities/theme'
 import { loadCurrentUserAction } from '@/features/auth'
 import {
+  activeNotebookIdAtom,
   bootSeedSuppressedAtom,
   loadNotebook,
   markBootRestored,
   reconcileBootFromServer,
+  resolveStartupTarget,
+  setStartViewReader,
   startNotebookListSync,
   startSlot,
 } from '@/features/notebook'
@@ -136,6 +140,14 @@ rootFrame.run(() => {
   // performs the opt-in model auto-load once the user's settings are applied.
   // Subscribing here makes it react to the session restored just above.
   startSettingsSync()
+  // TARDIS-183: feed the startup resolver the current user's persisted
+  // `startView`. The resolver lives in `features/notebook` (a feature must not
+  // import the app layer), so the app injects the reader. Read the persisted
+  // record DIRECTLY (not `startViewAtom`): `startSettingsSync` hydrates that
+  // atom asynchronously, so on boot/account-switch it may still hold its default
+  // — reading the record dodges that race (same reason tokens are read via
+  // `readPersistRecord` above). Defaults to 'last-opened' when no record yet.
+  setStartViewReader(() => readUserSettings(userAtom()?.id ?? '')?.startView ?? 'last-opened')
 })
 
 // Restore the local notebook from IndexedDB, then begin autosaving. Order
@@ -166,6 +178,14 @@ rootFrame.run(async () => {
     // so `loadNotebook(true)` then opens the right notebook instead of reseeding.
     // Best-effort and self-contained — never blocks boot.
     await wrap(reconcileBootFromServer())
+    // TARDIS-183: decide what to open BEFORE loading the slot, without bypassing
+    // `loadNotebook`. The resolver returns the owned last-opened id to arm (or
+    // null → let `loadNotebook(true)` pick the newest / seed) plus whether the
+    // user's startView is the dashboard. Arm the chosen id by flipping the
+    // active id; `loadNotebook(true)` only runs its own pickNewest when the id is
+    // still the local floor, so an explicit id is respected.
+    const startup = await wrap(resolveStartupTarget())
+    if (startup.notebookId) activeNotebookIdAtom.set(startup.notebookId)
     // A real restore (existing stored notebook) surfaces "Saved · <time>" right
     // away, seeded from the stored timestamp — instead of a blank indicator
     // until the first edit. A fresh seed / newer-format / failure returns false
@@ -180,9 +200,20 @@ rootFrame.run(async () => {
     // inert legacy floor (autosave/remote-sync stay unbound). Send them to the
     // Usage page's Restore affordance instead of an unbacked, unsaveable seed
     // whose first edit would resurrect the deleted seed. SPA navigation (no
-    // reload), so boot does not re-run and loop.
+    // reload), so boot does not re-run and loop. This takes PRIORITY over the
+    // dashboard start view (TARDIS-183 acceptance 7).
     if (bootSeedSuppressedAtom()) {
       urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
+    } else if (startup.showDashboard && urlAtom().pathname === import.meta.env.BASE_URL) {
+      // TARDIS-183: open the dashboard on top of the armed slot (like /usage),
+      // but ONLY when the entry point is the app root (the notebook route ''').
+      // boot runs on EVERY page load, so without the path guard a refresh or
+      // deep-link to /settings, /about, /usage, /llm-playground would be
+      // hijacked to the dashboard, losing the page the user was on. The
+      // suppressed-seed branch above is a forced recovery, so it stays
+      // unconditional; the dashboard is a preference and must not override a
+      // deliberate URL.
+      urlAtom.set((url) => new URL(DASHBOARD_PATH, url.origin), true)
     }
   } finally {
     if (bootedNotebook) {

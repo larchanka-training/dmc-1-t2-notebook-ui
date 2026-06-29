@@ -38,6 +38,7 @@ prefix:
 | Path                 | Page component         | Source                         |
 | -------------------- | ---------------------- | ------------------------------ |
 | `/`                  | `NotebookPage`         | `src/pages/notebook/`          |
+| `/dashboard`         | `DashboardPage`        | `src/pages/dashboard/`         |
 | `/login`             | `LoginPage`            | `src/pages/login/`             |
 | `/components/shadcn` | `ShadcnComponentsPage` | `src/pages/shadcn-components/` |
 | `/components/custom` | `CustomComponentsPage` | `src/pages/custom-components/` |
@@ -49,9 +50,12 @@ prefix:
 
 `/about` and `/usage` are public (no `AuthRouteGuard`); the rest of the
 feature pages — including `/settings`, which holds per-user preferences
-namespaced by user id — stay behind it. The 404 row is not a registered
-route — it is the root layout's fallback when no child route matches (see
-below).
+namespaced by user id, and `/dashboard`, which lists the signed-in user's
+notebooks — stay behind it. The 404 row is not a registered route — it is the
+root layout's fallback when no child route matches (see below).
+
+The sidebar's **All notebooks** item (Workspace group) links to `/dashboard`;
+it is the start screen the per-user `startView` setting can select (TARDIS-183).
 
 ---
 
@@ -63,6 +67,7 @@ rootRoute (layout: true)                    src/app/model/routes.tsx
         │
         └── child page routes (registered as side effects when their modules load)
               ├── notebookRoute    path: ''                  → NotebookPage
+              ├── dashboardRoute   path: 'dashboard'         → DashboardPage (guarded)
               ├── loginRoute       path: 'login'             → LoginPage
               ├── aboutRoute       path: 'about'             → AboutPage (public)
               ├── usageRoute       path: 'usage'             → UsagePage (public)

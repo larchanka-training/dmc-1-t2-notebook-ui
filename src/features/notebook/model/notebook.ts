@@ -186,6 +186,37 @@ export async function hasOwnedLocalNotebooks(): Promise<boolean> {
 }
 
 /**
+ * A page-safe projection of a local notebook (TARDIS-183): the metadata a list/
+ * card view needs, WITHOUT leaking the persistence `NotebookJSON` shape. The
+ * dashboard consumes this instead of importing `persistence/schema` directly, so
+ * the storage format stays an internal detail of the notebook feature.
+ */
+export interface LocalNotebookSummary {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  cellsCount: number
+}
+
+/**
+ * The current user's provably-owned local notebooks as page-safe summaries
+ * (id + title + dates + cell count). A façade over `listOwnedLocalNotebooks`
+ * that flattens `NotebookJSON` to `LocalNotebookSummary`, so consumers outside
+ * the feature (e.g. the dashboard) never touch the raw stored shape.
+ */
+export async function listOwnedLocalNotebookSummaries(): Promise<LocalNotebookSummary[]> {
+  const mine = await wrap(listOwnedLocalNotebooks())
+  return mine.map((nb) => ({
+    id: nb.id,
+    title: nb.title,
+    createdAt: nb.createdAt,
+    updatedAt: nb.updatedAt,
+    cellsCount: nb.cells.length,
+  }))
+}
+
+/**
  * Choose which notebook the editor slot opens on boot (TARDIS-167 №23, contract
  * B / bootstrap step 3). Returns the newest OWNED locally-stored notebook by
  * creation time (newest-first, matching the sidebar's `createdAt desc` order), or

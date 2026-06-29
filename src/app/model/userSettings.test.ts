@@ -39,6 +39,7 @@ describe('readUserSettings', () => {
       autoLoadModel: true,
       inBrowserMaxTokens: 1234,
       thinkTokenBudget: 567,
+      startView: 'dashboard',
     }
     localStorage.setItem(settingsKey('present'), JSON.stringify(record))
 
@@ -60,6 +61,7 @@ describe('writeUserSettings', () => {
       autoLoadModel: false,
       inBrowserMaxTokens: 2000,
       thinkTokenBudget: 1000,
+      startView: 'last-opened',
     }
 
     writeUserSettings('rt', record)
@@ -90,6 +92,7 @@ describe('ensureUserSettings', () => {
       autoLoadModel: true,
       inBrowserMaxTokens: 3333,
       thinkTokenBudget: 1111,
+      startView: 'dashboard',
     }
     writeUserSettings('keep', custom)
 
@@ -152,6 +155,26 @@ describe('coerce (exercised via readUserSettings)', () => {
     expect(readUserSettings('bad-bool')!.autoLoadModel).toBe(false)
   })
 
+  test('resets an unknown startView to the default (TARDIS-183)', () => {
+    localStorage.setItem(
+      settingsKey('bad-start'),
+      JSON.stringify({ ...DEFAULT_USER_SETTINGS, startView: 'galaxy' }),
+    )
+
+    expect(readUserSettings('bad-start')!.startView).toBe(DEFAULT_USER_SETTINGS.startView)
+    // Sanity: the default reproduces the pre-183 "open a notebook" behaviour.
+    expect(DEFAULT_USER_SETTINGS.startView).toBe('last-opened')
+  })
+
+  test('keeps a valid startView (dashboard) unchanged', () => {
+    localStorage.setItem(
+      settingsKey('dash-start'),
+      JSON.stringify({ ...DEFAULT_USER_SETTINGS, startView: 'dashboard' }),
+    )
+
+    expect(readUserSettings('dash-start')!.startView).toBe('dashboard')
+  })
+
   test('falls back to the default limits for non-number values', () => {
     localStorage.setItem(
       settingsKey('bad-nums'),
@@ -183,6 +206,7 @@ describe('coerce (exercised via readUserSettings)', () => {
       autoLoadModel: true,
       inBrowserMaxTokens: 1000,
       thinkTokenBudget: 500,
+      startView: 'last-opened',
     }
     localStorage.setItem(settingsKey('valid'), JSON.stringify(valid))
 

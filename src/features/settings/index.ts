@@ -2,4 +2,5 @@
 // `entities/session` alone). The per-user persistence + sync orchestration
 // (`userSettings`, `settingsSync`) lives in `app/model` because it composes
 // several features and a feature must not import a sibling feature.
-export { displayNameAtom, sidebarDisplayNameAtom } from './model/settings'
+export { displayNameAtom, sidebarDisplayNameAtom, startViewAtom } from './model/settings'
+export type { StartView } from './model/settings'

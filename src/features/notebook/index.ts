@@ -29,7 +29,10 @@ export {
   DEMO_NOTEBOOK_ID,
   resolveDemoNotebookId,
   activeNotebookIdAtom,
+  listOwnedLocalNotebooks,
+  listOwnedLocalNotebookSummaries,
 } from './model/notebook'
+export type { LocalNotebookSummary } from './model/notebook'
 export {
   startAutosave,
   drainAutosave,
@@ -91,9 +94,13 @@ export {
   canDeleteNotebooks,
   canCreateNotebook,
   MAX_NOTEBOOKS,
+  localNotebooksRevisionAtom,
 } from './model/notebookList'
 export { reconcileBootFromServer } from './model/bootReconcile'
 export { clearSeedTombstone, isSeedTombstoned, setSeedTombstone } from './model/seedTombstone'
+export { readLastOpenedId, writeLastOpenedId, resolveOwnedLastOpenedId } from './model/lastOpened'
+export { resolveStartupTarget, setStartViewReader } from './model/startupTarget'
+export type { StartupTarget, StartViewChoice } from './model/startupTarget'
 export {
   openNotebookInSlot,
   resetSlotToFloorForAccountChange,

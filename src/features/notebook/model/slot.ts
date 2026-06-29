@@ -13,7 +13,7 @@
 
 import { action, atom, urlAtom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
-import { appPath } from '@/shared/lib/paths'
+import { appPath, DASHBOARD_PATH } from '@/shared/lib/paths'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -28,8 +28,10 @@ import { drainAutosave, hasLocalChangesAtom, startAutosave } from './autosave'
 import { startRemoteSync } from './remoteSync'
 import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
-import { pullServerNotebook } from './pull'
+import { pullServerNotebook, stampServerNotebookOwnerIfUnowned } from './pull'
 import { reconcileBootFromServer } from './bootReconcile'
+import { writeLastOpenedId } from './lastOpened'
+import { resolveStartupTarget } from './startupTarget'
 
 // Live teardown handles for the bindings of the notebook currently in the slot.
 // `null` when a binding is not running (AI context only runs in persisted mode).
@@ -216,11 +218,15 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     // a deleted-seed tombstone) so a fresh device opens the user's newest notebook
     // instead of a brand-new seed. Best-effort; never blocks the slot.
     await wrap(reconcileBootFromServer())
-    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution; with
-    // `pickNewest` it then opens the newest notebook OWNED BY this user (the seed
-    // id is derived from user.id; others are matched by sync-state ownerId), so
-    // the slot never lands on another account's local notebook.
-    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    // TARDIS-183: the same startup resolver boot uses, so the two paths can't
+    // diverge. It returns the owned last-opened id to arm (or null) plus whether
+    // the new owner's startView is the dashboard.
+    const startup = await wrap(resolveStartupTarget())
+    // An explicit owned id arms the slot directly; otherwise LOCAL_NOTEBOOK_ID
+    // triggers loadNotebook's per-user demo-id resolution + `pickNewest`, which
+    // opens the newest notebook OWNED BY this user (seed id derived from user.id;
+    // others matched by sync-state ownerId) — never another account's notebook.
+    activeNotebookIdAtom.set(startup.notebookId ?? LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook(true))
     // Honour seed suppression on the account-switch path too (review opus): when
     // the new owner's seed is tombstoned and they have no surviving notebook,
@@ -230,13 +236,20 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     // dead while the previous account's in-memory cells linger on a notebook route
     // (cross-account data exposure, §11). SPA-navigate to Usage to unmount the
     // editor, mirroring boot. `startBindings` self-refuses on the floor id anyway,
-    // so skipping it changes nothing.
+    // so skipping it changes nothing. Takes PRIORITY over the dashboard start
+    // view (TARDIS-183 acceptance 7).
     if (bootSeedSuppressedAtom()) {
       urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
       return
     }
     startBindings()
     slotOpenErrorAtom.set(null)
+    // TARDIS-183: with the slot armed, honour the dashboard start view by
+    // navigating on top of it (same model as /usage). Done AFTER startBindings
+    // so the background slot is live while the dashboard is shown.
+    if (startup.showDashboard) {
+      urlAtom.set((url) => new URL(DASHBOARD_PATH, url.origin), true)
+    }
   } catch (error) {
     // Do NOT re-arm here: the active id may still be the legacy floor, and
     // binding autosave/remote-sync to it is exactly what we must avoid. Leave the
@@ -432,7 +445,19 @@ async function openResolvedNotebook(
  * save / hung fetch cannot strand the lock (CL-3).
  */
 export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome> => {
-  if (id === activeNotebookIdAtom()) return 'already'
+  // Capture the signed-in owner id SYNCHRONOUSLY, before any await (TARDIS-183):
+  // the last-opened write below runs AFTER `await runExclusive`, where the Reatom
+  // frame is off the stack under production clearStack() — a cold `userAtom()`
+  // read there throws `missing async stack`. Reading it up-front (in-frame) and
+  // reusing the captured value keeps the write frame-safe.
+  const ownerId = userAtom()?.id
+  if (id === activeNotebookIdAtom()) {
+    // Clicking the already-open notebook still counts as "this is what I'm on"
+    // (TARDIS-183). Persisting it keeps last-opened correct even when no slot
+    // switch happens. No-op for the floor id (guarded inside writeLastOpenedId).
+    writeLastOpenedId(ownerId, id)
+    return 'already'
+  }
 
   // Capture the slot generation before any await: a lock-free reset/delete that
   // runs while we await bumps it, and each post-await re-check below then bails
@@ -469,7 +494,20 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
         outcome = 'superseded'
         return
       }
-      if (server) await wrap(pullServerNotebook(server))
+      if (server) {
+        await wrap(pullServerNotebook(server))
+        // TARDIS-183 blocker fix: stamp ownership so the just-opened server
+        // notebook counts as owned (`listOwnedLocalNotebooks`). Without this the
+        // startup resolver rejects it as the last-opened target on next boot and
+        // falls back to another notebook. Mirrors `bootReconcile`'s stamp; the
+        // `if (!existing)` guard inside keeps it §11-safe (no cross-account
+        // overwrite). Best-effort — a stamp failure must not fail the open.
+        try {
+          await wrap(stampServerNotebookOwnerIfUnowned(server))
+        } catch (stampError) {
+          console.warn('slot: failed to stamp pulled-notebook ownership', stampError)
+        }
+      }
 
       const target = await wrap(notebookStorage.get(id))
       if (!target) {
@@ -512,5 +550,16 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
     }
   })
   if (!ran) return 'busy'
-  return outcome
+  // Record the last successful real transition into the slot (TARDIS-183), so
+  // the startup resolver can reopen it on the next boot. Uses the `ownerId`
+  // captured up-front (frame-safe after the await). No-op for the floor id /
+  // signed-out (guarded inside writeLastOpenedId).
+  // `outcome` is mutated only inside the `runExclusive` closure, which TS
+  // control-flow does not track, so here it stays narrowed to its initial
+  // `'error'` literal — a bare `outcome === 'opened'` is then flagged as a
+  // no-overlap comparison under `tsc -b`. Widen back to the full union for the
+  // check (the runtime value really can be any `OpenOutcome`).
+  const settled = outcome as OpenOutcome
+  if (settled === 'opened') writeLastOpenedId(ownerId, id)
+  return settled
 }, 'notebook.openInSlot')

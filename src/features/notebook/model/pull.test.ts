@@ -9,7 +9,8 @@ import {
   updateCellCode,
 } from './notebook'
 import { hasLocalChangesAtom } from './autosave'
-import { pullServerNotebook } from './pull'
+import { userAtom } from '@/entities/session'
+import { pullServerNotebook, stampServerNotebookOwnerIfUnowned } from './pull'
 
 const SERVER_ID = '99999999-9999-4999-8999-999999999999'
 const CELL = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -150,5 +151,52 @@ describe('pullServerNotebook', () => {
     const result = await pullServerNotebook(serverNotebook({ formatVersion: 99 }))
     expect(result).toBe('rejected')
     expect(putIfNewerSpy).not.toHaveBeenCalled()
+  })
+})
+
+// TARDIS-183 blocker: a server notebook merely opened (never edited) had no
+// sync-state ownerId, so `listOwnedLocalNotebooks` rejected it and the startup
+// resolver fell back to another notebook. `openNotebookInSlot` now stamps it via
+// this helper, mirroring `bootReconcile`.
+describe('stampServerNotebookOwnerIfUnowned', () => {
+  let putSyncStateSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    putSyncStateSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue(undefined)
+    userAtom.set({ id: 'owner-A', email: 'a@b.c', displayName: null, roles: [] })
+  })
+  afterEach(() => {
+    userAtom.set(null)
+  })
+
+  test('stamps the current user as owner when no sync-state exists', async () => {
+    getSyncStateSpy.mockResolvedValue(undefined)
+
+    await stampServerNotebookOwnerIfUnowned(serverNotebook())
+
+    expect(putSyncStateSpy).toHaveBeenCalledTimes(1)
+    expect(putSyncStateSpy.mock.calls[0][0]).toMatchObject({
+      notebookId: SERVER_ID,
+      ownerId: 'owner-A',
+      remoteCreated: true,
+      dirty: false,
+    })
+  })
+
+  test('does NOT overwrite an existing sync-state (no cross-account clobber, §11)', async () => {
+    getSyncStateSpy.mockResolvedValue(cleanSyncState(SERVER_ID))
+
+    await stampServerNotebookOwnerIfUnowned(serverNotebook())
+
+    expect(putSyncStateSpy).not.toHaveBeenCalled()
+  })
+
+  test('is a no-op when signed out (no owner to stamp)', async () => {
+    userAtom.set(null)
+    getSyncStateSpy.mockResolvedValue(undefined)
+
+    await stampServerNotebookOwnerIfUnowned(serverNotebook())
+
+    expect(putSyncStateSpy).not.toHaveBeenCalled()
   })
 })
