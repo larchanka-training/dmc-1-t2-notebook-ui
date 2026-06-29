@@ -61,7 +61,7 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
       onClick={onOpen}
       className={cn(
         'group flex flex-col rounded-[var(--radius-card)] border border-border bg-card p-4 text-left',
-        'transition-[box-shadow,border-color,transform] hover:-translate-y-px hover:border-[color-mix(in_oklch,var(--primary)_40%,var(--border))] hover:shadow-[var(--shadow-pop)]',
+        'transition-[box-shadow,border-color,transform] hover:-translate-y-px hover:border-[color-mix(in_oklch,var(--primary)_40%,var(--border))] hover:shadow-[var(--shadow-pop)] cursor-pointer',
       )}
     >
       {/* Title heading */}
