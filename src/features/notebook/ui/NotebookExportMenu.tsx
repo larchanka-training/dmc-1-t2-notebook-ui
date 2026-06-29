@@ -8,6 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { exportNotebook } from '../model/export'
 
 // Header-level download menu. Two formats — JSON for a lossless snapshot
@@ -18,16 +19,34 @@ import { exportNotebook } from '../model/export'
 // render time; `wrap()` itself needs an active reatom context (under
 // production `clearStack()`, calling it from a plain React render throws
 // "missing async stack").
+//
+// The trigger nests Tooltip → DropdownMenuTrigger → Button via base-ui's
+// `render` prop chain so a single <button> element carries both the
+// tooltip-trigger and the menu-trigger behaviours. The tooltip suppresses
+// itself while the menu is open (Base UI default), matching every other
+// icon-button + tooltip pair in the toolbar.
 export const NotebookExportMenu = reatomComponent(() => {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button size="icon" variant="ghost" aria-label="Download notebook" className="size-8">
-            <Download className="size-4" />
-          </Button>
-        }
-      />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Download notebook"
+                  className="size-8"
+                >
+                  <Download className="size-4" />
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipContent>Download notebook</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={wrap(() => exportNotebook('json'))}>
           <span className="flex min-w-0 flex-col">
