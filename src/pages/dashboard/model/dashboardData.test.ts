@@ -21,26 +21,33 @@ const serverRow = (
   cellsCount,
 })
 
-// Local notebooks now reach the merge as page-safe summaries (cellsCount === 2
-// here, matching the assertions below).
-const localNb = (id: string, title: string, createdAt: number): LocalNotebookSummary => ({
+// Local notebooks reach the merge as page-safe summaries. `updatedAt` defaults
+// to OLDER than `serverRow`'s (createdAt+10) so the default collision keeps the
+// server copy; pass an explicit `updatedAt` to test the newer-local branch.
+const localNb = (
+  id: string,
+  title: string,
+  createdAt: number,
+  updatedAt = createdAt + 5,
+): LocalNotebookSummary => ({
   id,
   title,
   createdAt,
-  updatedAt: createdAt + 5,
+  updatedAt,
   cellsCount: 2,
 })
 
 const FLOOR = '00000000-0000-4000-8000-000000000001'
 
 describe('mergeDashboardCards (TARDIS-183)', () => {
-  test('merges server rows and owned local rows (server metadata wins on id collision)', () => {
+  test('on id collision keeps the server copy when it is newer (and adds local-only rows)', () => {
+    // server 'a' updatedAt=110, local 'a' updatedAt=105 → server is newer → wins.
     const server = [serverRow('a', 'Server A', 100)]
     const local = [localNb('a', 'Local A stale', 100), localNb('b', 'Local-only B', 200)]
 
-    const cards = mergeDashboardCards(server, local, 'a', 'Server A')
+    // activeId 'x' (not in either list) so the live-title override doesn't touch 'a'.
+    const cards = mergeDashboardCards(server, local, 'x', '')
 
-    // 'a' appears once, from the server row (its cellsCount=3, not the local 2).
     const a = cards.filter((c) => c.id === 'a')
     expect(a).toHaveLength(1)
     expect(a[0].title).toBe('Server A')
@@ -48,6 +55,17 @@ describe('mergeDashboardCards (TARDIS-183)', () => {
     // 'b' is the local-only notebook, carried from IndexedDB.
     const b = cards.find((c) => c.id === 'b')
     expect(b).toMatchObject({ title: 'Local-only B', cellsCount: 2 })
+  })
+
+  test('on id collision the NEWER local copy wins (offline-edited notebook)', () => {
+    // local 'a' edited offline → updatedAt 500 > server 110 → local metadata wins.
+    const server = [serverRow('a', 'Server A stale', 100)]
+    const local = [localNb('a', 'Local A fresh', 100, 500)]
+
+    const cards = mergeDashboardCards(server, local, 'x', '')
+
+    const a = cards.find((c) => c.id === 'a')
+    expect(a).toMatchObject({ title: 'Local A fresh', cellsCount: 2, updatedAt: 500 })
   })
 
   test('orders newest-first by createdAt', () => {

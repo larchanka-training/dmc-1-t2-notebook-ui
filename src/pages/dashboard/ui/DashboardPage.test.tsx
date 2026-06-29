@@ -1,9 +1,35 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { urlAtom } from '@reatom/core'
 import { userAtom } from '@/entities/session'
+import type { notebook as notebookApi } from '@/shared/api'
+
+// Mock only `createNotebookFlow` from the notebook barrel; keep everything else
+// real (the page reads `notebookListResource`, `slotOpenErrorAtom`, etc.). The
+// dashboard-specific behaviour under test: "New notebook" navigates to the
+// notebook route ONLY when creation succeeds (the navigation lives in the page's
+// onCreate, not in createNotebookFlow).
+const createFlowMock = vi.hoisted(() => vi.fn<() => Promise<notebookApi.Notebook | null>>())
+vi.mock('@/features/notebook', async (importActual) => {
+  const actual = await importActual<typeof import('@/features/notebook')>()
+  return { ...actual, createNotebookFlow: createFlowMock }
+})
+
 import { notebookListResource } from '@/features/notebook'
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
 import DashboardPage from './DashboardPage'
+
+const BASE = import.meta.env.BASE_URL
+const NB: notebookApi.Notebook = {
+  id: 'nb-new',
+  title: 'New',
+  ownerId: 'owner-A',
+  formatVersion: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  cells: [],
+}
 
 // NOTE: renders here may emit React "not wrapped in act(...)" warnings from
 // @reatom/react's async scheduler — a repo-wide artefact, not a failure (see
@@ -29,6 +55,7 @@ afterEach(async () => {
   await notebookStorage.clearAll()
   notebookListResource.data.set([])
   userAtom.set(null)
+  createFlowMock.mockReset()
 })
 
 describe('DashboardPage (TARDIS-183)', () => {
@@ -41,5 +68,35 @@ describe('DashboardPage (TARDIS-183)', () => {
     userAtom.set(null)
     const { container } = render(<DashboardPage />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  // The dashboard-specific navigation: createNotebookFlow opens the notebook in
+  // the slot but does NOT navigate — onCreate does. So this thin "created →
+  // navigate / null → stay" layer lives only in DashboardPage.
+  test('New notebook navigates to the notebook route on successful create', async () => {
+    createFlowMock.mockResolvedValue(NB)
+    // Start on a non-notebook route so a navigation to BASE is observable.
+    urlAtom.set((url) => new URL(`${BASE}dashboard`, url.origin), true)
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+
+    await user.click(screen.getByRole('button', { name: /new notebook/i }))
+
+    expect(createFlowMock).toHaveBeenCalled()
+    expect(urlAtom().pathname).toBe(BASE)
+  })
+
+  test('New notebook stays on the dashboard when create fails (null)', async () => {
+    createFlowMock.mockResolvedValue(null)
+    const startPath = new URL(`${BASE}dashboard`, 'http://localhost').pathname
+    urlAtom.set((url) => new URL(`${BASE}dashboard`, url.origin), true)
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+
+    await user.click(screen.getByRole('button', { name: /new notebook/i }))
+
+    expect(createFlowMock).toHaveBeenCalled()
+    // No navigation — still on the dashboard.
+    expect(urlAtom().pathname).toBe(startPath)
   })
 })

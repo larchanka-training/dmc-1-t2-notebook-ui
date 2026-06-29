@@ -27,10 +27,12 @@ const FLOOR_TITLE_FALLBACK = 'Untitled notebook'
 
 /**
  * Pure merge of the dashboard card list (kept separate from the async resource
- * so it is trivially unit-testable). Server rows win over local on id collision;
- * local-only notebooks (e.g. an unsynced seed) are appended; a synthetic floor
- * card is added for `activeId` when it is in neither list, deduped strictly by
- * id. Sorted createdAt-desc with the floor (no createdAt) last.
+ * so it is trivially unit-testable). On an id collision the NEWER copy wins by
+ * `updatedAt` (a notebook edited offline shows its live local metadata, not a
+ * stale server snapshot; ties favour the server row); local-only notebooks
+ * (e.g. an unsynced seed) are appended; a synthetic floor card is added for
+ * `activeId` when it is in neither list, deduped strictly by id. Sorted
+ * createdAt-desc with the floor (no createdAt) last.
  */
 export function mergeDashboardCards(
   serverRows: notebookApi.NotebookListItem[],
@@ -48,9 +50,15 @@ export function mergeDashboardCards(
       cellsCount: row.cellsCount,
     })
   }
-  // Local-only rows (not yet on the server, e.g. a fresh seed): add if absent.
+  // Local rows. Two cases:
+  //   • id NOT in the server list → local-only (fresh seed / unsynced) → add.
+  //   • id IN the server list → take whichever copy is NEWER by `updatedAt`, so a
+  //     notebook edited offline shows its live local title/cellsCount instead of
+  //     a stale server snapshot (offline-first consistency). Ties keep the server
+  //     row (already set).
   for (const nb of ownedLocal) {
-    if (byId.has(nb.id)) continue
+    const existing = byId.get(nb.id)
+    if (existing && (existing.updatedAt ?? 0) >= nb.updatedAt) continue
     byId.set(nb.id, {
       id: nb.id,
       title: nb.title,

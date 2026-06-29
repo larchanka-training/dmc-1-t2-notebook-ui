@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Clock } from 'lucide-react'
@@ -43,12 +44,18 @@ function formatRelative(ms: number): string {
  * the sidebar's interactive rows.
  */
 export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) => {
-  const onOpen = wrap(async () => {
-    const outcome = await wrap(openNotebookInSlot(card.id))
-    if (outcome === 'opened' || outcome === 'already') {
-      urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
-    }
-  })
+  // Memoised (keyed by id) for a stable onClick identity across reatom
+  // re-renders — same convention as DashboardPage's `onCreate`.
+  const onOpen = useMemo(
+    () =>
+      wrap(async () => {
+        const outcome = await wrap(openNotebookInSlot(card.id))
+        if (outcome === 'opened' || outcome === 'already') {
+          urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
+        }
+      }),
+    [card.id],
+  )
 
   const cellsLabel =
     card.cellsCount === undefined
