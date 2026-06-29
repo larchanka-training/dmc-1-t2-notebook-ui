@@ -4,6 +4,17 @@ import { notebookStorage } from '../persistence/activeStorage'
 import { FORMAT_VERSION } from '../persistence/schema'
 import { writeLastOpenedId } from './lastOpened'
 import { resolveStartupTarget, setStartViewReader, type StartViewChoice } from './startupTarget'
+import type { StartView } from '@/features/settings'
+
+// Compile-time guard against drift: `StartViewChoice` (this feature's local copy,
+// kept so the feature doesn't import a sibling feature at runtime) MUST stay
+// equal to the canonical `StartView` from `features/settings`. If either union
+// gains/renames a member, these assignments fail to typecheck (`tsc -b`), which
+// is the cheap safety belt the Nit asks for — no runtime sibling import.
+const _startViewToChoice: StartViewChoice = null as unknown as StartView
+const _choiceToStartView: StartView = null as unknown as StartViewChoice
+void _startViewToChoice
+void _choiceToStartView
 
 const USER = { id: 'owner-A', roles: [] }
 const NB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'

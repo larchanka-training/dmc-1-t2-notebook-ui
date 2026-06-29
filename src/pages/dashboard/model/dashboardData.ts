@@ -1,12 +1,12 @@
 import { computed, withAsyncData, wrap } from '@reatom/core'
 import type { notebook as notebookApi } from '@/shared/api'
-import type { NotebookJSON } from '@/features/notebook/persistence/schema'
 import {
   activeNotebookIdAtom,
-  listOwnedLocalNotebooks,
+  listOwnedLocalNotebookSummaries,
   localNotebooksRevisionAtom,
   notebookListResource,
   notebookTitleAtom,
+  type LocalNotebookSummary,
 } from '@/features/notebook'
 
 // Dashboard card model (TARDIS-183). One card per notebook the user can open.
@@ -34,7 +34,7 @@ const FLOOR_TITLE_FALLBACK = 'Untitled notebook'
  */
 export function mergeDashboardCards(
   serverRows: notebookApi.NotebookListItem[],
-  ownedLocal: NotebookJSON[],
+  ownedLocal: LocalNotebookSummary[],
   activeId: string,
   activeTitle: string,
 ): DashboardCard[] {
@@ -56,7 +56,7 @@ export function mergeDashboardCards(
       title: nb.title,
       createdAt: nb.createdAt,
       updatedAt: nb.updatedAt,
-      cellsCount: nb.cells.length,
+      cellsCount: nb.cellsCount,
     })
   }
   // Synthetic floor card: the active notebook is in neither list (the unsynced
@@ -65,6 +65,11 @@ export function mergeDashboardCards(
   if (!byId.has(activeId)) {
     byId.set(activeId, { id: activeId, title: activeTitle || FLOOR_TITLE_FALLBACK })
   }
+  // The active notebook's card shows the LIVE editor title (TARDIS-183): the
+  // server list row can lag an unsynced rename, while the sidebar's active row
+  // already shows `activeTitle`. Keep the two views consistent.
+  const active = byId.get(activeId)
+  if (active && activeTitle) active.title = activeTitle
   // createdAt desc; rows without createdAt (the floor) sort last.
   return [...byId.values()].sort((a, b) => {
     if (a.createdAt === undefined) return 1
@@ -103,7 +108,13 @@ export const dashboardNotebooksResource = computed(async () => {
   // own — reading the revision here makes this merge recompute and drop the
   // deleted card instead of leaving it as a stale local-only row (TARDIS-183).
   localNotebooksRevisionAtom()
-  // Provably-owned local notebooks (seed + sync-state-owned), async storage read.
-  const owned = await wrap(listOwnedLocalNotebooks())
+  // Provably-owned local notebooks as page-safe summaries (no persistence/schema
+  // leak into pages) — seed + sync-state-owned, async storage read.
+  const owned = await wrap(listOwnedLocalNotebookSummaries())
   return mergeDashboardCards(serverRows, owned, activeNotebookIdAtom(), notebookTitleAtom())
-}, 'dashboard.notebooks').extend(withAsyncData({ initState: [] as DashboardCard[] }))
+}, 'dashboard.notebooks').extend(
+  // `status: true` exposes `.status().isEverSettled`, so the page can tell
+  // "still loading" (initState `[]`) apart from a genuinely empty result and
+  // show a skeleton instead of flashing the empty-state on every cold load.
+  withAsyncData({ initState: [] as DashboardCard[], status: true }),
+)

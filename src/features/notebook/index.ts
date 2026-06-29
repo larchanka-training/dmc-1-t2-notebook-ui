@@ -30,7 +30,9 @@ export {
   resolveDemoNotebookId,
   activeNotebookIdAtom,
   listOwnedLocalNotebooks,
+  listOwnedLocalNotebookSummaries,
 } from './model/notebook'
+export type { LocalNotebookSummary } from './model/notebook'
 export {
   startAutosave,
   drainAutosave,

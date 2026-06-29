@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import type { notebook as notebookApi } from '@/shared/api'
-import type { NotebookJSON } from '@/features/notebook/persistence/schema'
-import { FORMAT_VERSION } from '@/features/notebook/persistence/schema'
+import type { LocalNotebookSummary } from '@/features/notebook'
 import { mergeDashboardCards } from './dashboardData'
+
+// `formatVersion` is irrelevant to the merge; a literal keeps the test free of
+// any persistence/schema import (the page boundary the merge now respects).
+const FORMAT_VERSION = 1
 
 const serverRow = (
   id: string,
@@ -18,16 +21,14 @@ const serverRow = (
   cellsCount,
 })
 
-const localNb = (id: string, title: string, createdAt: number): NotebookJSON => ({
-  formatVersion: FORMAT_VERSION,
+// Local notebooks now reach the merge as page-safe summaries (cellsCount === 2
+// here, matching the assertions below).
+const localNb = (id: string, title: string, createdAt: number): LocalNotebookSummary => ({
   id,
   title,
   createdAt,
   updatedAt: createdAt + 5,
-  cells: [
-    { id: 'c1', kind: 'code', content: '', updatedAt: createdAt },
-    { id: 'c2', kind: 'code', content: '', updatedAt: createdAt },
-  ],
+  cellsCount: 2,
 })
 
 const FLOOR = '00000000-0000-4000-8000-000000000001'
@@ -86,5 +87,21 @@ describe('mergeDashboardCards (TARDIS-183)', () => {
   test('uses the fallback title for a floor card with an empty active title', () => {
     const cards = mergeDashboardCards([], [], FLOOR, '')
     expect(cards).toEqual([{ id: FLOOR, title: 'Untitled notebook' }])
+  })
+
+  test('the active notebook card shows the live editor title over a stale server title', () => {
+    // The server list still has the pre-rename title; the editor (activeTitle)
+    // has the new one. The active card must reflect the live title.
+    const server = [serverRow('a', 'Old name', 100)]
+    const cards = mergeDashboardCards(server, [], 'a', 'New name')
+    expect(cards.find((c) => c.id === 'a')?.title).toBe('New name')
+  })
+
+  test('does not override a non-active row with the active title', () => {
+    const server = [serverRow('a', 'A title', 100), serverRow('b', 'B title', 200)]
+    // 'a' is active; 'b' must keep its own server title.
+    const cards = mergeDashboardCards(server, [], 'a', 'Live A')
+    expect(cards.find((c) => c.id === 'b')?.title).toBe('B title')
+    expect(cards.find((c) => c.id === 'a')?.title).toBe('Live A')
   })
 })

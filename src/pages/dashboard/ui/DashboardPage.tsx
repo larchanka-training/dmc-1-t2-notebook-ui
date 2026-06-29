@@ -1,11 +1,15 @@
+import { useMemo } from 'react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Hash, Notebook, Plus } from 'lucide-react'
 import { userAtom } from '@/entities/session'
-import { canCreateNotebook, createNotebookFlow } from '@/features/notebook'
+import { canCreateNotebook, createNotebookFlow, slotOpenErrorAtom } from '@/features/notebook'
 import { Button } from '@/shared/ui/button'
+import { Skeleton } from '@/shared/ui/skeleton'
 import { NotebookCard } from './NotebookCard'
 import { dashboardNotebooksResource } from '../model/dashboardData'
+
+const CARD_GRID = 'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(290px,1fr))]'
 
 const NOTEBOOK_HREF = import.meta.env.BASE_URL
 
@@ -26,11 +30,24 @@ const DashboardPage = reatomComponent(() => {
   if (!user) return null
 
   const cards = dashboardNotebooksResource.data()
+  // `isEverSettled` is false until the first merge resolves, so a cold load shows
+  // a skeleton instead of flashing the (otherwise indistinguishable) empty list.
+  const settled = dashboardNotebooksResource.status().isEverSettled
+  // A failed open (e.g. offline with no local copy) surfaces here — the same atom
+  // the slot controller sets and the sidebar shows, so a "dead" card click is
+  // explained rather than silent.
+  const openError = slotOpenErrorAtom()
 
-  const onCreate = wrap(async () => {
-    const created = await wrap(createNotebookFlow())
-    if (created) urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
-  })
+  // Memoised so `Button`/`onClick` identity is stable across the frequent
+  // reatom re-renders (one `wrap` callback, empty deps).
+  const onCreate = useMemo(
+    () =>
+      wrap(async () => {
+        const created = await wrap(createNotebookFlow())
+        if (created) urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
+      }),
+    [],
+  )
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -52,33 +69,39 @@ const DashboardPage = reatomComponent(() => {
           </Button>
         </header>
 
-        {cards.length > 0 ? (
-          <div className="mb-7 grid grid-cols-2 gap-3">
-            <StatCard icon={Notebook} value={cards.length} label="Notebooks" />
-            <StatCard
-              icon={Hash}
-              value={cards.reduce((sum, c) => sum + (c.cellsCount ?? 0), 0)}
-              label="Total cells"
-            />
-          </div>
+        {openError ? (
+          <p role="alert" className="mb-5 text-sm text-destructive">
+            {openError}
+          </p>
         ) : null}
 
-        {cards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="text-base font-semibold">No notebooks yet</div>
-            <p className="mt-1 max-w-[36ch] text-sm text-muted-foreground">
-              Create your first notebook to get started.
-            </p>
-            <Button className="mt-4" onClick={onCreate}>
-              New notebook
-            </Button>
-          </div>
-        ) : (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(290px,1fr))]">
-            {cards.map((card) => (
-              <NotebookCard key={card.id} card={card} />
+        {/* Loading vs loaded.
+            settled (the welcome seed guarantees a notebook — see
+            `mergeDashboardCards`'s floor row), so there is no empty-state: a
+            settled-but-empty list is unreachable. A brand-new user still has the
+            top-right "New notebook" action. */}
+        {!settled ? (
+          <div className={CARD_GRID} aria-busy="true" aria-label="Loading notebooks">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[120px] rounded-[var(--radius-card)]" />
             ))}
           </div>
+        ) : (
+          <>
+            <div className="mb-7 grid grid-cols-2 gap-3">
+              <StatCard icon={Notebook} value={cards.length} label="Notebooks" />
+              <StatCard
+                icon={Hash}
+                value={cards.reduce((sum, c) => sum + (c.cellsCount ?? 0), 0)}
+                label="Total cells"
+              />
+            </div>
+            <div className={CARD_GRID}>
+              {cards.map((card) => (
+                <NotebookCard key={card.id} card={card} />
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>

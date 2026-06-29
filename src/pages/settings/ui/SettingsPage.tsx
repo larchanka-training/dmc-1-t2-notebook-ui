@@ -227,7 +227,16 @@ const OnStartSection = reatomComponent(() => {
             startViewAtom.set(checked ? 'dashboard' : 'last-opened'),
           )}
         />
-        <span>Show the dashboard on start</span>
+        {/* Name BOTH outcomes so the off-state isn't a guess: a Switch normally
+            reads as on/off, but here both positions are named modes. */}
+        <span>
+          Show the dashboard on start
+          <span className="block text-xs text-muted-foreground">
+            {startView === 'dashboard'
+              ? 'Opening the dashboard.'
+              : 'Opening the last notebook used on this device.'}
+          </span>
+        </span>
       </label>
     </SettingsSection>
   )
