@@ -115,6 +115,11 @@ const DefaultModelSection = reatomComponent(() => {
 // cleared field leaves the atom at its last valid value instead of writing 0/NaN.
 // `commit` is pre-`wrap`ped by the caller (clearStack). The draft re-seeds when
 // `value` changes from outside the field (account switch / sign-out reset).
+//
+// Deliberate `useState` (not `reatomField`): the project prefers Reatom forms,
+// but this draft/commit dance is exactly the local-UI-state case `useState` is
+// for (same as the sidebar's filter input), and it isolates the `Number('')`
+// quirk of a controlled number input. The source of truth stays the Reatom atom.
 function TokenLimitField({
   label,
   value,
@@ -152,6 +157,16 @@ function TokenLimitField({
         if (raw.trim() === '') return
         const n = Number(raw)
         if (Number.isFinite(n)) commit(n)
+      }}
+      onBlur={() => {
+        // Normalise to [min, max] on blur so the field never lingers showing an
+        // out-of-range value that generation would silently clamp. An empty /
+        // invalid draft snaps back to the last committed `value`.
+        const n = Number(draft)
+        const next = draft.trim() === '' || !Number.isFinite(n) ? value : n
+        const clamped = Math.min(max, Math.max(min, Math.round(next)))
+        setDraft(String(clamped))
+        if (clamped !== value) commit(clamped)
       }}
     />
   )

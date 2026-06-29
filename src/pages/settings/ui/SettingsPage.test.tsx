@@ -14,6 +14,7 @@ import { autoLoadModelAtom } from '@/features/web-llm'
 import {
   IN_BROWSER_MAX_TOKENS,
   IN_BROWSER_THINK_TOKEN_BUDGET,
+  MAX_IN_BROWSER_MAX_TOKENS,
   inBrowserMaxTokensAtom,
   thinkTokenBudgetAtom,
 } from '@/features/notebook'
@@ -101,5 +102,20 @@ describe('SettingsPage (TARDIS-181)', () => {
     await user.clear(screen.getByLabelText('Generation token limit'))
 
     expect(peek(inBrowserMaxTokensAtom)).toBe(3000)
+  })
+
+  test('an out-of-range Generation token limit is clamped to MAX on blur', async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    const input = screen.getByLabelText('Generation token limit')
+    await user.clear(input)
+    await user.type(input, '50000')
+    // Above MAX while typing (raw is kept so the user isn't fought mid-edit)…
+    expect(peek(inBrowserMaxTokensAtom)).toBe(50000)
+    // …but blur normalises both the atom and the visible field to MAX.
+    await user.tab()
+    expect(peek(inBrowserMaxTokensAtom)).toBe(MAX_IN_BROWSER_MAX_TOKENS)
+    expect(input).toHaveValue(MAX_IN_BROWSER_MAX_TOKENS)
   })
 })
