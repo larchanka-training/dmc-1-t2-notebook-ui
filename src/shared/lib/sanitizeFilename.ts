@@ -10,6 +10,11 @@
 const MAX_LEN = 80
 
 export function sanitizeFilename(title: string, fallbackId: string): string {
+  // Trailing `replace(/-+$/, '')` covers the edge case where `slice(0, MAX_LEN)`
+  // chops exactly at a separator dash and leaves the name ending in `-`. The
+  // earlier `replace(/-+/g, '-')` only collapses internal runs; only post-slice
+  // can we tell that the final dash is one created by truncation, not by the
+  // user.
   const cleaned = title
     .normalize('NFKD')
     .replace(/[^\w\s-]/g, '')
@@ -17,5 +22,6 @@ export function sanitizeFilename(title: string, fallbackId: string): string {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .slice(0, MAX_LEN)
+    .replace(/-+$/, '')
   return cleaned || `notebook-${fallbackId}`
 }

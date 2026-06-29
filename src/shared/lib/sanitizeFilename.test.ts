@@ -37,4 +37,13 @@ describe('sanitizeFilename', () => {
   test('trims leading/trailing whitespace before producing the name', () => {
     expect(sanitizeFilename('   hello   ', ID)).toBe('hello')
   })
+
+  test('does not leave a trailing dash when slice cuts exactly at a separator', () => {
+    // 79 chars + a space → after dash-join, char 80 is the dash itself; the
+    // truncation would otherwise keep that dash at the end of the name.
+    const title = 'a'.repeat(79) + ' x'
+    const out = sanitizeFilename(title, ID)
+    expect(out).toBe('a'.repeat(79))
+    expect(out.endsWith('-')).toBe(false)
+  })
 })

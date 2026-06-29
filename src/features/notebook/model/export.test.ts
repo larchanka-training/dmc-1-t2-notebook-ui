@@ -73,4 +73,21 @@ describe('exportNotebook', () => {
     exportNotebook('markdown')
     expect(capturedFilename).toBe('Hello-World.md')
   })
+
+  test('JSON export updatedAt is deterministic across consecutive clicks (no Date.now drift)', async () => {
+    setNotebookTitle('Stable')
+    updateCellCode(cellsAtom()[0]!.id, 'const x = 1')
+
+    exportNotebook('json')
+    const first = JSON.parse(await blobText()).updatedAt as number
+
+    // Advance wall-clock far past any plausible debounce; the export must
+    // still report the same updatedAt because no content actually changed.
+    await new Promise((r) => setTimeout(r, 5))
+
+    exportNotebook('json')
+    const second = JSON.parse(await blobText()).updatedAt as number
+
+    expect(second).toBe(first)
+  })
 })
