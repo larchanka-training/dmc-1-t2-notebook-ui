@@ -30,6 +30,7 @@ import { startAiContextSync } from './context-ai/aiContext'
 import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { pullServerNotebook } from './pull'
 import { reconcileBootFromServer } from './bootReconcile'
+import { writeLastOpenedId } from './lastOpened'
 
 // Live teardown handles for the bindings of the notebook currently in the slot.
 // `null` when a binding is not running (AI context only runs in persisted mode).
@@ -432,7 +433,13 @@ async function openResolvedNotebook(
  * save / hung fetch cannot strand the lock (CL-3).
  */
 export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome> => {
-  if (id === activeNotebookIdAtom()) return 'already'
+  if (id === activeNotebookIdAtom()) {
+    // Clicking the already-open notebook still counts as "this is what I'm on"
+    // (TARDIS-183). Persisting it keeps last-opened correct even when no slot
+    // switch happens. No-op for the floor id (guarded inside writeLastOpenedId).
+    writeLastOpenedId(userAtom()?.id, id)
+    return 'already'
+  }
 
   // Capture the slot generation before any await: a lock-free reset/delete that
   // runs while we await bumps it, and each post-await re-check below then bails
@@ -512,5 +519,9 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
     }
   })
   if (!ran) return 'busy'
+  // Record the last successful real transition into the slot (TARDIS-183), so
+  // the startup resolver can reopen it on the next boot. No-op for the floor id
+  // / signed-out (guarded inside writeLastOpenedId).
+  if (outcome === 'opened') writeLastOpenedId(userAtom()?.id, id)
   return outcome
 }, 'notebook.openInSlot')
