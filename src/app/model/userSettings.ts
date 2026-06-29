@@ -90,11 +90,26 @@ export function writeUserSettings(userId: string, settings: UserSettings): void 
  * Return the user's settings, creating the record with defaults when absent.
  * The create-on-login write is immediate (not deferred to a first edit), so a
  * fresh account always has a concrete record from the moment it signs in.
+ *
+ * Self-heals storage: `readUserSettings` coerces stale/garbage fields (a
+ * phantom `modelId`, a non-numeric limit, a missing/extra field) in memory, and
+ * here we write the repaired record back when it differs from the raw stored
+ * string — so the record is fixed once, not re-coerced on every sign-in. This
+ * keeps the write-back invariant the old `normalizeWebLlmPersistedState` held.
  */
 export function ensureUserSettings(userId: string): UserSettings {
   const existing = readUserSettings(userId)
-  if (existing) return existing
-  const defaults = { ...DEFAULT_USER_SETTINGS }
-  writeUserSettings(userId, defaults)
-  return defaults
+  if (existing === null) {
+    const defaults = { ...DEFAULT_USER_SETTINGS }
+    writeUserSettings(userId, defaults)
+    return defaults
+  }
+  // `existing` is non-null → localStorage is available (readUserSettings guards
+  // it). The canonical serialization of the coerced record differs from the raw
+  // stored string exactly when coercion changed something (or the stored JSON
+  // had non-canonical key order / extra keys) — rewrite once in that case.
+  if (localStorage.getItem(settingsKey(userId)) !== JSON.stringify(existing)) {
+    writeUserSettings(userId, existing)
+  }
+  return existing
 }

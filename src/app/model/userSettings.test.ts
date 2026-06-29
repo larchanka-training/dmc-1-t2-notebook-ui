@@ -99,6 +99,36 @@ describe('ensureUserSettings', () => {
     // Untouched on disk too.
     expect(readUserSettings('keep')).toEqual(custom)
   })
+
+  test('self-heals a stored record with stale fields back to disk (write-back once)', () => {
+    // A phantom modelId + a non-numeric limit + an extra junk key.
+    localStorage.setItem(
+      settingsKey('stale'),
+      JSON.stringify({
+        displayName: 'Stale',
+        modelId: 'dropped-from-catalogue',
+        autoLoadModel: true,
+        inBrowserMaxTokens: 'nope',
+        thinkTokenBudget: 1500,
+        junk: 42,
+      }),
+    )
+
+    const result = ensureUserSettings('stale')
+
+    // Coerced in memory: phantom model → default, bad limit → default, valid
+    // fields kept.
+    expect(result.modelId).toBe(DEFAULT_USER_SETTINGS.modelId)
+    expect(result.inBrowserMaxTokens).toBe(DEFAULT_USER_SETTINGS.inBrowserMaxTokens)
+    expect(result.displayName).toBe('Stale')
+    expect(result.autoLoadModel).toBe(true)
+    expect(result.thinkTokenBudget).toBe(1500)
+
+    // And written back to disk: the raw record now equals the canonical coerced
+    // record (no phantom id, no junk key left behind).
+    expect(localStorage.getItem(settingsKey('stale'))).toBe(JSON.stringify(result))
+    expect('junk' in JSON.parse(localStorage.getItem(settingsKey('stale'))!)).toBe(false)
+  })
 })
 
 describe('coerce (exercised via readUserSettings)', () => {
