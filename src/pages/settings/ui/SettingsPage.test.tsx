@@ -90,4 +90,16 @@ describe('SettingsPage (TARDIS-181)', () => {
 
     expect(peek(inBrowserMaxTokensAtom)).toBe(4000)
   })
+
+  test('clearing the Generation token limit keeps the current value, not 0', async () => {
+    const user = userEvent.setup()
+    inBrowserMaxTokensAtom.set(3000)
+    render(<SettingsPage />)
+
+    // Fully clearing the field must NOT persist 0 (Number('') === 0): it falls
+    // back to the current value instead.
+    await user.clear(screen.getByLabelText('Generation token limit'))
+
+    expect(peek(inBrowserMaxTokensAtom)).toBe(3000)
+  })
 })

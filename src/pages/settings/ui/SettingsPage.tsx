@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Lock } from 'lucide-react'
@@ -95,6 +96,9 @@ const DefaultModelSection = reatomComponent(() => {
         <Switch
           checked={autoLoad}
           onCheckedChange={wrap((checked: boolean) => autoLoadModelAtom.set(checked))}
+          // Defence-in-depth: the Select only offers catalogue ids and `coerce`
+          // resets a phantom id on load, so in practice this is always enabled —
+          // it just guards against arming auto-load for an unknown model id.
           disabled={!AVAILABLE_MODELS.includes(modelId)}
         />
         <span>Auto-load this model on start</span>
@@ -103,12 +107,54 @@ const DefaultModelSection = reatomComponent(() => {
   )
 }, 'DefaultModelSection')
 
-// Read-time conversion: an empty / non-numeric field falls back to the atom's
-// current value, so a half-cleared input never writes NaN. Generation clamps
-// these via the `effective*` atoms, so an out-of-range raw value stays safe.
-function parseLimit(raw: string, fallback: number): number {
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : fallback
+// A number field with a LOCAL string draft. A controlled number input bound
+// straight to the atom can't be cleared (the atom value snaps back, and a
+// fallback-on-empty makes `Number('') === 0` either persist 0 or fight the
+// edit). Keeping the visible value as a string lets the field be transiently
+// empty/partial while committing to the atom only a real finite number — so a
+// cleared field leaves the atom at its last valid value instead of writing 0/NaN.
+// `commit` is pre-`wrap`ped by the caller (clearStack). The draft re-seeds when
+// `value` changes from outside the field (account switch / sign-out reset).
+function TokenLimitField({
+  label,
+  value,
+  min,
+  max,
+  commit,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  commit: (n: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+  // Re-seed the draft when `value` changes from OUTSIDE the field (account
+  // switch / sign-out reset). React's "adjust state during render on prop
+  // change" pattern — a render-time set, not an effect, so no cascading-render
+  // lint and no stale frame.
+  const [lastValue, setLastValue] = useState(value)
+  if (value !== lastValue) {
+    setLastValue(value)
+    setDraft(String(value))
+  }
+  return (
+    <Input
+      type="number"
+      value={draft}
+      min={min}
+      max={max}
+      step={256}
+      aria-label={label}
+      onChange={(e) => {
+        const raw = e.target.value
+        setDraft(raw)
+        if (raw.trim() === '') return
+        const n = Number(raw)
+        if (Number.isFinite(n)) commit(n)
+      }}
+    />
+  )
 }
 
 const LimitsSection = reatomComponent(() => {
@@ -123,32 +169,24 @@ const LimitsSection = reatomComponent(() => {
         <span>
           Generation limit (tokens) — {MIN_IN_BROWSER_MAX_TOKENS}–{MAX_IN_BROWSER_MAX_TOKENS}
         </span>
-        <Input
-          type="number"
-          value={String(maxTokens)}
+        <TokenLimitField
+          label="Generation token limit"
+          value={maxTokens}
           min={MIN_IN_BROWSER_MAX_TOKENS}
           max={MAX_IN_BROWSER_MAX_TOKENS}
-          step={256}
-          aria-label="Generation token limit"
-          onChange={wrap((e: React.ChangeEvent<HTMLInputElement>) =>
-            inBrowserMaxTokensAtom.set(parseLimit(e.target.value, maxTokens)),
-          )}
+          commit={wrap((n: number) => inBrowserMaxTokensAtom.set(n))}
         />
       </label>
       <label className="flex flex-col gap-1.5 text-sm">
         <span>
           Thinking limit (tokens) — {MIN_THINK_TOKEN_BUDGET}–{MAX_THINK_TOKEN_BUDGET}
         </span>
-        <Input
-          type="number"
-          value={String(thinkBudget)}
+        <TokenLimitField
+          label="Thinking token limit"
+          value={thinkBudget}
           min={MIN_THINK_TOKEN_BUDGET}
           max={MAX_THINK_TOKEN_BUDGET}
-          step={256}
-          aria-label="Thinking token limit"
-          onChange={wrap((e: React.ChangeEvent<HTMLInputElement>) =>
-            thinkTokenBudgetAtom.set(parseLimit(e.target.value, thinkBudget)),
-          )}
+          commit={wrap((n: number) => thinkTokenBudgetAtom.set(n))}
         />
       </label>
     </SettingsSection>
