@@ -1,6 +1,7 @@
 import { reatomComponent } from '@reatom/react'
 import { rootRoute } from './model/routes'
 import '@/pages/notebook'
+import '@/pages/dashboard'
 import '@/pages/login'
 import '@/pages/about'
 import '@/pages/usage'
