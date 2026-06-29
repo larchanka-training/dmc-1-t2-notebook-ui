@@ -29,6 +29,7 @@ export {
   DEMO_NOTEBOOK_ID,
   resolveDemoNotebookId,
   activeNotebookIdAtom,
+  listOwnedLocalNotebooks,
 } from './model/notebook'
 export {
   startAutosave,
