@@ -4,6 +4,7 @@ import {
   modelIdAtom,
   autoLoadModelAtom,
   loadModelAction,
+  cancelModelLoad,
   AVAILABLE_MODELS,
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
@@ -83,6 +84,13 @@ export function startSettingsSync(): () => void {
       const userId = user?.id ?? null
       if (userId === currentUserId) return
       currentUserId = userId
+
+      // The user changed (sign-in of another account, or sign-out). Invalidate
+      // any in-flight / published model load BEFORE applying the new settings,
+      // so a slow `loadModelAction` started for the previous account can't
+      // resolve later and publish that account's model into this session
+      // (TARDIS-181: keeps the loaded engine from bleeding across accounts).
+      cancelModelLoad()
 
       if (userId === null) {
         // Signed out: clear the atoms so the next account / login screen starts

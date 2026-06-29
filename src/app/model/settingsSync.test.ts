@@ -225,3 +225,59 @@ describe('startSettingsSync — auto-load opt-in', () => {
     }
   })
 })
+
+describe('startSettingsSync — model load invalidation on user change', () => {
+  test('a user change drops the previously loaded engine (no cross-account bleed)', async () => {
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('alice'))
+      await flush()
+      const aliceEngine = { unload: unloadMock }
+      engineAtom.set(aliceEngine as unknown as ReturnType<typeof engineAtom>)
+      loadedModelIdAtom.set(AVAILABLE_MODELS[0])
+
+      userAtom.set(user('bob'))
+      await flush()
+
+      // Alice's engine must not bleed into Bob's session: dropped + unloaded.
+      expect(peek(engineAtom)).toBeNull()
+      expect(peek(loadedModelIdAtom)).toBeNull()
+      expect(unloadMock).toHaveBeenCalled()
+    } finally {
+      stop()
+    }
+  })
+
+  test('a late-resolving load started before sign-out does not publish its engine', async () => {
+    writeUserSettings('alice', {
+      ...DEFAULT_USER_SETTINGS,
+      modelId: AVAILABLE_MODELS[0],
+      autoLoadModel: true,
+    })
+    // Hold the reload promise open so the load is still pending at sign-out.
+    let resolveReload: () => void = () => {}
+    reloadMock.mockImplementationOnce(
+      () => new Promise<undefined>((res) => (resolveReload = () => res(undefined))),
+    )
+
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('alice'))
+      await flush()
+      expect(reloadMock).toHaveBeenCalled()
+
+      // Sign out while the load is still pending, then let it resolve.
+      userAtom.set(null)
+      await flush()
+      resolveReload()
+      await flush()
+
+      // The superseded load must not publish Alice's model into the signed-out
+      // session.
+      expect(peek(engineAtom)).toBeNull()
+      expect(peek(loadedModelIdAtom)).toBeNull()
+    } finally {
+      stop()
+    }
+  })
+})

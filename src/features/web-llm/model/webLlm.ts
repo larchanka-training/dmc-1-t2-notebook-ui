@@ -224,6 +224,27 @@ export const loadModelAction = action(async () => {
   }
 }, 'webLlm.loadModel').extend(withAsync())
 
+// Invalidate any model load and drop the loaded engine (TARDIS-181). Called on a
+// user change (sign-in of another account / sign-out) so the engine session does
+// not bleed across accounts: bumping `latestLoadSeq` makes an IN-FLIGHT load,
+// when its `engine.reload()` resolves, see `seq !== latestLoadSeq` and unload its
+// now-orphan engine instead of publishing the previous user's model into the new
+// (or signed-out) session; the synchronous atom resets + best-effort unload drop
+// an ALREADY-published engine the same way. Fire-and-forget unload: all atom
+// writes happen first, so no Reatom frame is needed in the unload continuation.
+export const cancelModelLoad = action(() => {
+  latestLoadSeq++
+  const engine = engineAtom()
+  engineAtom.set(null)
+  loadedModelIdAtom.set(null)
+  loadingModelIdAtom.set(null)
+  loadProgressAtom.set(null)
+  messagesAtom.set([])
+  if (engine) {
+    void Promise.resolve(engine.unload()).catch(() => undefined)
+  }
+}, 'webLlm.cancelModelLoad')
+
 // TARDIS-167 (№5, review PR #88): reconcile the persisted downloaded-list with
 // the REAL WebLLM cache on startup. localStorage and Cache Storage are
 // independent: the user can clear site data or the browser can evict weights,
