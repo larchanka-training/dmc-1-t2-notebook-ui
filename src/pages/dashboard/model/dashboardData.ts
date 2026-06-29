@@ -1,4 +1,6 @@
 import { computed, withAsyncData, wrap } from '@reatom/core'
+import type { notebook as notebookApi } from '@/shared/api'
+import type { NotebookJSON } from '@/features/notebook/persistence/schema'
 import {
   activeNotebookIdAtom,
   listOwnedLocalNotebooks,
@@ -21,6 +23,54 @@ export interface DashboardCard {
 }
 
 const FLOOR_TITLE_FALLBACK = 'Untitled notebook'
+
+/**
+ * Pure merge of the dashboard card list (kept separate from the async resource
+ * so it is trivially unit-testable). Server rows win over local on id collision;
+ * local-only notebooks (e.g. an unsynced seed) are appended; a synthetic floor
+ * card is added for `activeId` when it is in neither list, deduped strictly by
+ * id. Sorted createdAt-desc with the floor (no createdAt) last.
+ */
+export function mergeDashboardCards(
+  serverRows: notebookApi.NotebookListItem[],
+  ownedLocal: NotebookJSON[],
+  activeId: string,
+  activeTitle: string,
+): DashboardCard[] {
+  const byId = new Map<string, DashboardCard>()
+  for (const row of serverRows) {
+    byId.set(row.id, {
+      id: row.id,
+      title: row.title,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      cellsCount: row.cellsCount,
+    })
+  }
+  // Local-only rows (not yet on the server, e.g. a fresh seed): add if absent.
+  for (const nb of ownedLocal) {
+    if (byId.has(nb.id)) continue
+    byId.set(nb.id, {
+      id: nb.id,
+      title: nb.title,
+      createdAt: nb.createdAt,
+      updatedAt: nb.updatedAt,
+      cellsCount: nb.cells.length,
+    })
+  }
+  // Synthetic floor card: the active notebook is in neither list (the unsynced
+  // welcome seed). Mirror `effectiveNotebookCount`'s floor rule, but dedupe
+  // strictly by id so a seed already merged above is never doubled.
+  if (!byId.has(activeId)) {
+    byId.set(activeId, { id: activeId, title: activeTitle || FLOOR_TITLE_FALLBACK })
+  }
+  // createdAt desc; rows without createdAt (the floor) sort last.
+  return [...byId.values()].sort((a, b) => {
+    if (a.createdAt === undefined) return 1
+    if (b.createdAt === undefined) return -1
+    return b.createdAt - a.createdAt || b.id.localeCompare(a.id)
+  })
+}
 
 /**
  * The notebooks shown on the dashboard: the server list merged with the user's
@@ -48,40 +98,5 @@ export const dashboardNotebooksResource = computed(async () => {
   const serverRows = notebookListResource.data()
   // Provably-owned local notebooks (seed + sync-state-owned), async storage read.
   const owned = await wrap(listOwnedLocalNotebooks())
-
-  const byId = new Map<string, DashboardCard>()
-  for (const row of serverRows) {
-    byId.set(row.id, {
-      id: row.id,
-      title: row.title,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      cellsCount: row.cellsCount,
-    })
-  }
-  // Local-only rows (not yet on the server, e.g. a fresh seed): add if absent.
-  for (const nb of owned) {
-    if (byId.has(nb.id)) continue
-    byId.set(nb.id, {
-      id: nb.id,
-      title: nb.title,
-      createdAt: nb.createdAt,
-      updatedAt: nb.updatedAt,
-      cellsCount: nb.cells.length,
-    })
-  }
-  // Synthetic floor card: the active notebook is in neither list (the unsynced
-  // welcome seed). Mirror `effectiveNotebookCount`'s floor rule, but dedupe
-  // strictly by id so a seed already merged above is never doubled.
-  const activeId = activeNotebookIdAtom()
-  if (!byId.has(activeId)) {
-    byId.set(activeId, { id: activeId, title: notebookTitleAtom() || FLOOR_TITLE_FALLBACK })
-  }
-
-  // createdAt desc; rows without createdAt (the floor) sort last.
-  return [...byId.values()].sort((a, b) => {
-    if (a.createdAt === undefined) return 1
-    if (b.createdAt === undefined) return -1
-    return b.createdAt - a.createdAt || b.id.localeCompare(a.id)
-  })
+  return mergeDashboardCards(serverRows, owned, activeNotebookIdAtom(), notebookTitleAtom())
 }, 'dashboard.notebooks').extend(withAsyncData({ initState: [] as DashboardCard[] }))
