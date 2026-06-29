@@ -73,7 +73,14 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
       </h3>
 
       {/* Cell count */}
-      {cellsLabel ? <div className="mt-1 text-xs text-muted-foreground">{cellsLabel}</div> : null}
+      {cellsLabel ? (
+        <div className="mt-1 text-xs text-muted-foreground">
+          <span className="font-mono font-semibold text-[10.5px] px-[5px] py-[1px] rounded-[4px] bg-muted border border-border">
+            JS
+          </span>{' '}
+          {cellsLabel}
+        </div>
+      ) : null}
 
       {/* Creation date (in place of the dropped description); min-height keeps
           cards aligned when it is absent (the synthetic floor card). */}

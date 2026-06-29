@@ -1,8 +1,8 @@
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
-import { Hash, Notebook } from 'lucide-react'
+import { Hash, Notebook, Plus } from 'lucide-react'
 import { userAtom } from '@/entities/session'
-import { createNotebookFlow } from '@/features/notebook'
+import { canCreateNotebook, createNotebookFlow } from '@/features/notebook'
 import { Button } from '@/shared/ui/button'
 import { NotebookCard } from './NotebookCard'
 import { dashboardNotebooksResource } from '../model/dashboardData'
@@ -35,13 +35,21 @@ const DashboardPage = reatomComponent(() => {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-[1180px] px-6 pt-9 pb-24 sm:px-10">
-        <header className="mb-7">
-          <h1 className="text-[30px] font-semibold leading-[1.15] tracking-[-0.025em] sm:text-[34px]">
-            Your notebooks
-          </h1>
-          <p className="mt-1.5 text-[15px] leading-relaxed text-muted-foreground">
-            Pick one up where you left off, or start a new scratchpad.
-          </p>
+        <header className="mb-7 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-[30px] font-semibold leading-[1.15] tracking-[-0.025em] sm:text-[34px]">
+              Your notebooks
+            </h1>
+            <p className="mt-1.5 text-[15px] leading-relaxed text-muted-foreground">
+              Pick one up where you left off, or start a new scratchpad.
+            </p>
+          </div>
+          {/* Primary create action, top-right (the design's topbar slot). Disabled
+              at the notebook cap, mirroring the sidebar "+". */}
+          <Button className="mt-1 shrink-0" onClick={onCreate} disabled={!canCreateNotebook()}>
+            <Plus className="size-4" />
+            New notebook
+          </Button>
         </header>
 
         {cards.length > 0 ? (
