@@ -19,3 +19,6 @@ export const SETTINGS_PATH = appPath('settings')
 
 /** Absolute in-app path of the notebooks dashboard, base included (TARDIS-183). */
 export const DASHBOARD_PATH = appPath('dashboard')
+
+/** Absolute in-app path of the notebook route (the app root ''), base included. */
+export const NOTEBOOK_PATH = appPath('')

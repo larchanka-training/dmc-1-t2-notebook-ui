@@ -6,12 +6,11 @@ import { userAtom } from '@/entities/session'
 import { canCreateNotebook, createNotebookFlow, slotOpenErrorAtom } from '@/features/notebook'
 import { Button } from '@/shared/ui/button'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { NOTEBOOK_PATH } from '@/shared/lib/paths'
 import { NotebookCard } from './NotebookCard'
 import { dashboardNotebooksResource } from '../model/dashboardData'
 
 const CARD_GRID = 'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(290px,1fr))]'
-
-const NOTEBOOK_HREF = import.meta.env.BASE_URL
 
 /**
  * Notebooks dashboard (TARDIS-183) — the start screen showing every notebook as
@@ -35,7 +34,7 @@ const DashboardPage = reatomComponent(() => {
     () =>
       wrap(async () => {
         const created = await wrap(createNotebookFlow())
-        if (created) urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
+        if (created) urlAtom.set((url) => new URL(NOTEBOOK_PATH, url.origin), true)
       }),
     [],
   )

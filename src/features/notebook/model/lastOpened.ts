@@ -82,8 +82,9 @@ export function writeLastOpenedId(userId: string | null | undefined, id: string)
  * stamped with another account's owner.
  */
 export async function resolveOwnedLastOpenedId(): Promise<string | null> {
-  const ownerId = userAtom()?.id?.toLowerCase()
-  const lastId = readLastOpenedId(userAtom()?.id)
+  const userId = userAtom()?.id
+  const ownerId = userId?.toLowerCase()
+  const lastId = readLastOpenedId(userId)
   if (!ownerId || !lastId) return null
   // A local copy must exist to open without the network.
   const local = await wrap(notebookStorage.get(lastId))

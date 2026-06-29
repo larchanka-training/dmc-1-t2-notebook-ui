@@ -204,8 +204,15 @@ rootFrame.run(async () => {
     // dashboard start view (TARDIS-183 acceptance 7).
     if (bootSeedSuppressedAtom()) {
       urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
-    } else if (startup.showDashboard) {
-      // TARDIS-183: open the dashboard on top of the armed slot (like /usage).
+    } else if (startup.showDashboard && urlAtom().pathname === import.meta.env.BASE_URL) {
+      // TARDIS-183: open the dashboard on top of the armed slot (like /usage),
+      // but ONLY when the entry point is the app root (the notebook route ''').
+      // boot runs on EVERY page load, so without the path guard a refresh or
+      // deep-link to /settings, /about, /usage, /llm-playground would be
+      // hijacked to the dashboard, losing the page the user was on. The
+      // suppressed-seed branch above is a forced recovery, so it stays
+      // unconditional; the dashboard is a preference and must not override a
+      // deliberate URL.
       urlAtom.set((url) => new URL(DASHBOARD_PATH, url.origin), true)
     }
   } finally {

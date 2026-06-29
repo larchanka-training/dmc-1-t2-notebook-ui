@@ -4,10 +4,8 @@ import { reatomComponent } from '@reatom/react'
 import { Clock } from 'lucide-react'
 import { openNotebookInSlot } from '@/features/notebook'
 import { cn } from '@/shared/lib/cn'
+import { NOTEBOOK_PATH } from '@/shared/lib/paths'
 import type { DashboardCard } from '../model/dashboardData'
-
-// The notebook route is the app base ('' under it) — same href the sidebar uses.
-const NOTEBOOK_HREF = import.meta.env.BASE_URL
 
 function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, {
@@ -51,7 +49,7 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
       wrap(async () => {
         const outcome = await wrap(openNotebookInSlot(card.id))
         if (outcome === 'opened' || outcome === 'already') {
-          urlAtom.set((url) => new URL(NOTEBOOK_HREF, url.origin), true)
+          urlAtom.set((url) => new URL(NOTEBOOK_PATH, url.origin), true)
         }
       }),
     [card.id],
