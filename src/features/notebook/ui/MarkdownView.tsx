@@ -5,7 +5,7 @@ import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import { ensureKatexStyles, hasMathDelimiter } from './katexStyles'
-import './markdown.css'
+import '@/shared/ui/hljs.css'
 
 // Renders a markdown cell's source as formatted HTML. Raw HTML embedded in the
 // markdown is NOT rendered: we never enable `rehype-raw`, so any `<script>` or
@@ -32,7 +32,7 @@ const markdownComponents: Components = {
   ),
   // Fenced blocks are wrapped by the `pre` renderer below; here we only style
   // inline code. Block `<code>` keeps the `hljs language-*` classes that
-  // rehype-highlight adds, so the token colours from markdown.css apply.
+  // rehype-highlight adds, so the token colours from hljs.css apply.
   code: ({ className, children }) => {
     if (className?.includes('language-')) {
       return <code className={`${className} font-mono text-sm`}>{children}</code>

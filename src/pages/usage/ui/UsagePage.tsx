@@ -16,6 +16,7 @@ import { DEMO_IMAGE_PNG_BASE64 } from '@/features/notebook/model/featureDemoNote
 import { notebookStorage } from '@/features/notebook/persistence/activeStorage'
 import { appPath } from '@/shared/lib/paths'
 import { Button } from '@/shared/ui/button'
+import { HighlightedCode } from '@/shared/ui/highlighted-code'
 
 const examples = [
   {
@@ -110,9 +111,7 @@ const CodeExample = reatomComponent(({ title, code }: { title: string; code: str
           <Copy className="size-3.5" /> {copied ? 'Copied!' : 'Copy'}
         </Button>
       </div>
-      <pre className="max-w-full min-w-0 overflow-x-auto whitespace-pre-wrap break-words rounded-[var(--radius-item)] bg-muted p-3 text-xs leading-relaxed">
-        <code>{code}</code>
-      </pre>
+      <HighlightedCode code={code} language="javascript" />
     </section>
   )
 }, 'CodeExample')
