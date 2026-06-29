@@ -1,4 +1,5 @@
 import { urlAtom, wrap } from '@reatom/core'
+import { reatomComponent } from '@reatom/react'
 import { openNotebookInSlot } from '@/features/notebook'
 import { cn } from '@/shared/lib/cn'
 import type { DashboardCard } from '../model/dashboardData'
@@ -20,8 +21,12 @@ function formatDate(ms: number): string {
  * Clicking opens the notebook into the slot and navigates to the notebook
  * route, exactly like a sidebar row: navigation is gated on a successful open
  * (`opened`/`already`) so a failed open keeps the current slot and route.
+ *
+ * A `reatomComponent` so its render runs inside a Reatom frame — `wrap` below
+ * needs one (a plain function component throws `missing async stack`), same as
+ * the sidebar's interactive rows.
  */
-export function NotebookCard({ card }: { card: DashboardCard }) {
+export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) => {
   const onOpen = wrap(async () => {
     const outcome = await wrap(openNotebookInSlot(card.id))
     if (outcome === 'opened' || outcome === 'already') {
@@ -65,4 +70,4 @@ export function NotebookCard({ card }: { card: DashboardCard }) {
       ) : null}
     </button>
   )
-}
+}, 'NotebookCard')
