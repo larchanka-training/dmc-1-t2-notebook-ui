@@ -2,6 +2,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite
 import { peek } from '@reatom/core'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+
+// NOTE: these interaction tests emit React "update not wrapped in act(...)"
+// warnings. That is a repo-wide artefact of `@reatom/react` re-rendering via
+// Reatom's own async scheduler (outside React's act window) — the same warning
+// appears in the pre-existing LlmPlaygroundPage.test.tsx. The assertions below
+// read the atom directly via `peek`, which is what the test verifies; silencing
+// the warning cleanly belongs to a shared test-harness change, not here.
 import { displayNameAtom } from '@/features/settings'
 import { autoLoadModelAtom } from '@/features/web-llm'
 import {
