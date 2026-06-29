@@ -16,3 +16,6 @@ export const LOGIN_PATH = appPath('login')
 
 /** Absolute in-app path of the settings page, base included. */
 export const SETTINGS_PATH = appPath('settings')
+
+/** Absolute in-app path of the notebooks dashboard, base included (TARDIS-183). */
+export const DASHBOARD_PATH = appPath('dashboard')

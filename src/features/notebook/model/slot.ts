@@ -13,7 +13,7 @@
 
 import { action, atom, urlAtom, wrap } from '@reatom/core'
 import { notebook as notebookApi } from '@/shared/api'
-import { appPath } from '@/shared/lib/paths'
+import { appPath, DASHBOARD_PATH } from '@/shared/lib/paths'
 import { notebookStorage } from '../persistence/activeStorage'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -31,6 +31,7 @@ import { aiContextModeAtom } from './context-ai/aiContextMode'
 import { pullServerNotebook } from './pull'
 import { reconcileBootFromServer } from './bootReconcile'
 import { writeLastOpenedId } from './lastOpened'
+import { resolveStartupTarget } from './startupTarget'
 
 // Live teardown handles for the bindings of the notebook currently in the slot.
 // `null` when a binding is not running (AI context only runs in persisted mode).
@@ -217,11 +218,15 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     // a deleted-seed tombstone) so a fresh device opens the user's newest notebook
     // instead of a brand-new seed. Best-effort; never blocks the slot.
     await wrap(reconcileBootFromServer())
-    // LOCAL_NOTEBOOK_ID triggers loadNotebook's per-user demo-id resolution; with
-    // `pickNewest` it then opens the newest notebook OWNED BY this user (the seed
-    // id is derived from user.id; others are matched by sync-state ownerId), so
-    // the slot never lands on another account's local notebook.
-    activeNotebookIdAtom.set(LOCAL_NOTEBOOK_ID)
+    // TARDIS-183: the same startup resolver boot uses, so the two paths can't
+    // diverge. It returns the owned last-opened id to arm (or null) plus whether
+    // the new owner's startView is the dashboard.
+    const startup = await wrap(resolveStartupTarget())
+    // An explicit owned id arms the slot directly; otherwise LOCAL_NOTEBOOK_ID
+    // triggers loadNotebook's per-user demo-id resolution + `pickNewest`, which
+    // opens the newest notebook OWNED BY this user (seed id derived from user.id;
+    // others matched by sync-state ownerId) — never another account's notebook.
+    activeNotebookIdAtom.set(startup.notebookId ?? LOCAL_NOTEBOOK_ID)
     await wrap(loadNotebook(true))
     // Honour seed suppression on the account-switch path too (review opus): when
     // the new owner's seed is tombstoned and they have no surviving notebook,
@@ -231,13 +236,20 @@ export const resetSlotToFloorForAccountChange = action(async (): Promise<void> =
     // dead while the previous account's in-memory cells linger on a notebook route
     // (cross-account data exposure, §11). SPA-navigate to Usage to unmount the
     // editor, mirroring boot. `startBindings` self-refuses on the floor id anyway,
-    // so skipping it changes nothing.
+    // so skipping it changes nothing. Takes PRIORITY over the dashboard start
+    // view (TARDIS-183 acceptance 7).
     if (bootSeedSuppressedAtom()) {
       urlAtom.set((url) => new URL(appPath('usage'), url.origin), true)
       return
     }
     startBindings()
     slotOpenErrorAtom.set(null)
+    // TARDIS-183: with the slot armed, honour the dashboard start view by
+    // navigating on top of it (same model as /usage). Done AFTER startBindings
+    // so the background slot is live while the dashboard is shown.
+    if (startup.showDashboard) {
+      urlAtom.set((url) => new URL(DASHBOARD_PATH, url.origin), true)
+    }
   } catch (error) {
     // Do NOT re-arm here: the active id may still be the legacy floor, and
     // binding autosave/remote-sync to it is exactly what we must avoid. Leave the
