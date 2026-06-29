@@ -141,12 +141,16 @@ const AuthSection = reatomComponent(() => {
         align="start"
         className="w-[calc(var(--anchor-width)-12px)] min-w-0"
       >
-        <DropdownMenuItem render={<a href={SETTINGS_PATH} />}>
+        <DropdownMenuItem render={<a href={SETTINGS_PATH} />} className="cursor-pointer">
           <Settings className="size-4" />
           <span className="text-sm">Settings</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={wrap(async () => logoutAction())}>
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={wrap(async () => logoutAction())}
+          className="cursor-pointer"
+        >
           <LogOut className="size-4" />
           <div className="flex flex-col">
             <span className="text-sm">Sign out</span>
