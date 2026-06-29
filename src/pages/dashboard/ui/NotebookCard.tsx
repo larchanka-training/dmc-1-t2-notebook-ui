@@ -1,5 +1,6 @@
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
+import { Clock } from 'lucide-react'
 import { openNotebookInSlot } from '@/features/notebook'
 import { cn } from '@/shared/lib/cn'
 import type { DashboardCard } from '../model/dashboardData'
@@ -15,9 +16,24 @@ function formatDate(ms: number): string {
   })
 }
 
+// Relative "time ago" for the footer (mirrors the design's fmtAgo).
+function formatRelative(ms: number): string {
+  const minutes = Math.round((Date.now() - ms) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return days === 1 ? '1 day ago' : `${days} days ago`
+}
+
 /**
- * A single dashboard notebook card (TARDIS-183). Structure only from the
- * `Notebooks Dashboard.html` design — no tags / description / emoji / starred.
+ * A single dashboard notebook card (TARDIS-183). Layout from the
+ * `Notebooks Dashboard.html` design (structure only — no tags / emoji / starred):
+ * title heading on top, cell count below, the creation date in place of the
+ * dropped description, and a footer separated by a rule whose right-aligned
+ * relative "edited" time mirrors the design's `nb-foot`.
+ *
  * Clicking opens the notebook into the slot and navigates to the notebook
  * route, exactly like a sidebar row: navigation is gated on a successful open
  * (`opened`/`already`) so a failed open keeps the current slot and route.
@@ -48,6 +64,7 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
         'transition-[box-shadow,border-color,transform] hover:-translate-y-px hover:border-[color-mix(in_oklch,var(--primary)_40%,var(--border))] hover:shadow-[var(--shadow-pop)]',
       )}
     >
+      {/* Title heading */}
       <h3
         className="truncate text-[15px] font-semibold tracking-[-0.01em] transition-colors group-hover:text-primary"
         title={card.title}
@@ -55,19 +72,27 @@ export const NotebookCard = reatomComponent(({ card }: { card: DashboardCard }) 
         {card.title}
       </h3>
 
-      <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-        {cellsLabel ? <span>{cellsLabel}</span> : null}
-        {cellsLabel && card.updatedAt !== undefined ? <span>·</span> : null}
-        {card.updatedAt !== undefined ? (
-          <span title="Last edited">Edited {formatDate(card.updatedAt)}</span>
-        ) : null}
+      {/* Cell count */}
+      {cellsLabel ? <div className="mt-1 text-xs text-muted-foreground">{cellsLabel}</div> : null}
+
+      {/* Creation date (in place of the dropped description); min-height keeps
+          cards aligned when it is absent (the synthetic floor card). */}
+      <div className="mt-3 min-h-[18px] text-[13px] text-muted-foreground">
+        {card.createdAt !== undefined ? `Created ${formatDate(card.createdAt)}` : null}
       </div>
 
-      {card.createdAt !== undefined ? (
-        <div className="mt-1 text-[11px] text-muted-foreground/80">
-          Created {formatDate(card.createdAt)}
-        </div>
-      ) : null}
+      {/* Footer: separated by a rule; the relative "edited" time is pushed right. */}
+      <div className="mt-4 flex items-center border-t border-border pt-3">
+        {card.updatedAt !== undefined ? (
+          <span
+            className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+            title={`Last edited ${formatDate(card.updatedAt)}`}
+          >
+            <Clock className="size-3.5" />
+            {formatRelative(card.updatedAt)}
+          </span>
+        ) : null}
+      </div>
     </button>
   )
 }, 'NotebookCard')

@@ -1,5 +1,6 @@
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
+import { Hash, Notebook } from 'lucide-react'
 import { userAtom } from '@/entities/session'
 import { createNotebookFlow } from '@/features/notebook'
 import { Button } from '@/shared/ui/button'
@@ -43,6 +44,17 @@ const DashboardPage = reatomComponent(() => {
           </p>
         </header>
 
+        {cards.length > 0 ? (
+          <div className="mb-7 grid grid-cols-2 gap-3">
+            <StatCard icon={Notebook} value={cards.length} label="Notebooks" />
+            <StatCard
+              icon={Hash}
+              value={cards.reduce((sum, c) => sum + (c.cellsCount ?? 0), 0)}
+              label="Total cells"
+            />
+          </div>
+        ) : null}
+
         {cards.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="text-base font-semibold">No notebooks yet</div>
@@ -64,5 +76,30 @@ const DashboardPage = reatomComponent(() => {
     </div>
   )
 }, 'DashboardPage')
+
+// A stat-strip tile (new-design-v2): a tinted square icon + a big number over a
+// muted label. Only the two stats the task keeps — Notebooks + Total cells —
+// are surfaced (Starred / Unsaved are out of scope).
+function StatCard({
+  icon: Icon,
+  value,
+  label,
+}: {
+  icon: typeof Notebook
+  value: number
+  label: string
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-[var(--radius-card)] border border-border bg-card px-[14px] py-3">
+      <div className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-[color-mix(in_oklch,var(--primary)_12%,transparent)] text-primary">
+        <Icon className="size-[18px]" />
+      </div>
+      <div className="leading-tight">
+        <div className="text-[20px] font-semibold tracking-[-0.01em]">{value}</div>
+        <div className="text-xs text-muted-foreground">{label}</div>
+      </div>
+    </div>
+  )
+}
 
 export default DashboardPage
