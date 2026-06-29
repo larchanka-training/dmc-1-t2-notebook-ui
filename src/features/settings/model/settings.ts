@@ -23,3 +23,20 @@ export const sidebarDisplayNameAtom = computed(() => {
   if (local) return local
   return userAtom()?.email ?? 'Account'
 }, 'settings.sidebarDisplayName')
+
+/**
+ * What to open after sign-in (TARDIS-183). `'dashboard'` shows the notebooks
+ * dashboard; `'last-opened'` reopens the last notebook used on this device.
+ * `'seed'` is intentionally NOT a value: a clean user gets the seed as an
+ * internal fallback inside `loadNotebook`, not as an explicit start view.
+ */
+export type StartView = 'dashboard' | 'last-opened'
+
+/**
+ * Which screen to open on sign-in. Per-user (hydrated/persisted under
+ * `settings:<userId>` by `settingsSync`), so two accounts on one browser keep
+ * separate choices. The startup resolver does NOT read this atom on boot (it
+ * reads the persisted record directly, to avoid the async-hydration race); this
+ * atom is the reactive source for the Settings UI toggle.
+ */
+export const startViewAtom = atom<StartView>('last-opened', 'settings.startView')

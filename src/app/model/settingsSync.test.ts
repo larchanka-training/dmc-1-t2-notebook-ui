@@ -25,7 +25,7 @@ import {
   modelIdAtom,
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
-import { displayNameAtom } from '@/features/settings'
+import { displayNameAtom, startViewAtom } from '@/features/settings'
 import { DEFAULT_USER_SETTINGS, readUserSettings, writeUserSettings } from './userSettings'
 import { startSettingsSync } from './settingsSync'
 
@@ -40,6 +40,7 @@ function resetAtomsToDefaults(): void {
   autoLoadModelAtom.set(DEFAULT_USER_SETTINGS.autoLoadModel)
   inBrowserMaxTokensAtom.set(DEFAULT_USER_SETTINGS.inBrowserMaxTokens)
   thinkTokenBudgetAtom.set(DEFAULT_USER_SETTINGS.thinkTokenBudget)
+  startViewAtom.set(DEFAULT_USER_SETTINGS.startView)
 }
 
 function expectAtomsAreDefaults(): void {
@@ -48,6 +49,7 @@ function expectAtomsAreDefaults(): void {
   expect(peek(autoLoadModelAtom)).toBe(DEFAULT_USER_SETTINGS.autoLoadModel)
   expect(peek(inBrowserMaxTokensAtom)).toBe(DEFAULT_USER_SETTINGS.inBrowserMaxTokens)
   expect(peek(thinkTokenBudgetAtom)).toBe(DEFAULT_USER_SETTINGS.thinkTokenBudget)
+  expect(peek(startViewAtom)).toBe(DEFAULT_USER_SETTINGS.startView)
 }
 
 const user = (id: string) => ({ id, email: `${id}@x`, displayName: null, roles: [] })
@@ -94,6 +96,7 @@ describe('startSettingsSync — sign-in / record application', () => {
       autoLoadModel: false,
       inBrowserMaxTokens: 3000,
       thinkTokenBudget: 1500,
+      startView: 'dashboard' as const,
     }
     writeUserSettings('bob', stored)
 
@@ -107,6 +110,7 @@ describe('startSettingsSync — sign-in / record application', () => {
       expect(peek(autoLoadModelAtom)).toBe(false)
       expect(peek(inBrowserMaxTokensAtom)).toBe(3000)
       expect(peek(thinkTokenBudgetAtom)).toBe(1500)
+      expect(peek(startViewAtom)).toBe('dashboard')
 
       // Echo guard: applying the record on sign-in must not corrupt it.
       expect(readUserSettings('bob')).toEqual(stored)
@@ -129,6 +133,24 @@ describe('startSettingsSync — write-back', () => {
       await flush()
 
       expect(readUserSettings('bob')!.displayName).toBe('Bobby')
+    } finally {
+      stop()
+    }
+  })
+
+  test('editing startView while signed in writes back to that user record (TARDIS-183)', async () => {
+    writeUserSettings('bob', { ...DEFAULT_USER_SETTINGS, displayName: 'Bob' })
+
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('bob'))
+      await flush()
+      expect(peek(startViewAtom)).toBe('last-opened')
+
+      startViewAtom.set('dashboard')
+      await flush()
+
+      expect(readUserSettings('bob')!.startView).toBe('dashboard')
     } finally {
       stop()
     }

@@ -8,7 +8,7 @@ import {
   AVAILABLE_MODELS,
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
-import { displayNameAtom } from '@/features/settings'
+import { displayNameAtom, startViewAtom } from '@/features/settings'
 import {
   DEFAULT_USER_SETTINGS,
   ensureUserSettings,
@@ -38,6 +38,7 @@ function snapshot(): UserSettings {
     autoLoadModel: autoLoadModelAtom(),
     inBrowserMaxTokens: inBrowserMaxTokensAtom(),
     thinkTokenBudget: thinkTokenBudgetAtom(),
+    startView: startViewAtom(),
   }
 }
 
@@ -49,6 +50,7 @@ function apply(s: UserSettings): void {
   autoLoadModelAtom.set(s.autoLoadModel)
   inBrowserMaxTokensAtom.set(s.inBrowserMaxTokens)
   thinkTokenBudgetAtom.set(s.thinkTokenBudget)
+  startViewAtom.set(s.startView)
 }
 
 /**
@@ -130,6 +132,7 @@ export function startSettingsSync(): () => void {
     autoLoadModelAtom.subscribe(persist),
     inBrowserMaxTokensAtom.subscribe(persist),
     thinkTokenBudgetAtom.subscribe(persist),
+    startViewAtom.subscribe(persist),
   ]
 
   return () => {

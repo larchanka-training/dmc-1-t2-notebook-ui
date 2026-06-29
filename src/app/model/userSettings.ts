@@ -1,5 +1,6 @@
 import { AVAILABLE_MODELS } from '@/features/web-llm'
 import { IN_BROWSER_MAX_TOKENS, IN_BROWSER_THINK_TOKEN_BUDGET } from '@/features/notebook'
+import type { StartView } from '@/features/settings'
 
 // Per-user settings record (TARDIS-181). Stored as one JSON object per user
 // under `settings:<userId>`, so two accounts on the same browser keep separate
@@ -21,6 +22,8 @@ export interface UserSettings {
   inBrowserMaxTokens: number
   /** Thinking token budget (raw; clamped downstream). */
   thinkTokenBudget: number
+  /** Which screen to open on sign-in (TARDIS-183). */
+  startView: StartView
 }
 
 /** Defaults written immediately on first sign-in when no record exists yet. */
@@ -30,6 +33,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   autoLoadModel: false,
   inBrowserMaxTokens: IN_BROWSER_MAX_TOKENS,
   thinkTokenBudget: IN_BROWSER_THINK_TOKEN_BUDGET,
+  // Default reproduces the pre-183 behaviour (reopen the last/newest notebook),
+  // so the dashboard only becomes the start screen on an explicit opt-in.
+  startView: 'last-opened',
 }
 
 /** localStorage key for a given user's settings record. */
@@ -61,6 +67,10 @@ function coerce(raw: unknown): UserSettings {
       typeof o.thinkTokenBudget === 'number' && Number.isFinite(o.thinkTokenBudget)
         ? o.thinkTokenBudget
         : DEFAULT_USER_SETTINGS.thinkTokenBudget,
+    startView:
+      o.startView === 'dashboard' || o.startView === 'last-opened'
+        ? o.startView
+        : DEFAULT_USER_SETTINGS.startView,
   }
 }
 
