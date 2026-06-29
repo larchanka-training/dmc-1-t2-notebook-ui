@@ -6,6 +6,7 @@ import { urlAtom } from '@reatom/core'
 import { userAtom } from '@/entities/session'
 import { activeNotebookIdAtom, LOCAL_NOTEBOOK_ID } from './notebook'
 import { setSeedTombstone, clearSeedTombstone } from './seedTombstone'
+import { setStartViewReader } from './startupTarget'
 import {
   bumpSlotGeneration,
   openNotebookInSlot,
@@ -313,6 +314,9 @@ describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', 
     await clearSeedTombstone()
     userAtom.set(null)
     await notebookStorage.clearAll()
+    localStorage.clear()
+    // Reset the injected startView reader to the default between tests.
+    setStartViewReader(() => 'last-opened')
   })
 
   test('navigates to /usage (Restore) and does NOT arm bindings when the new owner has a tombstoned seed and nothing to open', async () => {
@@ -333,6 +337,23 @@ describe('resetSlotToFloorForAccountChange — seed suppression (review opus)', 
     // legacy floor, so the previous account's cells can't be saved/pushed).
     expect(h.startAutosave).not.toHaveBeenCalled()
     expect(h.startRemoteSync).not.toHaveBeenCalled()
+  })
+
+  // TARDIS-183 acceptance 7: the dashboard start view must NOT override the
+  // tombstoned-seed → Usage routing. bootSeedSuppressed has priority.
+  test('startView=dashboard does NOT route to the dashboard when the seed is tombstoned with no survivor', async () => {
+    userAtom.set({ id: OWNER, email: 'a@b.c', displayName: null, roles: [] })
+    await notebookStorage.clearAll()
+    await setSeedTombstone()
+    vi.spyOn(notebookApi, 'list').mockResolvedValue([])
+    setStartViewReader(() => 'dashboard') // user prefers the dashboard…
+
+    await resetSlotToFloorForAccountChange()
+
+    // …but the suppressed-seed Restore path wins: Usage, not dashboard.
+    expect(urlAtom().pathname).toMatch(/usage$/)
+    expect(urlAtom().pathname).not.toMatch(/dashboard$/)
+    expect(h.startAutosave).not.toHaveBeenCalled()
   })
 })
 
