@@ -541,6 +541,12 @@ export const openNotebookInSlot = action(async (id: string): Promise<OpenOutcome
   // the startup resolver can reopen it on the next boot. Uses the `ownerId`
   // captured up-front (frame-safe after the await). No-op for the floor id /
   // signed-out (guarded inside writeLastOpenedId).
-  if (outcome === 'opened') writeLastOpenedId(ownerId, id)
-  return outcome
+  // `outcome` is mutated only inside the `runExclusive` closure, which TS
+  // control-flow does not track, so here it stays narrowed to its initial
+  // `'error'` literal — a bare `outcome === 'opened'` is then flagged as a
+  // no-overlap comparison under `tsc -b`. Widen back to the full union for the
+  // check (the runtime value really can be any `OpenOutcome`).
+  const settled = outcome as OpenOutcome
+  if (settled === 'opened') writeLastOpenedId(ownerId, id)
+  return settled
 }, 'notebook.openInSlot')
