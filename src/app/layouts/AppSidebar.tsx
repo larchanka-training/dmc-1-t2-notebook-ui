@@ -19,6 +19,7 @@ import {
   CircleHelp,
   BookOpen,
   Settings,
+  Users,
 } from 'lucide-react'
 import { urlAtom, wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
@@ -203,6 +204,7 @@ const NavGroup = reatomComponent(({ label, items }: { label: string; items: NavI
 const InfoGroup = reatomComponent(() => {
   const { pathname } = urlAtom()
   const aboutHref = import.meta.env.BASE_URL + 'about'
+  const authorsHref = import.meta.env.BASE_URL + 'authors'
   const usageHref = import.meta.env.BASE_URL + 'usage'
   return (
     // mt-auto pins Info to the bottom of the scrollable content area (above the
@@ -219,6 +221,16 @@ const InfoGroup = reatomComponent(() => {
             >
               <Info />
               <span>About</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname === authorsHref}
+              className={NAV_ACTIVE}
+              render={<a href={authorsHref} />}
+            >
+              <Users />
+              <span>Authors</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
