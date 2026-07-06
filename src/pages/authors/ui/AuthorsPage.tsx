@@ -14,7 +14,7 @@ const TEAM = [
     name: 'Grigorii Averkin',
     github: 'Computer-God',
     contribution:
-      'QA focus, one sprint as Tech Lead, and additional engineering tasks across the project.',
+      'Set up the QA process in Sprint 1: quality strategy, bug-report template, acceptance criteria, and qa-plan.md. Health issues prevented further participation.',
   },
   {
     name: 'Irina Ser.',
