@@ -44,7 +44,7 @@ const TEAM = [
     name: 'Marat',
     github: 'MaratGaZa',
     contribution:
-      'Built the backend from scratch in Sprint 1 (FastAPI endpoints, API contracts, domain boundaries) and aligned the BE/FE contract with the frontend team; implemented the auth system (OTP + JWT, refresh tokens, rate limiting) and the LLM generation pipeline (Amazon Bedrock); added notebook export (JSON/Markdown), OTP abuse protection, and prompt-injection guard; migrated CI/CD to GHCR + Beget VPS.',
+      'Sprint 1 DevOps: Docker containerization and the initial GitHub Actions CI/CD pipeline; built the backend from scratch (FastAPI endpoints, API contracts, domain boundaries) and aligned the BE/FE contract with the frontend team; implemented the auth system (OTP + JWT, refresh tokens, rate limiting) and the LLM generation pipeline (Amazon Bedrock); added notebook export (JSON/Markdown), OTP abuse protection, and prompt-injection guard; migrated CI/CD to GHCR + Beget VPS.',
   },
   {
     name: 'Yuriy Bugakov',
