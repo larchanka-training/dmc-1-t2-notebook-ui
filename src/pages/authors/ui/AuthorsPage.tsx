@@ -8,43 +8,49 @@ const TEAM = [
     name: 'Siarhei Luskanau',
     github: 'siarhei-luskanau',
     contribution:
-      'DevOps and automation, especially GitHub Actions and Dependabot, plus targeted work across other areas.',
+      'Set up the initial CI/CD foundation (GitHub Actions, Dependabot, PR workflows) and moved per-module CI into the submodule repos; authored the system architecture documentation and Sprint 3 cost analysis.',
   },
   {
     name: 'Grigorii Averkin',
     github: 'Computer-God',
     contribution:
-      'QA focus, one sprint as Tech Lead, and additional engineering tasks across the project.',
+      'Set up the QA process in Sprint 1: quality strategy, bug-report template, acceptance criteria, and qa-plan.md. Could not continue due to personal circumstances.',
   },
   {
     name: 'Irina Ser.',
     github: 'IrinaSer',
     contribution:
-      'Major contributor to the project agent skills, with smaller QA and engineering tasks across sprint rotations.',
+      'Built the frontend OTP/JWT auth flow and the backend OTP email delivery via Resend; created the project-level AI agent skills; and wrote 40 automated test cases for LLM code generation.',
   },
   {
-    name: 'Larisa Morozh',
+    name: 'Larisa Morozhnikova',
     github: 'lmoroz',
     contribution:
-      'Frontend work across most tasks, one sprint as Tech Lead, final demo preparation, and the final LLM UX polish.',
+      'Built the frontend from the ground up and aligned the FE/BE contract with the backend team; led notebook engineering across all sprints: code execution UX (QuickJS), IndexedDB persistence, full UI redesign, background remote sync, and the dashboard startup screen; Sprint 2 Tech Lead (AI generation pipeline design).',
   },
   {
     name: 'Akzhol',
     github: 'aokzhl',
     contribution:
-      'DevOps specialist who brought up the AWS infrastructure and wrote most of the Terraform stack.',
+      'Built the cloud-native AWS stack (ECS Fargate, RDS, S3/CloudFront, Terraform) and per-PR preview environments; set up the Liquibase migration runner and Bedrock VPC infrastructure; also refactored the frontend architecture (OpenAPI codegen, shared/api facade, routing).',
   },
   {
     name: 'Oleg',
     github: 'okoleg',
     contribution:
-      'Tech Lead in the final sprint and owner of the LLM generation path, from setup to the first working integration.',
+      'Created the initial frontend scaffold (React + Vite + shadcn/ui) with the first notebook execution prototype; built the full cloud LLM generation flow (Bedrock API, Ask agent dialog, LLM playground); authored 82 manual QA test cases and implemented CloudWatch analytics.',
   },
   {
     name: 'Marat',
     github: 'MaratGaZa',
     contribution:
-      'DevOps in sprint one, main backend contributor from zero to a working API, disaster-recovery runbook, and some frontend work.',
+      'Sprint 1 DevOps — Docker containerization and the initial CI/CD pipeline; built the backend from scratch (API contracts, domain model) and aligned the BE/FE contract with the frontend team; implemented the auth system (OTP + JWT, refresh tokens) and the LLM generation pipeline (Amazon Bedrock); added notebook export and security hardening (OTP rate limiting, prompt-injection guard).',
+  },
+  {
+    name: 'Yuriy Bugakov',
+    github: 'SvyatoKod',
+    contribution:
+      'Tech Lead in early sprints (execution architecture, docs); built the backend foundation from scratch and the auth module; AI context persistence; QA autotest framework (Playwright + pytest + Allure); and contributed to the frontend AI context builder.',
   },
 ] as const
 
@@ -121,17 +127,7 @@ export default function AuthorsPage() {
 
       {/* footer note */}
       <p className="mt-12 border-t border-border pt-6 text-[13px] text-muted-foreground">
-        Seven people worked actively across three repositories — monorepo, API and UI. The final
-        presentation with the full contribution breakdown lives at{' '}
-        <a
-          href="http://tardis.ubiz.ru"
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium text-primary hover:underline"
-        >
-          tardis.ubiz.ru
-        </a>
-        .
+        Eight people worked actively across three repositories — monorepo, API and UI.
       </p>
     </div>
   )

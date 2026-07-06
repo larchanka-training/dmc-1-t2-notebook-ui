@@ -16,10 +16,11 @@ describe('AuthorsPage', () => {
       'Siarhei Luskanau',
       'Grigorii Averkin',
       'Irina Ser.',
-      'Larisa Morozh',
+      'Larisa Morozhnikova',
       'Akzhol',
       'Oleg',
       'Marat',
+      'Yuriy Bugakov',
     ]) {
       expect(screen.getByText(name)).toBeInTheDocument()
     }
@@ -37,6 +38,7 @@ describe('AuthorsPage', () => {
       'aokzhl',
       'okoleg',
       'MaratGaZa',
+      'SvyatoKod',
     ]
     for (const handle of handles) {
       const link = screen.getByRole('link', { name: new RegExp(`@${handle}`, 'i') })
