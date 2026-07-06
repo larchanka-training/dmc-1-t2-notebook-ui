@@ -14,7 +14,7 @@ const TEAM = [
     name: 'Grigorii Averkin',
     github: 'Computer-God',
     contribution:
-      'Set up the QA process in Sprint 1: quality strategy, bug-report template, acceptance criteria, and qa-plan.md. Health issues prevented further participation.',
+      'Set up the QA process in Sprint 1: quality strategy, bug-report template, acceptance criteria, and qa-plan.md. Could not continue due to personal circumstances.',
   },
   {
     name: 'Irina Ser.',
