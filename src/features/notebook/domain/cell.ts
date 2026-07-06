@@ -3,13 +3,7 @@ import { newId } from '@/shared/lib/id'
 import type { OutputItem } from '../runtime/types'
 
 export type CellStatus =
-  | 'idle'
-  | 'running'
-  | 'done'
-  | 'error'
-  | 'interrupted'
-  | 'timeout'
-  | 'skipped'
+  'idle' | 'running' | 'done' | 'error' | 'interrupted' | 'timeout' | 'skipped'
 export type CellKind = 'code' | 'markdown'
 export type CellViewMode = 'edit' | 'preview'
 
