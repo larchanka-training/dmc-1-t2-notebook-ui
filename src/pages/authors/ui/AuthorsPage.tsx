@@ -46,6 +46,12 @@ const TEAM = [
     contribution:
       'DevOps in sprint one, main backend contributor from zero to a working API, disaster-recovery runbook, and some frontend work.',
   },
+  {
+    name: 'Svyatoslav',
+    github: 'SvyatoKod',
+    contribution:
+      'Tech Lead in early sprints (execution architecture, docs); built the backend foundation from scratch and the auth module; AI context persistence; QA autotest framework (Playwright + pytest + Allure); and contributed to the frontend AI context builder.',
+  },
 ] as const
 
 function GithubLink({ handle }: { handle: string }) {
@@ -121,7 +127,7 @@ export default function AuthorsPage() {
 
       {/* footer note */}
       <p className="mt-12 border-t border-border pt-6 text-[13px] text-muted-foreground">
-        Seven people worked actively across three repositories — monorepo, API and UI. The final
+        Eight people worked actively across three repositories — monorepo, API and UI. The final
         presentation with the full contribution breakdown lives at{' '}
         <a
           href="http://tardis.ubiz.ru"
