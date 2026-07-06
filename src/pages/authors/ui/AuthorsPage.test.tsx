@@ -16,7 +16,7 @@ describe('AuthorsPage', () => {
       'Siarhei Luskanau',
       'Grigorii Averkin',
       'Irina Ser.',
-      'Larisa Morozh',
+      'Larisa Morozhnikova',
       'Akzhol',
       'Oleg',
       'Marat',

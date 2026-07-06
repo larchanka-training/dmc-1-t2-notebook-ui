@@ -23,7 +23,7 @@ const TEAM = [
       'Built the frontend OTP/JWT auth flow and the backend OTP email delivery via Resend; created the project-level AI agent skills; and wrote 40 automated test cases for LLM code generation.',
   },
   {
-    name: 'Larisa Morozh',
+    name: 'Larisa Morozhnikova',
     github: 'lmoroz',
     contribution:
       'Built the frontend from the ground up and aligned the FE/BE contract with the backend team; led notebook engineering across all sprints: code execution UX (QuickJS), IndexedDB persistence, full UI redesign, background remote sync, and the dashboard startup screen; Sprint 2 Tech Lead (AI generation pipeline design).',
