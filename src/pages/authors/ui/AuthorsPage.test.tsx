@@ -15,11 +15,11 @@ describe('AuthorsPage', () => {
     for (const name of [
       'Siarhei Luskanau',
       'Grigorii Averkin',
-      'Irina Ser.',
+      'Irina Pukhkaia',
       'Larisa Morozhnikova',
       'Akzhol',
       'Oleg',
-      'Marat',
+      'Marat Gainutdinov',
       'Yuriy Bugakov',
     ]) {
       expect(screen.getByText(name)).toBeInTheDocument()

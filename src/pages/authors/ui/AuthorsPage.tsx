@@ -17,7 +17,7 @@ const TEAM = [
       'Set up the QA process in Sprint 1: quality strategy, bug-report template, acceptance criteria, and qa-plan.md. Could not continue due to personal circumstances.',
   },
   {
-    name: 'Irina Ser.',
+    name: 'Irina Pukhkaia',
     github: 'IrinaSer',
     contribution:
       'Built the frontend OTP/JWT auth flow and the backend OTP email delivery via Resend; created the project-level AI agent skills; and wrote 40 automated test cases for LLM code generation.',
@@ -41,7 +41,7 @@ const TEAM = [
       'Created the initial frontend scaffold (React + Vite + shadcn/ui) with the first notebook execution prototype; built the full cloud LLM generation flow (Bedrock API, Ask agent dialog, LLM playground); authored 82 manual QA test cases and implemented CloudWatch analytics.',
   },
   {
-    name: 'Marat',
+    name: 'Marat Gainutdinov',
     github: 'MaratGaZa',
     contribution:
       'Sprint 1 DevOps — Docker containerization and the initial CI/CD pipeline; built the backend from scratch (API contracts, domain model) and aligned the BE/FE contract with the frontend team; implemented the auth system (OTP + JWT, refresh tokens) and the LLM generation pipeline (Amazon Bedrock); added notebook export and security hardening (OTP rate limiting, prompt-injection guard).',
