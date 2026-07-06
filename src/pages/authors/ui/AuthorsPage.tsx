@@ -26,7 +26,7 @@ const TEAM = [
     name: 'Larisa Morozh',
     github: 'lmoroz',
     contribution:
-      'Led notebook frontend engineering: code execution UX (QuickJS), IndexedDB persistence, full UI redesign, background remote sync with the backend, and the dashboard startup screen; Sprint 2 Tech Lead (AI generation pipeline design).',
+      'Built the frontend from the ground up and aligned the FE/BE contract with the backend team; led notebook engineering across all sprints: code execution UX (QuickJS), IndexedDB persistence, full UI redesign, background remote sync, and the dashboard startup screen; Sprint 2 Tech Lead (AI generation pipeline design).',
   },
   {
     name: 'Akzhol',
@@ -44,7 +44,7 @@ const TEAM = [
     name: 'Marat',
     github: 'MaratGaZa',
     contribution:
-      'Built the backend auth system (OTP + JWT, refresh tokens, rate limiting) and the LLM generation pipeline (Amazon Bedrock); added notebook export (JSON/Markdown), OTP abuse protection, and prompt-injection guard; migrated CI/CD to GHCR + Beget VPS.',
+      'Built the backend from scratch in Sprint 1 (FastAPI endpoints, API contracts, domain boundaries) and aligned the BE/FE contract with the frontend team; implemented the auth system (OTP + JWT, refresh tokens, rate limiting) and the LLM generation pipeline (Amazon Bedrock); added notebook export (JSON/Markdown), OTP abuse protection, and prompt-injection guard; migrated CI/CD to GHCR + Beget VPS.',
   },
   {
     name: 'Yuriy Bugakov',
