@@ -7,38 +7,44 @@ const TEAM = [
   {
     name: 'Siarhei Luskanau',
     github: 'siarhei-luskanau',
-    contribution: 'Frontend lead and main contributor — the notebook core, cells and runtime.',
+    contribution:
+      'DevOps and automation, especially GitHub Actions and Dependabot, plus targeted work across other areas.',
   },
   {
     name: 'Grigorii Averkin',
     github: 'Computer-God',
-    contribution: 'Engineering — backend and QA across sprint rotations.',
+    contribution:
+      'QA focus, one sprint as Tech Lead, and additional engineering tasks across the project.',
   },
   {
     name: 'Irina Ser.',
     github: 'IrinaSer',
-    contribution: 'Engineering — QA and test suites across sprint rotations.',
+    contribution:
+      'Major contributor to the project agent skills, with smaller QA and engineering tasks across sprint rotations.',
   },
   {
     name: 'Larisa Morozh',
     github: 'lmoroz',
     contribution:
-      'Project tooling and agent skills, the English translation of the project docs, and the final presentation.',
+      'Frontend work across most tasks, one sprint as Tech Lead, final demo preparation, and the final LLM UX polish.',
   },
   {
     name: 'Akzhol',
     github: 'aokzhl',
-    contribution: 'Engineering — backend and CI across sprint rotations.',
+    contribution:
+      'DevOps specialist who brought up the AWS infrastructure and wrote most of the Terraform stack.',
   },
   {
     name: 'Oleg',
     github: 'okoleg',
-    contribution: 'Engineering — backend and monitoring across sprint rotations.',
+    contribution:
+      'Tech Lead in the final sprint and owner of the LLM generation path, from setup to the first working integration.',
   },
   {
     name: 'Marat',
     github: 'MaratGaZa',
-    contribution: 'DevOps and infrastructure — CI/CD, cloud deployment and the migration off AWS.',
+    contribution:
+      'DevOps in sprint one, main backend contributor from zero to a working API, disaster-recovery runbook, and some frontend work.',
   },
 ] as const
 
