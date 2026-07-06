@@ -20,7 +20,7 @@ describe('AuthorsPage', () => {
       'Akzhol',
       'Oleg',
       'Marat',
-      'Svyatoslav',
+      'Yuriy Bugakov',
     ]) {
       expect(screen.getByText(name)).toBeInTheDocument()
     }

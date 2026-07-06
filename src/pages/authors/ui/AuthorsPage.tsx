@@ -47,7 +47,7 @@ const TEAM = [
       'DevOps in sprint one, main backend contributor from zero to a working API, disaster-recovery runbook, and some frontend work.',
   },
   {
-    name: 'Svyatoslav',
+    name: 'Yuriy Bugakov',
     github: 'SvyatoKod',
     contribution:
       'Tech Lead in early sprints (execution architecture, docs); built the backend foundation from scratch and the auth module; AI context persistence; QA autotest framework (Playwright + pytest + Allure); and contributed to the frontend AI context builder.',
