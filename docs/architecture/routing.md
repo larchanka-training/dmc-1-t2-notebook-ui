@@ -43,13 +43,14 @@ prefix:
 | `/components/shadcn` | `ShadcnComponentsPage` | `src/pages/shadcn-components/` |
 | `/components/custom` | `CustomComponentsPage` | `src/pages/custom-components/` |
 | `/about`             | `AboutPage`            | `src/pages/about/`             |
+| `/authors`           | `AuthorsPage`          | `src/pages/authors/`           |
 | `/usage`             | `UsagePage`            | `src/pages/usage/`             |
 | `/settings`          | `SettingsPage`         | `src/pages/settings/`          |
 | `/llm-playground`    | `LlmPlaygroundPage`    | `src/pages/llm-playground/`    |
 | _any unknown URL_    | `NotFoundPage` (404)   | `src/pages/not-found/`         |
 
-`/about` and `/usage` are public (no `AuthRouteGuard`); the rest of the
-feature pages — including `/settings`, which holds per-user preferences
+`/about`, `/authors` and `/usage` are public (no `AuthRouteGuard`); the rest
+of the feature pages — including `/settings`, which holds per-user preferences
 namespaced by user id, and `/dashboard`, which lists the signed-in user's
 notebooks — stay behind it. The 404 row is not a registered route — it is the
 root layout's fallback when no child route matches (see below).
@@ -70,6 +71,7 @@ rootRoute (layout: true)                    src/app/model/routes.tsx
               ├── dashboardRoute   path: 'dashboard'         → DashboardPage (guarded)
               ├── loginRoute       path: 'login'             → LoginPage
               ├── aboutRoute       path: 'about'             → AboutPage (public)
+              ├── authorsRoute     path: 'authors'           → AuthorsPage (public)
               ├── usageRoute       path: 'usage'             → UsagePage (public)
               ├── settingsRoute    path: 'settings'          → SettingsPage (guarded)
               ├── llmPlaygroundRoute path: 'llm-playground'  → LlmPlaygroundPage

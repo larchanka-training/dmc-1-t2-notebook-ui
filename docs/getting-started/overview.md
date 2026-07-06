@@ -40,6 +40,8 @@ Jupyter Notebook made interactive Python computing accessible to everyone. The s
 | `/components/custom` | Custom components built for this project           |
 | `/login`             | Login page UI example                              |
 | `/about`             | Project and course information                     |
+| `/authors`           | Team roster and project credits                    |
+| `/usage`             | Usage examples and notebook restore help           |
 
 ---
 
