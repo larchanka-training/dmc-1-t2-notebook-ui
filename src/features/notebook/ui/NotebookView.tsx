@@ -68,7 +68,7 @@ import { openAgentChatAction } from '../model/agentChat'
 import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
 import { ThinkingBlock } from './ThinkingBlock'
-import { RateLimitedError } from '@/shared/api/errors'
+import { ApiError, RateLimitedError } from '@/shared/api/errors'
 import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
@@ -94,10 +94,15 @@ function runAndInsertBelow(cellId: string) {
   enterEdit(inserted.id)
 }
 
-function formatCloudGenerateError(err: Error): string {
+export function formatCloudGenerateError(err: Error): string {
   if (err instanceof RateLimitedError) {
     const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
     return `Rate limit reached.${wait}`
+  }
+  if (err instanceof ApiError) {
+    if (err.code === 'llm_internal' || err.code === 'llm_access_denied') {
+      return 'Cloud AI is temporarily unavailable. Use the local model instead.'
+    }
   }
   const msg = err.message.toLowerCase()
   if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
