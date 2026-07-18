@@ -315,7 +315,7 @@ export function NotebookCell({
                       type="button"
                       aria-label={agentCloudLabel}
                       className={AGENT_BTN}
-                      disabled={isCloudGenerating}
+                      disabled={isCloudGenerating || !onCloudGenerate}
                       onClick={onCloudGenerate}
                     >
                       {isCloudGenerating ? (
@@ -326,7 +326,9 @@ export function NotebookCell({
                     </button>
                   }
                 />
-                <TooltipContent>{agentCloudLabel}</TooltipContent>
+                <TooltipContent>
+                  {onCloudGenerate ? agentCloudLabel : 'Cloud AI is temporarily unavailable'}
+                </TooltipContent>
               </Tooltip>
             )}
 
