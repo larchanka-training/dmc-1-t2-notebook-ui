@@ -59,11 +59,7 @@ import {
   inBrowserGeneratingCellIdAtom,
   inBrowserGenerateErrorsAtom,
 } from '../model/codeGenerator'
-import {
-  cloudGenerateAndInsertCodeAction,
-  cloudGeneratingCellIdsAtom,
-  cloudGenerateErrorsAtom,
-} from '../model/cloudCodeGenerator'
+import { cloudGeneratingCellIdsAtom, cloudGenerateErrorsAtom } from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
 import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
@@ -184,11 +180,6 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         }
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
-        onCloudGenerate={
-          cell.kind === 'markdown'
-            ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
-            : undefined
-        }
         isCloudGenerating={isCloudGenerating}
       />
       {generateError && (
