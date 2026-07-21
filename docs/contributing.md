@@ -32,31 +32,52 @@ export default function MyPage() {
 }
 ```
 
-2. **Register the route** in `model/route.tsx`:
+2. **Register the route** in `model/route.tsx`. A non-critical page must be
+   **lazy-loaded** so its component is split out of the initial bundle — wrap a
+   dynamic `import()` with `lazyRoutePage`, created **once at module scope** (not
+   inside `render()`):
 
 ```tsx
 import { rootRoute } from '@/app/model/routes'
-import MyPage from '../ui/MyPage'
+import { lazyRoutePage } from '@/app/ui/lazyRoutePage'
+
+const renderMyPage = lazyRoutePage(() => import('../ui/MyPage'))
 
 export const myPageRoute = rootRoute.reatomRoute({
   path: 'my-page',
   render() {
-    return <MyPage />
+    return renderMyPage()
   },
 })
 ```
 
-3. **Re-export from `index.ts`** and **import the module in `src/app/App.tsx`** so the route registers at startup:
+> **Critical-path exception.** Only a page on the hot first-paint path (like the
+> notebook home screen) should be imported eagerly to avoid a loading flash —
+> `import MyPage from '../ui/MyPage'` and `render: () => <MyPage />`. Everything
+> else is lazy. See [Routing → Code splitting](./architecture/routing.md#code-splitting-lazy-page-loading).
+
+3. **Export only the route from `index.ts`**, then **import the module in
+   `src/app/App.tsx`** so the route registers at startup:
+
+```ts
+// src/pages/my-page/index.ts — for a lazy page, do NOT re-export the component
+// (a static `export { default as MyPage } from './ui/MyPage'` pulls it back into
+// the initial chunk through the App.tsx barrel import).
+export { myPageRoute } from './model/route'
+```
 
 ```tsx
 // src/app/App.tsx
 import '@/pages/my-page'
 ```
 
-4. **Add it to the sidebar** in `src/app/layouts/AppSidebar.tsx`:
+4. **Add it to the sidebar** in `src/app/layouts/AppSidebar.tsx`. Keep
+   `NavItem.url` **base-relative** (no leading slash) — it is rendered as
+   `import.meta.env.BASE_URL + url`, so an absolute `/my-page` breaks under a
+   `/pr-<N>/` preview base:
 
 ```tsx
-const navMain: NavItem[] = [{ title: 'My Page', icon: SomeIcon, url: '/my-page' }]
+const navMain: NavItem[] = [{ title: 'My Page', icon: SomeIcon, url: 'my-page' }]
 ```
 
 5. **Add it to the docs** — create `docs/<topic>/my-page.md`.
