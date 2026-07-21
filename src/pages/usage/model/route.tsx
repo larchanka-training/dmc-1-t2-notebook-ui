@@ -1,5 +1,8 @@
 import { rootRoute } from '@/app/model/routes'
-import UsagePage from '../ui/UsagePage'
+import { lazyRoutePage } from '@/app/ui/lazyRoutePage'
+
+// Lazily loaded — non-critical route split out of the initial bundle.
+const renderUsagePage = lazyRoutePage(() => import('../ui/UsagePage'))
 
 // TARDIS-167 (№22): Usage (Help) is public — a reference page must not require
 // sign-in. No AuthRouteGuard wrapper. The seed-restore block inside UsagePage is
@@ -7,6 +10,6 @@ import UsagePage from '../ui/UsagePage'
 export const usageRoute = rootRoute.reatomRoute({
   path: 'usage',
   render() {
-    return <UsagePage />
+    return renderUsagePage()
   },
 })

@@ -1,2 +1,3 @@
-export { default as DashboardPage } from './ui/DashboardPage'
+// DashboardPage is loaded lazily by its route (code splitting) — not re-exported
+// here, so the barrel import in App.tsx only pulls in the route registration.
 export { dashboardRoute } from './model/route'
