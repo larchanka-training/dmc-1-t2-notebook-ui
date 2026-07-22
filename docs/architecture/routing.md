@@ -143,6 +143,44 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
 ---
 
+## Code splitting (lazy page loading)
+
+Route **registration** is always eager (App.tsx side-effect imports evaluate each
+`model/route.tsx` so `reatomRoute(...)` registers the path at startup), but the
+heavy page **component** of a non-critical route is loaded lazily so it lands in
+its own chunk instead of the initial bundle.
+
+- **Critical path stays eager.** `notebook` (path `''`, the home screen),
+  `login` (auth entry) and `not-found` import their component directly — no
+  Suspense flash on first paint.
+- **Non-critical pages are lazy:** `dashboard`, `settings`, `llm-playground`,
+  `about`, `authors`, `usage`, `components/shadcn`, `components/custom`. Their
+  `model/route.tsx` uses the `lazyRoutePage` helper:
+
+  ```tsx
+  // src/pages/dashboard/model/route.tsx
+  import { lazyRoutePage } from '@/app/ui/lazyRoutePage'
+
+  // lazy() is created once, at module scope — not inside render().
+  const renderDashboardPage = lazyRoutePage(() => import('../ui/DashboardPage'))
+
+  export const dashboardRoute = rootRoute.reatomRoute({
+    path: 'dashboard',
+    render: () => <AuthRouteGuard>{renderDashboardPage()}</AuthRouteGuard>,
+  })
+  ```
+
+  `lazyRoutePage` (`src/app/ui/lazyRoutePage.tsx`) wraps `React.lazy` in a
+  `Suspense` boundary with the shared `PageFallback` (a centred spinner filling
+  the routed content area).
+
+- **Keep the barrel thin.** A lazy page's `index.ts` must **not** re-export its
+  component (`export { default as XPage } from './ui/XPage'`) — that static
+  re-export would pull the component back into the initial chunk through the
+  App.tsx barrel import. Export only the route.
+
+---
+
 ## Sidebar navigation
 
 `AppSidebar` reads `urlAtom()` for the active path. Navigation is handled by `urlAtom`'s built-in `catchLinks` — a plain `<a href={...}>` is intercepted and turned into SPA navigation. No `useNavigate`, no manual `e.preventDefault()`.
@@ -197,24 +235,31 @@ export default function MyPage() {
 }
 ```
 
-**2. Register the route** in `model/route.tsx`:
+**2. Register the route** in `model/route.tsx`. For a **non-critical** page,
+lazy-load the component (see [Code splitting](#code-splitting-lazy-page-loading)):
 
 ```tsx
 import { rootRoute } from '@/app/model/routes'
-import MyPage from '../ui/MyPage'
+import { lazyRoutePage } from '@/app/ui/lazyRoutePage'
+
+const renderMyPage = lazyRoutePage(() => import('../ui/MyPage'))
 
 export const myPageRoute = rootRoute.reatomRoute({
   path: 'my-page',
   render() {
-    return <MyPage />
+    return renderMyPage()
   },
 })
 ```
 
-`index.ts`:
+For a **critical-path** page (rare — like the notebook home screen) import the
+component directly instead: `import MyPage from '../ui/MyPage'` and
+`render: () => <MyPage />`.
+
+`index.ts` — export only the route for a lazy page (do **not** re-export the
+component, or it rejoins the initial chunk):
 
 ```ts
-export { default as MyPage } from './ui/MyPage'
 export { myPageRoute } from './model/route'
 ```
 

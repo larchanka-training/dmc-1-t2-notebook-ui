@@ -1,2 +1,3 @@
-export { default as UsagePage } from './ui/UsagePage'
+// UsagePage is loaded lazily by its route (code splitting) — not re-exported
+// here, so the barrel import in App.tsx only pulls in the route registration.
 export { usageRoute } from './model/route'
