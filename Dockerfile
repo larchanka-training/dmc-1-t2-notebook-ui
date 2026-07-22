@@ -33,7 +33,7 @@ ENV VITE_BASE=${VITE_BASE}
 
 RUN pnpm run build
 
-FROM nginx:1.31.2-alpine AS production
+FROM nginx:1.31.3-alpine AS production
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /home/app/dist /usr/share/nginx/html
