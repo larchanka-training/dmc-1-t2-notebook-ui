@@ -17,6 +17,15 @@ updates:
       npm:
         patterns:
           - '*'
+    # Hold TypeScript on the 6.x line: typescript-eslint (peer typescript
+    # ">=4.8.4 <6.1.0") and openapi-typescript use the TS compiler API and do not
+    # support TS 7.0 yet, so a major bump reddens Lint + the API drift check.
+    # Remove once typescript-eslint ships TS 7 support (typescript-eslint#10940).
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'typescript-eslint'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'docker'
     directory: '/'
