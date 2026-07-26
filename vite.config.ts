@@ -38,6 +38,33 @@ export default defineConfig({
   // CloudFront/S3). Drives asset URLs and import.meta.env.BASE_URL.
   base: process.env['VITE_BASE'] ?? '/',
   plugins: [react(), tailwindcss(), crossOriginIsolation],
+  build: {
+    // Split heavy third-party libraries out of the single ~6 MB main chunk into
+    // their own hashed vendor chunks. These libs change far less often than app
+    // code, so separate chunks let a returning user re-use them from cache across
+    // deploys, enable parallel fetches, and clear Vite's >500 kB single-chunk
+    // warning. Initial *bytes* are largely unchanged while WebLLM is statically
+    // imported at bootstrap — deferring it to dynamic import() is a follow-up.
+    //
+    // Uses the native Vite 8 / Rolldown chunking API (`rolldownOptions.output.
+    // codeSplitting.groups`), not the deprecated `rollupOptions.manualChunks`
+    // function form. Groups are matched top-to-bottom (first match wins).
+    // (QuickJS is not listed: it runs in a separate Web Worker bundle — the main
+    // build emits no quickjs chunk, so a matcher here would be inert.)
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'webllm', test: /node_modules\/@mlc-ai\/web-llm\// },
+            { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer)\// },
+            { name: 'katex', test: /node_modules\/(katex|rehype-katex|remark-math)\// },
+            { name: 'highlight', test: /node_modules\/(highlight\.js|rehype-highlight)\// },
+            { name: 'react-vendor', test: /node_modules\/(react|react-dom|scheduler)\// },
+          ],
+        },
+      },
+    },
+  },
   server: {
     // Listen on all interfaces so the container is reachable from the host.
     host: true,
