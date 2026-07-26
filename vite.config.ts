@@ -38,6 +38,34 @@ export default defineConfig({
   // CloudFront/S3). Drives asset URLs and import.meta.env.BASE_URL.
   base: process.env['VITE_BASE'] ?? '/',
   plugins: [react(), tailwindcss(), crossOriginIsolation],
+  build: {
+    rollupOptions: {
+      output: {
+        // Split heavy third-party libraries out of the single ~6 MB main chunk
+        // into their own hashed vendor chunks. These libs change far less often
+        // than app code, so separate chunks let a returning user re-use them from
+        // cache across deploys, enable parallel fetches, and clear Vite's
+        // >500 kB single-chunk warning. Initial *bytes* are largely unchanged
+        // while WebLLM/QuickJS are statically imported at bootstrap — deferring
+        // those to dynamic import() is a separate follow-up.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('@mlc-ai/web-llm')) return 'webllm'
+          if (id.includes('quickjs')) return 'quickjs'
+          if (id.includes('@codemirror') || id.includes('@lezer')) return 'codemirror'
+          if (id.includes('katex') || id.includes('rehype-katex') || id.includes('remark-math'))
+            return 'katex'
+          if (id.includes('highlight.js') || id.includes('rehype-highlight')) return 'highlight'
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/scheduler/')
+          )
+            return 'react-vendor'
+        },
+      },
+    },
+  },
   server: {
     // Listen on all interfaces so the container is reachable from the host.
     host: true,
