@@ -141,5 +141,6 @@ autosave revision, and does not trigger a remote sync.
   model that produces the cell content this exports.
 - [Working with Cells](./adding-cells.md) — the cell shape (`code` ⇄
   `content` mapping) the serializer mirrors.
-- DevOps runbook §11.4.1 (mono-repo `docs/sprint-3-deliverables/DevOps-runbook.md`)
-  — pre-shutdown self-export checklist this feature closes.
+- DevOps runbook §11.4.1 (workspace docs repo
+  `docs/sprint-3-deliverables/DevOps-runbook.md`) — pre-shutdown self-export
+  checklist this feature closes.
