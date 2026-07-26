@@ -39,29 +39,28 @@ export default defineConfig({
   base: process.env['VITE_BASE'] ?? '/',
   plugins: [react(), tailwindcss(), crossOriginIsolation],
   build: {
-    rollupOptions: {
+    // Split heavy third-party libraries out of the single ~6 MB main chunk into
+    // their own hashed vendor chunks. These libs change far less often than app
+    // code, so separate chunks let a returning user re-use them from cache across
+    // deploys, enable parallel fetches, and clear Vite's >500 kB single-chunk
+    // warning. Initial *bytes* are largely unchanged while WebLLM is statically
+    // imported at bootstrap — deferring it to dynamic import() is a follow-up.
+    //
+    // Uses the native Vite 8 / Rolldown chunking API (`rolldownOptions.output.
+    // codeSplitting.groups`), not the deprecated `rollupOptions.manualChunks`
+    // function form. Groups are matched top-to-bottom (first match wins).
+    // (QuickJS is not listed: it runs in a separate Web Worker bundle — the main
+    // build emits no quickjs chunk, so a matcher here would be inert.)
+    rolldownOptions: {
       output: {
-        // Split heavy third-party libraries out of the single ~6 MB main chunk
-        // into their own hashed vendor chunks. These libs change far less often
-        // than app code, so separate chunks let a returning user re-use them from
-        // cache across deploys, enable parallel fetches, and clear Vite's
-        // >500 kB single-chunk warning. Initial *bytes* are largely unchanged
-        // while WebLLM/QuickJS are statically imported at bootstrap — deferring
-        // those to dynamic import() is a separate follow-up.
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return
-          if (id.includes('@mlc-ai/web-llm')) return 'webllm'
-          if (id.includes('quickjs')) return 'quickjs'
-          if (id.includes('@codemirror') || id.includes('@lezer')) return 'codemirror'
-          if (id.includes('katex') || id.includes('rehype-katex') || id.includes('remark-math'))
-            return 'katex'
-          if (id.includes('highlight.js') || id.includes('rehype-highlight')) return 'highlight'
-          if (
-            id.includes('/node_modules/react/') ||
-            id.includes('/node_modules/react-dom/') ||
-            id.includes('/scheduler/')
-          )
-            return 'react-vendor'
+        codeSplitting: {
+          groups: [
+            { name: 'webllm', test: /node_modules\/@mlc-ai\/web-llm\// },
+            { name: 'codemirror', test: /node_modules\/(@codemirror|@lezer)\// },
+            { name: 'katex', test: /node_modules\/(katex|rehype-katex|remark-math)\// },
+            { name: 'highlight', test: /node_modules\/(highlight\.js|rehype-highlight)\// },
+            { name: 'react-vendor', test: /node_modules\/(react|react-dom|scheduler)\// },
+          ],
         },
       },
     },
