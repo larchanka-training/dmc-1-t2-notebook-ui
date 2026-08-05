@@ -11,6 +11,10 @@ import {
   projectNotebookOverlay,
 } from './outputOverlay'
 
+const encoder = new TextEncoder()
+/** Byte length of a value's JSON serialization — the actually-stored form. */
+const serializedBytes = (value: unknown): number => encoder.encode(JSON.stringify(value)).length
+
 // ── builders ────────────────────────────────────────────────────────────────
 const stdout = (text: string): OutputItem => ({ type: 'stdout', text })
 const result = (value: number): OutputItem => ({
@@ -25,11 +29,11 @@ const cell = (
   cellId: string,
   items: OutputItem[],
   sourceUpdatedAt = 1,
-): {
-  cellId: string
-  sourceUpdatedAt: number
-  items: OutputItem[]
-} => ({ cellId, sourceUpdatedAt, items })
+): { cellId: string; sourceUpdatedAt: number; items: OutputItem[] } => ({
+  cellId,
+  sourceUpdatedAt,
+  items,
+})
 
 describe('caps are exact bytes', () => {
   test('the documented byte caps', () => {
@@ -49,9 +53,7 @@ describe('projectCellOutputs — persistable filter', () => {
       items: [stdout('log'), result(1), html('<b>x</b>'), image('AAAA'), runtimeError()],
     })
     expect(out.items.map((i) => i.type)).toEqual(['result', 'html', 'image'])
-    expect(out.sourceUpdatedAt).toBe(7)
-    expect(out.savedAt).toBe(100)
-    expect(out.cellId).toBe('c1')
+    expect(out).toMatchObject({ cellId: 'c1', sourceUpdatedAt: 7, savedAt: 100 })
   })
 })
 
@@ -61,7 +63,6 @@ describe('projectCellOutputs — per-item caps', () => {
     const out = projectCellOutputs({ cellId: 'c', sourceUpdatedAt: 1, savedAt: 0, items: [big] })
     expect(out.items).toHaveLength(1)
     expect(isOutputTooLarge(out.items[0] as OutputItem)).toBe(true)
-    expect(out.items[0]).toMatchObject({ type: 'error', name: OUTPUT_TOO_LARGE_NAME })
   })
 
   test('html exactly at the cap is kept verbatim', () => {
@@ -84,8 +85,8 @@ describe('projectCellOutputs — per-item caps', () => {
   })
 })
 
-describe('projectCellOutputs — per-cell cap', () => {
-  test('truncates oldest-first and appends a single cell-level placeholder', () => {
+describe('projectCellOutputs — per-cell cap enforced on the serialized items', () => {
+  test('truncates oldest-first, appends one placeholder, and stays within the cap', () => {
     // Each image is ~1.5 MiB of base64 → three exceed the 4 MiB cell cap.
     const oneAndHalfMiB = 'A'.repeat(1.5 * 1024 * 1024)
     const out = projectCellOutputs({
@@ -94,40 +95,56 @@ describe('projectCellOutputs — per-cell cap', () => {
       savedAt: 0,
       items: [image(oneAndHalfMiB), image(oneAndHalfMiB), image(oneAndHalfMiB)],
     })
-    // Two kept (oldest-first), third dropped, one placeholder appended.
     const kept = out.items.filter((i) => i.type === 'image')
     const placeholders = out.items.filter((i) => isOutputTooLarge(i as OutputItem))
     expect(kept).toHaveLength(2)
     expect(placeholders).toHaveLength(1)
     expect(out.items.at(-1)).toMatchObject({ name: OUTPUT_TOO_LARGE_NAME })
+    // Invariant: the ACTUAL stored representation is within the cap.
+    expect(serializedBytes(out.items)).toBeLessThanOrEqual(CELL_MAX_BYTES)
+  })
+
+  test('a single over-cap result yields only the placeholder, within the cap', () => {
+    const huge = { type: 'result', value: { kind: 'primitive', value: 'z'.repeat(CELL_MAX_BYTES) } }
+    const out = projectCellOutputs({
+      cellId: 'c',
+      sourceUpdatedAt: 1,
+      savedAt: 0,
+      items: [huge as OutputItem],
+    })
+    expect(out.items).toHaveLength(1)
+    expect(isOutputTooLarge(out.items[0] as OutputItem)).toBe(true)
+    expect(serializedBytes(out.items)).toBeLessThanOrEqual(CELL_MAX_BYTES)
   })
 })
 
 describe('projectNotebookOverlay', () => {
-  test('skips cells that project to no persistable items', () => {
+  test('skips cells with no persistable items; no overflow when everything fits', () => {
     const overlay = projectNotebookOverlay({
       notebookId: 'nb',
       savedAt: 5,
       cells: [cell('a', [stdout('only logs')]), cell('b', [result(2)])],
     })
     expect(overlay.cells.map((c) => c.cellId)).toEqual(['b'])
-    expect(overlay.droppedCellIds).toEqual([])
+    expect(overlay.overflow).toBeNull()
     expect(overlay.savedAt).toBe(5)
   })
 
-  test('notebook cap: keeps oldest cells, records later ones in droppedCellIds', () => {
+  test('notebook cap: keeps an oldest-first prefix, records a bounded overflow marker, stays within cap', () => {
     // Each cell carries a ~2 MiB image; 20 cells ≈ 40 MiB > 32 MiB cap.
     const twoMiB = 'A'.repeat(2 * 1024 * 1024)
     const cells = Array.from({ length: 20 }, (_, i) => cell(`c${i}`, [image(twoMiB)]))
     const overlay = projectNotebookOverlay({ notebookId: 'nb', savedAt: 0, cells })
 
     expect(overlay.cells.length).toBeGreaterThan(0)
-    expect(overlay.droppedCellIds.length).toBeGreaterThan(0)
-    // Every id is accounted for exactly once, in original order (oldest-first kept).
+    expect(overlay.overflow).not.toBeNull()
+    // Kept cells are an oldest-first prefix of the input.
     const keptIds = overlay.cells.map((c) => c.cellId)
-    expect([...keptIds, ...overlay.droppedCellIds]).toEqual(cells.map((c) => c.cellId))
-    // The kept set is a prefix of the original order.
     expect(keptIds).toEqual(cells.slice(0, keptIds.length).map((c) => c.cellId))
+    // The bounded marker counts exactly the omitted cells (no id list).
+    expect(overlay.overflow?.droppedCellCount).toBe(cells.length - keptIds.length)
+    // Invariant: the ACTUAL stored overlay is within the cap.
+    expect(serializedBytes(overlay)).toBeLessThanOrEqual(NOTEBOOK_MAX_BYTES)
   })
 
   test('preserves each cell version stamp', () => {

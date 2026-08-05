@@ -9,24 +9,36 @@
 // Contract highlights (see §6):
 //   - Only the rich, not-cheaply-re-viewable outputs persist: `result`, `html`,
 //     `image`. Streams (`stdout`/`stderr`) and live runtime `error`s do not.
-//   - Byte-accurate caps, measured on the actually-serialized representation.
+//   - Caps are enforced on the ACTUAL serialized representation that gets
+//     stored — `JSON.stringify(cell.items)` and `JSON.stringify(overlay)` — so
+//     array delimiters, the object envelope, and the overflow marker are all
+//     counted (C2/C6.4). Accounting is analytical (O(n)) but exact for JSON.
 //   - Over-cap items are replaced by a stable `OutputTooLarge` placeholder
-//     (C6.4: reuse the existing `error` item, `name: 'OutputTooLarge'`), which
-//     renders through the existing OutputView with no new render path.
+//     (C6.4: reuse the `error` item, `name: 'OutputTooLarge'`), which renders
+//     through the existing OutputView with no new render path.
 
 import type { OutputItem } from '../runtime/types'
 
 /** The output item types that are persisted (rich outputs only). */
 export type PersistableOutputItem = Extract<OutputItem, { type: 'result' | 'html' | 'image' }>
 
+/** `error.name` that marks an `error` item as an `OutputTooLarge` placeholder. */
+export const OUTPUT_TOO_LARGE_NAME = 'OutputTooLarge'
+
 /**
- * A persisted output item: either a rich output or an `OutputTooLarge`
- * placeholder. The placeholder reuses the runtime `error` item (C6.4) so it is
- * structurally part of the shared `OutputItem` union and renders as an error
- * note on reopen; `name === OUTPUT_TOO_LARGE_NAME` distinguishes it from a real
- * runtime error (real errors are not persisted).
+ * The synthetic "output too large to save" placeholder. A narrowed subtype of
+ * the runtime `error` item (assignable to `OutputItem`, so it renders as an
+ * error note on reopen) whose literal `name` distinguishes it — real runtime
+ * errors are never persisted, so a persisted `error` is always this marker.
  */
-export type PersistedOutputItem = PersistableOutputItem | Extract<OutputItem, { type: 'error' }>
+export interface OutputTooLargeItem {
+  type: 'error'
+  name: typeof OUTPUT_TOO_LARGE_NAME
+  message: string
+}
+
+/** A persisted output item: a rich output or an `OutputTooLarge` placeholder. */
+export type PersistedOutputItem = PersistableOutputItem | OutputTooLargeItem
 
 /** One cell's persisted outputs, version-stamped to the source it belongs to. */
 export interface PersistedCellOutput {
@@ -43,17 +55,23 @@ export interface PersistedCellOutput {
   items: PersistedOutputItem[]
 }
 
+/**
+ * The single, bounded notebook-level overflow marker (C6.4): when the
+ * notebook-wide cap is reached, later cells are omitted (oldest-first retained)
+ * and only their COUNT is recorded — never a variable-length id list, which
+ * would itself be unaccounted metadata.
+ */
+export interface OverlayOverflow {
+  droppedCellCount: number
+}
+
 /** A notebook's local output overlay — a separate store from `NotebookJSON`. */
 export interface NotebookOutputOverlay {
   notebookId: string
   savedAt: number
   cells: PersistedCellOutput[]
-  /**
-   * Cell ids whose outputs were omitted because the notebook-wide cap was
-   * reached (oldest-first retained). Empty when nothing was dropped. Recorded
-   * rather than silently dropped so the UI/export can explain the gap (C6.4).
-   */
-  droppedCellIds: string[]
+  /** `null` when everything fit; otherwise the bounded overflow marker. */
+  overflow: OverlayOverflow | null
 }
 
 // ─── Caps (exact bytes) — graphical-output-contract.md §6 C2/C6.4 ────────────
@@ -61,13 +79,10 @@ export interface NotebookOutputOverlay {
 export const HTML_MAX_BYTES = 256 * 1024
 /** Per-`image`-item cap: length of the stored base64 payload. */
 export const IMAGE_MAX_BYTES = 2 * 1024 * 1024
-/** Per-cell cap over the serialized persisted items. */
+/** Per-cell cap over `JSON.stringify(cell.items)`. */
 export const CELL_MAX_BYTES = 4 * 1024 * 1024
-/** Notebook-wide cap over the serialized overlay (exact, C6.4). */
+/** Notebook-wide cap over `JSON.stringify(overlay)` (exact, C6.4). */
 export const NOTEBOOK_MAX_BYTES = 32 * 1024 * 1024
-
-/** `error.name` that marks an `error` item as an `OutputTooLarge` placeholder. */
-export const OUTPUT_TOO_LARGE_NAME = 'OutputTooLarge'
 
 const encoder = new TextEncoder()
 
@@ -76,12 +91,24 @@ function utf8Bytes(text: string): number {
   return encoder.encode(text).length
 }
 
-/** Bytes of an item's serialized (persisted) representation. */
-function serializedBytes(item: PersistedOutputItem): number {
-  return utf8Bytes(JSON.stringify(item))
+/** Bytes of a value's JSON serialization. */
+function jsonBytes(value: unknown): number {
+  return utf8Bytes(JSON.stringify(value))
 }
 
-function tooLarge(message: string): Extract<OutputItem, { type: 'error' }> {
+/**
+ * Exact byte length of `JSON.stringify(items)` for an array, computed from the
+ * per-element sizes: `[` + e0 + `,` + e1 + … + `]`. No whitespace in
+ * `JSON.stringify`, so this equals the real serialized length.
+ */
+function arrayBytes(elementBytes: readonly number[]): number {
+  if (elementBytes.length === 0) return 2 // "[]"
+  let sum = 2 // brackets
+  for (const b of elementBytes) sum += b
+  return sum + (elementBytes.length - 1) // commas
+}
+
+function tooLarge(message: string): OutputTooLargeItem {
   return { type: 'error', name: OUTPUT_TOO_LARGE_NAME, message }
 }
 
@@ -111,13 +138,9 @@ function capItem(item: PersistableOutputItem): PersistedOutputItem {
 }
 
 /**
- * Project one cell's live run output into its bounded persisted form.
- *
- * Order (deterministic, oldest-first retained):
- *   1. keep only rich outputs (`result`/`html`/`image`);
- *   2. per-item cap → placeholder for over-cap `html`/`image`;
- *   3. per-cell cap: accumulate serialized bytes; when the next item would
- *      exceed {@link CELL_MAX_BYTES}, stop and append ONE cell-level placeholder.
+ * Project one cell's live run output into its bounded persisted form. The result
+ * satisfies `JSON.stringify(items).length ≤ CELL_MAX_BYTES` (bytes), reserving
+ * the truncation marker's own serialized size before it is appended.
  */
 export function projectCellOutputs(input: {
   cellId: string
@@ -126,77 +149,106 @@ export function projectCellOutputs(input: {
   items: readonly OutputItem[]
 }): PersistedCellOutput {
   const capped = input.items.filter(isPersistable).map(capItem)
+  const sizes = capped.map(jsonBytes)
 
-  const kept: PersistedOutputItem[] = []
-  let total = 0
-  let overflowed = false
-  for (const item of capped) {
-    const bytes = serializedBytes(item)
-    if (total + bytes > CELL_MAX_BYTES) {
-      overflowed = true
-      break
+  let items: PersistedOutputItem[]
+  if (arrayBytes(sizes) <= CELL_MAX_BYTES) {
+    items = capped // everything fits, no marker
+  } else {
+    // Overflow: keep the longest oldest-first prefix that fits WITH the marker
+    // appended, so the final `[...kept, marker]` array stays within the cap.
+    const marker = tooLarge(`Cell output truncated: exceeds ${CELL_MAX_BYTES} bytes`)
+    const markerBytes = jsonBytes(marker)
+    const kept: PersistedOutputItem[] = []
+    const keptSizes: number[] = []
+    for (let i = 0; i < capped.length; i++) {
+      if (arrayBytes([...keptSizes, sizes[i]!, markerBytes]) > CELL_MAX_BYTES) break
+      kept.push(capped[i]!)
+      keptSizes.push(sizes[i]!)
     }
-    kept.push(item)
-    total += bytes
-  }
-  if (overflowed) {
-    kept.push(tooLarge(`Cell output truncated: exceeds ${CELL_MAX_BYTES} bytes`))
+    kept.push(marker)
+    items = kept
   }
 
   return {
     cellId: input.cellId,
     sourceUpdatedAt: input.sourceUpdatedAt,
     savedAt: input.savedAt,
-    items: kept,
+    items,
   }
+}
+
+/** Bytes of `JSON.stringify(overlay)` given the serialized cell-record sizes. */
+function overlayBytes(
+  notebookId: string,
+  savedAt: number,
+  cellRecordSizes: readonly number[],
+  overflow: OverlayOverflow | null,
+): number {
+  // The envelope with an empty cells array, then swap the empty-array bytes for
+  // the real array bytes (only `cells` varies; key order is fixed by the literal
+  // returned below, so this is exact).
+  const skeleton = jsonBytes({ notebookId, savedAt, cells: [], overflow })
+  return skeleton - 2 + arrayBytes(cellRecordSizes)
 }
 
 /**
  * Project a whole notebook's per-cell outputs into the overlay, enforcing the
- * notebook-wide cap. Cells are taken in order; once a cell's serialized size
- * would push the running total past {@link NOTEBOOK_MAX_BYTES}, that cell and
- * all later cells are omitted and their ids recorded in `droppedCellIds`
- * (oldest-first retained, C6.4). Cells that project to no items are skipped
- * entirely (nothing to persist).
+ * notebook-wide cap on the ACTUAL `JSON.stringify(overlay)` size (envelope +
+ * bounded overflow marker included). Cells are taken in order; once a cell would
+ * push the serialized overlay past {@link NOTEBOOK_MAX_BYTES}, it and all later
+ * cells are omitted and counted in a single {@link OverlayOverflow} marker
+ * (oldest-first retained, C6.4). Cells that project to no items are skipped.
  */
 export function projectNotebookOverlay(input: {
   notebookId: string
   savedAt: number
   cells: ReadonlyArray<{ cellId: string; sourceUpdatedAt: number; items: readonly OutputItem[] }>
 }): NotebookOutputOverlay {
-  const cells: PersistedCellOutput[] = []
-  const droppedCellIds: string[] = []
-  let total = 0
-  let capReached = false
+  const { notebookId, savedAt } = input
 
-  for (const cell of input.cells) {
-    const projected = projectCellOutputs({
-      cellId: cell.cellId,
-      sourceUpdatedAt: cell.sourceUpdatedAt,
-      savedAt: input.savedAt,
-      items: cell.items,
-    })
-    if (projected.items.length === 0) continue
+  const projected = input.cells
+    .map((cell) =>
+      projectCellOutputs({
+        cellId: cell.cellId,
+        sourceUpdatedAt: cell.sourceUpdatedAt,
+        savedAt,
+        items: cell.items,
+      }),
+    )
+    .filter((cell) => cell.items.length > 0)
+  const sizes = projected.map(jsonBytes)
 
-    if (capReached) {
-      droppedCellIds.push(cell.cellId)
-      continue
-    }
-
-    const bytes = utf8Bytes(JSON.stringify(projected))
-    if (total + bytes > NOTEBOOK_MAX_BYTES) {
-      capReached = true
-      droppedCellIds.push(cell.cellId)
-      continue
-    }
-    cells.push(projected)
-    total += bytes
+  // Fast path: all non-empty cells fit with no overflow marker.
+  if (overlayBytes(notebookId, savedAt, sizes, null) <= NOTEBOOK_MAX_BYTES) {
+    return { notebookId, savedAt, cells: projected, overflow: null }
   }
 
-  return { notebookId: input.notebookId, savedAt: input.savedAt, cells, droppedCellIds }
+  // Overflow: reserve the marker (use the max possible dropped count so the
+  // envelope estimate is an upper bound on the real one).
+  const reserve: OverlayOverflow = { droppedCellCount: projected.length }
+  const kept: PersistedCellOutput[] = []
+  const keptSizes: number[] = []
+  for (let i = 0; i < projected.length; i++) {
+    if (
+      overlayBytes(notebookId, savedAt, [...keptSizes, sizes[i]!], reserve) > NOTEBOOK_MAX_BYTES
+    ) {
+      break
+    }
+    kept.push(projected[i]!)
+    keptSizes.push(sizes[i]!)
+  }
+
+  const droppedCellCount = projected.length - kept.length
+  return {
+    notebookId,
+    savedAt,
+    cells: kept,
+    overflow: droppedCellCount > 0 ? { droppedCellCount } : null,
+  }
 }
 
 /** True when the item is an `OutputTooLarge` placeholder (not a real error). */
-export function isOutputTooLarge(item: OutputItem): boolean {
+export function isOutputTooLarge(item: OutputItem): item is OutputTooLargeItem {
   return item.type === 'error' && item.name === OUTPUT_TOO_LARGE_NAME
 }
