@@ -13,6 +13,7 @@
 // import it from the contract (impl → contract) rather than the contract
 // reaching into a concrete backend.
 
+import type { NotebookOutputOverlay } from './outputOverlay'
 import type { NotebookJSON } from './schema'
 
 /** Outcome of a conditional write. */
@@ -166,7 +167,7 @@ export interface NotebookStorageAdapter {
    * newer app version (memory backend never throws this — see `get`).
    */
   putIfNewer(notebook: NotebookJSON, base: number | null): Promise<PutResult>
-  /** Delete a notebook by id. No-op if it does not exist. */
+  /** Delete a notebook by id AND its output overlay. No-op if it does not exist. */
   delete(id: string): Promise<void>
   /**
    * All notebooks, most recently edited first (ties broken by id descending).
@@ -174,7 +175,10 @@ export interface NotebookStorageAdapter {
    * skips it and lists the rest.
    */
   list(): Promise<NotebookJSON[]>
-  /** Remove every notebook AND every sync-state record held by this backend. */
+  /**
+   * Remove every notebook, sync-state record AND output overlay held by this
+   * backend (an untrusted-device wipe must leave nothing behind — Step 6 C6.3).
+   */
   clearAll(): Promise<void>
   /** Read one notebook's sync state, validated. `undefined` if absent or invalid. */
   getSyncState(notebookId: string): Promise<NotebookSyncState | undefined>
@@ -191,4 +195,14 @@ export interface NotebookStorageAdapter {
   putMeta(key: string, value: unknown): Promise<void>
   /** Delete a meta marker by key. No-op if absent. */
   deleteMeta(key: string): Promise<void>
+  /**
+   * Read one notebook's local output overlay, validated (Step 6 C1). A corrupt
+   * record is treated as absent (no outputs restored), never thrown. `undefined`
+   * if absent or invalid.
+   */
+  getOverlay(notebookId: string): Promise<NotebookOutputOverlay | undefined>
+  /** Insert or replace one notebook's output overlay (keyed by `overlay.notebookId`). */
+  putOverlay(overlay: NotebookOutputOverlay): Promise<void>
+  /** Delete one notebook's output overlay. No-op if it does not exist. */
+  deleteOverlay(notebookId: string): Promise<void>
 }

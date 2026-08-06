@@ -11,6 +11,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { applyMigrations, NewerFormatError } from './migrations'
+import { isNotebookOutputOverlay, type NotebookOutputOverlay } from './outputOverlay'
 import type { NotebookJSON } from './schema'
 import {
   isNotebookSyncState,
@@ -27,10 +28,15 @@ const DB_NAME = 'js-notebook'
 // v3 (TARDIS-167 №23) adds the `meta` store for per-account durable markers —
 // currently the deleted-seed tombstone, so a deleted welcome notebook is NOT
 // resurrected on the next boot. Additive + version-guarded like the v2 step.
-const DB_VERSION = 3
+// v4 (Step 6 C1/C6.3) adds the `outputs` store for the LOCAL-ONLY graphical
+// output overlay, keyed by notebook id. Additive + version-guarded: notebooks,
+// sync and meta are untouched, and the overlay never joins `NotebookJSON` / the
+// autosync wire contract.
+const DB_VERSION = 4
 const STORE = 'notebooks'
 const SYNC_STORE = 'sync'
 const META_STORE = 'meta'
+const OVERLAY_STORE = 'outputs'
 
 interface NotebookDB extends DBSchema {
   [STORE]: {
@@ -45,6 +51,10 @@ interface NotebookDB extends DBSchema {
   [META_STORE]: {
     key: string
     value: unknown
+  }
+  [OVERLAY_STORE]: {
+    key: string
+    value: NotebookOutputOverlay
   }
 }
 
@@ -68,6 +78,11 @@ function getDB(): Promise<IDBPDatabase<NotebookDB>> {
           // Out-of-line keys: callers pass an explicit string key (e.g. the
           // seed-tombstone key). Notebooks/sync are untouched (INV-1).
           db.createObjectStore(META_STORE)
+        }
+        if (oldVersion < 4) {
+          // Local-only output overlay, keyed by notebook id. Additive: existing
+          // stores are untouched (INV-1).
+          db.createObjectStore(OVERLAY_STORE, { keyPath: 'notebookId' })
         }
       },
       // This tab is holding an OLD-version connection open while ANOTHER tab tries
@@ -172,25 +187,61 @@ export async function putIfNewer(notebook: NotebookJSON, base: number | null): P
   return { ok: true }
 }
 
-/** Delete a notebook by id. No-op if it does not exist. */
+/**
+ * Delete a notebook by id AND its output overlay, in one transaction. No-op for
+ * absent records. Deleting the notebook must not leave an orphaned overlay behind
+ * (Step 6 C6.3).
+ */
 export async function remove(id: string): Promise<void> {
-  await (await getDB()).delete(STORE, id)
+  const db = await getDB()
+  const tx = db.transaction([STORE, OVERLAY_STORE], 'readwrite')
+  await Promise.all([
+    tx.objectStore(STORE).delete(id),
+    tx.objectStore(OVERLAY_STORE).delete(id),
+    tx.done,
+  ])
 }
 
 /**
- * Remove all notebooks AND all sync-state records, in one transaction. Backs
- * `clearLocalNotebookData()`: an untrusted-device wipe must leave nothing behind,
- * neither notebook content nor the unsynced-change queue / tombstones (#134).
+ * Remove all notebooks, sync-state records AND output overlays, in one
+ * transaction. Backs `clearLocalNotebookData()`: an untrusted-device wipe must
+ * leave nothing behind — neither notebook content, the unsynced-change queue /
+ * tombstones (#134), nor persisted outputs (Step 6 C6.3).
  */
 export async function clear(): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction([STORE, SYNC_STORE, META_STORE], 'readwrite')
+  const tx = db.transaction([STORE, SYNC_STORE, META_STORE, OVERLAY_STORE], 'readwrite')
   await Promise.all([
     tx.objectStore(STORE).clear(),
     tx.objectStore(SYNC_STORE).clear(),
     tx.objectStore(META_STORE).clear(),
+    tx.objectStore(OVERLAY_STORE).clear(),
     tx.done,
   ])
+}
+
+// ---------------------------------------------------------------------------
+// Output overlay partition (Step 6 C1): the LOCAL-ONLY graphical output store,
+// one record per notebook. Never synced; kept out of `NotebookJSON`.
+// ---------------------------------------------------------------------------
+
+/** Read one notebook's output overlay, validated. `undefined` if absent/corrupt. */
+export async function getOverlay(notebookId: string): Promise<NotebookOutputOverlay | undefined> {
+  const raw = await (await getDB()).get(OVERLAY_STORE, notebookId)
+  if (raw === undefined) return undefined
+  // A corrupt overlay is treated as absent (no outputs restored), never thrown —
+  // persisted outputs must not be able to crash boot or a run.
+  return isNotebookOutputOverlay(raw) ? raw : undefined
+}
+
+/** Insert or replace one notebook's output overlay (keyed by `overlay.notebookId`). */
+export async function putOverlay(overlay: NotebookOutputOverlay): Promise<void> {
+  await (await getDB()).put(OVERLAY_STORE, overlay)
+}
+
+/** Delete one notebook's output overlay. No-op if it does not exist. */
+export async function deleteOverlay(notebookId: string): Promise<void> {
+  await (await getDB()).delete(OVERLAY_STORE, notebookId)
 }
 
 // ---------------------------------------------------------------------------

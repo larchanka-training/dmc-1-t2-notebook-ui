@@ -46,6 +46,9 @@ export const notebookStorage: NotebookStorageAdapter = {
   getMeta: (key) => active.getMeta(key),
   putMeta: (key, value) => active.putMeta(key, value),
   deleteMeta: (key) => active.deleteMeta(key),
+  getOverlay: (id) => active.getOverlay(id),
+  putOverlay: (overlay) => active.putOverlay(overlay),
+  deleteOverlay: (id) => active.deleteOverlay(id),
 }
 
 /**
