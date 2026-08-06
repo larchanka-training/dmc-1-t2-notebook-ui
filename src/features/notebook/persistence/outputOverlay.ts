@@ -97,15 +97,22 @@ function jsonBytes(value: unknown): number {
 }
 
 /**
- * Exact byte length of `JSON.stringify(items)` for an array, computed from the
- * per-element sizes: `[` + e0 + `,` + e1 + … + `]`. No whitespace in
- * `JSON.stringify`, so this equals the real serialized length.
+ * Exact byte length of `JSON.stringify(items)` for an array with `count`
+ * elements whose serialized sizes sum to `sum`: `[` + e0 + `,` + … + `]`. No
+ * whitespace in `JSON.stringify`, so this equals the real serialized length.
+ * Taking totals (not the array) keeps the overflow loops O(n) — no per-step
+ * copies of the growing prefix.
  */
+function arrayBytesOf(sum: number, count: number): number {
+  if (count === 0) return 2 // "[]"
+  return 2 + sum + (count - 1) // brackets + elements + commas
+}
+
+/** Sum of the element sizes → {@link arrayBytesOf}. */
 function arrayBytes(elementBytes: readonly number[]): number {
-  if (elementBytes.length === 0) return 2 // "[]"
-  let sum = 2 // brackets
+  let sum = 0
   for (const b of elementBytes) sum += b
-  return sum + (elementBytes.length - 1) // commas
+  return arrayBytesOf(sum, elementBytes.length)
 }
 
 function tooLarge(message: string): OutputTooLargeItem {
@@ -160,11 +167,12 @@ export function projectCellOutputs(input: {
     const marker = tooLarge(`Cell output truncated: exceeds ${CELL_MAX_BYTES} bytes`)
     const markerBytes = jsonBytes(marker)
     const kept: PersistedOutputItem[] = []
-    const keptSizes: number[] = []
+    let keptSum = 0
     for (let i = 0; i < capped.length; i++) {
-      if (arrayBytes([...keptSizes, sizes[i]!, markerBytes]) > CELL_MAX_BYTES) break
+      // Final array would be [...kept, item, marker] → kept.length + 2 elements.
+      if (arrayBytesOf(keptSum + sizes[i]! + markerBytes, kept.length + 2) > CELL_MAX_BYTES) break
       kept.push(capped[i]!)
-      keptSizes.push(sizes[i]!)
+      keptSum += sizes[i]!
     }
     kept.push(marker)
     items = kept
@@ -225,18 +233,17 @@ export function projectNotebookOverlay(input: {
   }
 
   // Overflow: reserve the marker (use the max possible dropped count so the
-  // envelope estimate is an upper bound on the real one).
+  // envelope estimate is an upper bound on the real one). The envelope skeleton is
+  // fixed across the loop, so hoist it and track a running cell-size sum → O(n).
   const reserve: OverlayOverflow = { droppedCellCount: projected.length }
+  const skeleton = jsonBytes({ notebookId, savedAt, cells: [], overflow: reserve })
   const kept: PersistedCellOutput[] = []
-  const keptSizes: number[] = []
+  let keptSum = 0
   for (let i = 0; i < projected.length; i++) {
-    if (
-      overlayBytes(notebookId, savedAt, [...keptSizes, sizes[i]!], reserve) > NOTEBOOK_MAX_BYTES
-    ) {
-      break
-    }
+    const cellsArrayBytes = arrayBytesOf(keptSum + sizes[i]!, kept.length + 1)
+    if (skeleton - 2 + cellsArrayBytes > NOTEBOOK_MAX_BYTES) break
     kept.push(projected[i]!)
-    keptSizes.push(sizes[i]!)
+    keptSum += sizes[i]!
   }
 
   const droppedCellCount = projected.length - kept.length
