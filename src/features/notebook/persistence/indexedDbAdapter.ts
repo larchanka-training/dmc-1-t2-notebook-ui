@@ -10,14 +10,17 @@ import type { NotebookStorageAdapter } from './storageAdapter'
 import {
   clear,
   deleteMeta,
+  deleteOverlay,
   deleteSyncState,
   get,
   getMeta,
+  getOverlay,
   getSyncState,
   list,
   put,
   putIfNewer,
   putMeta,
+  putOverlay,
   putSyncState,
   remove,
 } from './storage'
@@ -35,4 +38,7 @@ export const indexedDbAdapter: NotebookStorageAdapter = {
   getMeta,
   putMeta,
   deleteMeta,
+  getOverlay,
+  putOverlay,
+  deleteOverlay,
 }

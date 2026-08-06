@@ -259,3 +259,42 @@ export function projectNotebookOverlay(input: {
 export function isOutputTooLarge(item: OutputItem): item is OutputTooLargeItem {
   return item.type === 'error' && item.name === OUTPUT_TOO_LARGE_NAME
 }
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isPersistedCellOutput(value: unknown): value is PersistedCellOutput {
+  return (
+    isObject(value) &&
+    typeof value['cellId'] === 'string' &&
+    isFiniteNumber(value['sourceUpdatedAt']) &&
+    isFiniteNumber(value['savedAt']) &&
+    Array.isArray(value['items'])
+  )
+}
+
+/**
+ * Boundary validator for a stored overlay record (AGENTS.md §11 — a read from
+ * IndexedDB is untrusted input). A record that fails this is treated as absent by
+ * the storage layer (no persisted outputs restored), never thrown: a corrupt
+ * overlay must not be able to crash boot or a run. Validates the envelope and the
+ * per-cell shape; item internals stay loose (they are only ever rendered).
+ */
+export function isNotebookOutputOverlay(value: unknown): value is NotebookOutputOverlay {
+  if (!isObject(value)) return false
+  const overflow = value['overflow']
+  const overflowOk =
+    overflow === null || (isObject(overflow) && isFiniteNumber(overflow['droppedCellCount']))
+  return (
+    typeof value['notebookId'] === 'string' &&
+    isFiniteNumber(value['savedAt']) &&
+    overflowOk &&
+    Array.isArray(value['cells']) &&
+    value['cells'].every(isPersistedCellOutput)
+  )
+}

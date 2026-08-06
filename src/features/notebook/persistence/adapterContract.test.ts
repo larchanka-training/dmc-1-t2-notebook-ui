@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { indexedDbAdapter } from './indexedDbAdapter'
 import { createMemoryAdapter } from './memoryAdapter'
+import type { NotebookOutputOverlay } from './outputOverlay'
 import type { NotebookStorageAdapter, NotebookSyncState } from './storageAdapter'
 import {
   CELL_ID,
@@ -238,5 +239,55 @@ describe.each(backends)('NotebookStorageAdapter contract: $name', ({ create }) =
     await store.putMeta('k', true)
     await store.clearAll()
     expect(await store.getMeta('k')).toBeUndefined()
+  })
+
+  // ── Output overlay (Step 6 C1/C6.3) ────────────────────────────────────────
+  const makeOverlay = (notebookId: string): NotebookOutputOverlay => ({
+    notebookId,
+    savedAt: 1,
+    overflow: null,
+    cells: [
+      {
+        cellId: CELL_ID,
+        sourceUpdatedAt: 1,
+        savedAt: 1,
+        items: [{ type: 'image', mime: 'image/png', data: 'AAAA' }],
+      },
+    ],
+  })
+
+  test('putOverlay then getOverlay round-trips an overlay', async () => {
+    const overlay = makeOverlay(ID)
+    await store.putOverlay(overlay)
+    expect(await store.getOverlay(ID)).toEqual(overlay)
+  })
+
+  test('getOverlay returns undefined for an unknown notebook', async () => {
+    expect(await store.getOverlay(ID)).toBeUndefined()
+  })
+
+  test('putOverlay replaces the overlay for the same notebook', async () => {
+    await store.putOverlay(makeOverlay(ID))
+    await store.putOverlay({ ...makeOverlay(ID), savedAt: 2 })
+    expect((await store.getOverlay(ID))?.savedAt).toBe(2)
+  })
+
+  test('deleteOverlay removes an overlay', async () => {
+    await store.putOverlay(makeOverlay(ID))
+    await store.deleteOverlay(ID)
+    expect(await store.getOverlay(ID)).toBeUndefined()
+  })
+
+  test('delete(notebook) also removes its overlay (no orphan, C6.3)', async () => {
+    await store.put(makeNotebook(ID, 1))
+    await store.putOverlay(makeOverlay(ID))
+    await store.delete(ID)
+    expect(await store.getOverlay(ID)).toBeUndefined()
+  })
+
+  test('clearAll wipes overlays too (untrusted-device wipe, C6.3)', async () => {
+    await store.putOverlay(makeOverlay(ID))
+    await store.clearAll()
+    expect(await store.getOverlay(ID)).toBeUndefined()
   })
 })

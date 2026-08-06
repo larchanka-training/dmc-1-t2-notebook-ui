@@ -15,6 +15,7 @@
 // records can never enter it. It touches nothing outside its own Map — no
 // IndexedDB, localStorage or sessionStorage.
 
+import { isNotebookOutputOverlay, type NotebookOutputOverlay } from './outputOverlay'
 import type { NotebookJSON } from './schema'
 import {
   isNotebookSyncState,
@@ -40,6 +41,7 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
   const store = new Map<string, NotebookJSON>()
   const syncStore = new Map<string, NotebookSyncState>()
   const metaStore = new Map<string, unknown>()
+  const overlayStore = new Map<string, NotebookOutputOverlay>()
 
   return {
     async get(id) {
@@ -61,7 +63,10 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
       return { ok: true }
     },
     async delete(id) {
+      // Deleting a notebook must not leave an orphaned overlay behind (C6.3),
+      // mirroring the disk backend's combined delete.
       store.delete(id)
+      overlayStore.delete(id)
     },
     async list() {
       // Most recently edited first, mirroring the disk backend's order exactly:
@@ -77,6 +82,7 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
       store.clear()
       syncStore.clear()
       metaStore.clear()
+      overlayStore.clear()
     },
     async getSyncState(notebookId) {
       const state = syncStore.get(notebookId)
@@ -104,6 +110,20 @@ export function createMemoryAdapter(): NotebookStorageAdapter {
     },
     async deleteMeta(key) {
       metaStore.delete(key)
+    },
+    async getOverlay(notebookId) {
+      const overlay = overlayStore.get(notebookId)
+      if (overlay === undefined) return undefined
+      // Validate on read for parity with the disk backend (treat an invalid
+      // record as absent), and snapshot on the boundary like the other stores.
+      if (!isNotebookOutputOverlay(overlay)) return undefined
+      return structuredClone(overlay)
+    },
+    async putOverlay(overlay) {
+      overlayStore.set(overlay.notebookId, structuredClone(overlay))
+    },
+    async deleteOverlay(notebookId) {
+      overlayStore.delete(notebookId)
     },
   }
 }

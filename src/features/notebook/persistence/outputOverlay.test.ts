@@ -6,6 +6,7 @@ import {
   IMAGE_MAX_BYTES,
   NOTEBOOK_MAX_BYTES,
   OUTPUT_TOO_LARGE_NAME,
+  isNotebookOutputOverlay,
   isOutputTooLarge,
   projectCellOutputs,
   projectNotebookOverlay,
@@ -162,5 +163,51 @@ describe('isOutputTooLarge', () => {
     expect(isOutputTooLarge({ type: 'error', name: OUTPUT_TOO_LARGE_NAME, message: '' })).toBe(true)
     expect(isOutputTooLarge(runtimeError())).toBe(false)
     expect(isOutputTooLarge(stdout('x'))).toBe(false)
+  })
+})
+
+describe('isNotebookOutputOverlay (boundary validator)', () => {
+  test('accepts a well-formed overlay (round-trip of projectNotebookOverlay)', () => {
+    const overlay = projectNotebookOverlay({
+      notebookId: 'nb',
+      savedAt: 1,
+      cells: [cell('a', [result(1), image('AAAA')])],
+    })
+    expect(isNotebookOutputOverlay(overlay)).toBe(true)
+    // Survives a JSON round-trip (what IndexedDB stores/returns).
+    expect(isNotebookOutputOverlay(JSON.parse(JSON.stringify(overlay)))).toBe(true)
+  })
+
+  test('accepts an overflow marker', () => {
+    expect(
+      isNotebookOutputOverlay({
+        notebookId: 'nb',
+        savedAt: 1,
+        overflow: { droppedCellCount: 3 },
+        cells: [],
+      }),
+    ).toBe(true)
+  })
+
+  test('rejects corrupt / foreign shapes', () => {
+    expect(isNotebookOutputOverlay(null)).toBe(false)
+    expect(isNotebookOutputOverlay({ notebookId: 1, savedAt: 1, overflow: null, cells: [] })).toBe(
+      false,
+    )
+    expect(
+      isNotebookOutputOverlay({ notebookId: 'nb', savedAt: 'x', overflow: null, cells: [] }),
+    ).toBe(false)
+    expect(isNotebookOutputOverlay({ notebookId: 'nb', savedAt: 1, overflow: {}, cells: [] })).toBe(
+      false,
+    )
+    expect(
+      isNotebookOutputOverlay({
+        notebookId: 'nb',
+        savedAt: 1,
+        overflow: null,
+        cells: [{ cellId: 'a' }],
+      }),
+    ).toBe(false)
+    expect(isNotebookOutputOverlay({ notebookId: 'nb', savedAt: 1, overflow: null })).toBe(false)
   })
 })
