@@ -17,7 +17,7 @@
 //     (C6.4: reuse the `error` item, `name: 'OutputTooLarge'`), which renders
 //     through the existing OutputView with no new render path.
 
-import type { OutputItem } from '../runtime/types'
+import type { OutputItem, SerializedValue } from '../runtime/types'
 
 /** The output item types that are persisted (rich outputs only). */
 export type PersistableOutputItem = Extract<OutputItem, { type: 'result' | 'html' | 'image' }>
@@ -268,13 +268,76 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+/** Recursive validator for the runtime `SerializedValue` union — so a malformed
+ *  `result` (e.g. missing `value`, bad `kind`) is rejected before OutputView's
+ *  `formatValue` ever dereferences it. */
+function isSerializedValue(value: unknown): value is SerializedValue {
+  if (!isObject(value)) return false
+  switch (value['kind']) {
+    case 'primitive': {
+      const v = value['value']
+      return v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+    }
+    case 'undefined':
+      return true
+    case 'array':
+      return Array.isArray(value['items']) && value['items'].every(isSerializedValue)
+    case 'object':
+      return (
+        Array.isArray(value['entries']) &&
+        value['entries'].every(
+          (e: unknown) =>
+            Array.isArray(e) &&
+            e.length === 2 &&
+            typeof e[0] === 'string' &&
+            isSerializedValue(e[1]),
+        )
+      )
+    case 'truncated':
+      return typeof value['placeholder'] === 'string'
+    case 'function':
+      return typeof value['name'] === 'string'
+    default:
+      return false
+  }
+}
+
+/**
+ * Deep validator for one persisted item: the exact `result`/`html`/`image` shape
+ * or an `OutputTooLarge` placeholder. Also re-applies the per-item byte caps on
+ * read, so an over-limit `html`/`image` (from tampering or an older build) is
+ * rejected rather than restored into the DOM.
+ */
+function isPersistedOutputItem(value: unknown): value is PersistedOutputItem {
+  if (!isObject(value)) return false
+  switch (value['type']) {
+    case 'result':
+      return isSerializedValue(value['value'])
+    case 'html':
+      return typeof value['html'] === 'string' && utf8Bytes(value['html']) <= HTML_MAX_BYTES
+    case 'image':
+      return (
+        typeof value['mime'] === 'string' &&
+        typeof value['data'] === 'string' &&
+        utf8Bytes(value['data']) <= IMAGE_MAX_BYTES
+      )
+    case 'error':
+      // Only the synthetic OutputTooLarge marker is a valid persisted `error`.
+      return value['name'] === OUTPUT_TOO_LARGE_NAME && typeof value['message'] === 'string'
+    default:
+      return false
+  }
+}
+
 function isPersistedCellOutput(value: unknown): value is PersistedCellOutput {
   return (
     isObject(value) &&
     typeof value['cellId'] === 'string' &&
     isFiniteNumber(value['sourceUpdatedAt']) &&
     isFiniteNumber(value['savedAt']) &&
-    Array.isArray(value['items'])
+    Array.isArray(value['items']) &&
+    value['items'].every(isPersistedOutputItem) &&
+    jsonBytes(value['items']) <= CELL_MAX_BYTES
   )
 }
 
@@ -282,8 +345,10 @@ function isPersistedCellOutput(value: unknown): value is PersistedCellOutput {
  * Boundary validator for a stored overlay record (AGENTS.md §11 — a read from
  * IndexedDB is untrusted input). A record that fails this is treated as absent by
  * the storage layer (no persisted outputs restored), never thrown: a corrupt
- * overlay must not be able to crash boot or a run. Validates the envelope and the
- * per-cell shape; item internals stay loose (they are only ever rendered).
+ * overlay must not be able to crash boot or a run. Validates the full item
+ * structure (incl. `SerializedValue`) and re-applies the per-item / per-cell /
+ * notebook byte caps, so neither a malformed value nor an over-limit payload can
+ * reach the renderer.
  */
 export function isNotebookOutputOverlay(value: unknown): value is NotebookOutputOverlay {
   if (!isObject(value)) return false
@@ -295,6 +360,7 @@ export function isNotebookOutputOverlay(value: unknown): value is NotebookOutput
     isFiniteNumber(value['savedAt']) &&
     overflowOk &&
     Array.isArray(value['cells']) &&
-    value['cells'].every(isPersistedCellOutput)
+    value['cells'].every(isPersistedCellOutput) &&
+    jsonBytes(value) <= NOTEBOOK_MAX_BYTES
   )
 }

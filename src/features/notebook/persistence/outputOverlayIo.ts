@@ -25,14 +25,30 @@ export interface CellRunOutputs {
  * produced none.
  *
  * The caller passes ALL cells that carry run output (not just the one that just
- * ran), each with the version captured at ITS run start; `projectNotebookOverlay`
- * then applies the byte caps and the bounded notebook overflow.
+ * ran), each with the version captured at ITS run start, plus `currentVersions`
+ * — the cells' content versions at save time. A cell whose source changed BETWEEN
+ * run start and this save (`currentVersions` differs from its run-start
+ * `sourceUpdatedAt`) is dropped and NOT persisted (C6.2), so an edit during a run
+ * never lands a stale output in storage. `projectNotebookOverlay` then applies the
+ * byte caps and the bounded notebook overflow to the survivors.
  */
 export async function saveNotebookOutputs(
   storage: Pick<NotebookStorageAdapter, 'putOverlay' | 'deleteOverlay'>,
-  input: { notebookId: string; savedAt: number; cells: readonly CellRunOutputs[] },
+  input: {
+    notebookId: string
+    savedAt: number
+    cells: readonly CellRunOutputs[]
+    currentVersions: ReadonlyMap<string, number>
+  },
 ): Promise<void> {
-  const overlay = projectNotebookOverlay(input)
+  const fresh = input.cells.filter(
+    (cell) => input.currentVersions.get(cell.cellId) === cell.sourceUpdatedAt,
+  )
+  const overlay = projectNotebookOverlay({
+    notebookId: input.notebookId,
+    savedAt: input.savedAt,
+    cells: fresh,
+  })
   if (overlay.cells.length === 0) {
     await storage.deleteOverlay(input.notebookId)
     return

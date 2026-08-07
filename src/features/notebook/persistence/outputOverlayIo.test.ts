@@ -24,6 +24,7 @@ describe('saveNotebookOutputs', () => {
       notebookId: NB,
       savedAt: 5,
       cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [result(1), image('AAAA')] }],
+      currentVersions: new Map([['a', 1]]),
     })
     const overlay = await store.getOverlay(NB)
     expect(overlay?.cells.map((c) => c.cellId)).toEqual(['a'])
@@ -35,11 +36,13 @@ describe('saveNotebookOutputs', () => {
       notebookId: NB,
       savedAt: 1,
       cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [result(1)] }],
+      currentVersions: new Map([['a', 1]]),
     })
     await saveNotebookOutputs(store, {
       notebookId: NB,
       savedAt: 2,
       cells: [{ cellId: 'b', sourceUpdatedAt: 1, items: [result(2)] }],
+      currentVersions: new Map([['b', 1]]),
     })
     const overlay = await store.getOverlay(NB)
     expect(overlay?.cells.map((c) => c.cellId)).toEqual(['b'])
@@ -51,6 +54,7 @@ describe('saveNotebookOutputs', () => {
       notebookId: NB,
       savedAt: 1,
       cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [image('AAAA')] }],
+      currentVersions: new Map([['a', 1]]),
     })
     expect(await store.getOverlay(NB)).toBeDefined()
     // A rerun that produced only streams → overlay is cleared, not left stale.
@@ -58,8 +62,37 @@ describe('saveNotebookOutputs', () => {
       notebookId: NB,
       savedAt: 2,
       cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [stdout('logs only')] }],
+      currentVersions: new Map([['a', 1]]),
     })
     expect(await store.getOverlay(NB)).toBeUndefined()
+  })
+
+  test('drops a cell whose source changed DURING the run (edit-during-run, C6.2)', async () => {
+    // Run started at version 1, but the cell is now at version 2 → not persisted.
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 1,
+      cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [image('AAAA')] }],
+      currentVersions: new Map([['a', 2]]),
+    })
+    expect(await store.getOverlay(NB)).toBeUndefined()
+  })
+
+  test('persists only the still-fresh cells when some changed during their run', async () => {
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 1,
+      cells: [
+        { cellId: 'a', sourceUpdatedAt: 1, items: [result(1)] }, // stale (now v2)
+        { cellId: 'b', sourceUpdatedAt: 5, items: [result(2)] }, // fresh
+      ],
+      currentVersions: new Map([
+        ['a', 2],
+        ['b', 5],
+      ]),
+    })
+    const overlay = await store.getOverlay(NB)
+    expect(overlay?.cells.map((c) => c.cellId)).toEqual(['b'])
   })
 })
 
@@ -72,6 +105,10 @@ describe('restoreNotebookOutputs', () => {
         { cellId: 'a', sourceUpdatedAt: 10, items: [image('AAAA')] },
         { cellId: 'b', sourceUpdatedAt: 20, items: [result(2)] },
       ],
+      currentVersions: new Map([
+        ['a', 10],
+        ['b', 20],
+      ]),
     })
   })
 
@@ -116,6 +153,7 @@ describe('restoreNotebookOutputs', () => {
       notebookId: NB,
       savedAt: 3,
       cells: [{ cellId: 'a', sourceUpdatedAt: 30, items: [image(huge)] }],
+      currentVersions: new Map([['a', 30]]),
     })
     const restored = await restoreNotebookOutputs(store, NB, new Map([['a', 30]]))
     const items = restored.get('a')!

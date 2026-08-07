@@ -210,4 +210,51 @@ describe('isNotebookOutputOverlay (boundary validator)', () => {
     ).toBe(false)
     expect(isNotebookOutputOverlay({ notebookId: 'nb', savedAt: 1, overflow: null })).toBe(false)
   })
+
+  const overlayWith = (items: unknown[]): unknown => ({
+    notebookId: 'nb',
+    savedAt: 1,
+    overflow: null,
+    cells: [{ cellId: 'a', sourceUpdatedAt: 1, savedAt: 1, items }],
+  })
+
+  test('rejects a malformed result item (missing/!valid SerializedValue)', () => {
+    // Would otherwise crash OutputView's formatValue(item.value).
+    expect(isNotebookOutputOverlay(overlayWith([{ type: 'result' }]))).toBe(false)
+    expect(
+      isNotebookOutputOverlay(overlayWith([{ type: 'result', value: { kind: 'bogus' } }])),
+    ).toBe(false)
+    // A well-formed SerializedValue passes.
+    expect(
+      isNotebookOutputOverlay(
+        overlayWith([{ type: 'result', value: { kind: 'primitive', value: 1 } }]),
+      ),
+    ).toBe(true)
+  })
+
+  test('rejects nested malformed SerializedValue (array/object recursion)', () => {
+    expect(
+      isNotebookOutputOverlay(
+        overlayWith([{ type: 'result', value: { kind: 'array', items: [{}] } }]),
+      ),
+    ).toBe(false)
+  })
+
+  test('rejects an over-cap image / html on read (re-applied byte limits)', () => {
+    const bigImg = { type: 'image', mime: 'image/png', data: 'A'.repeat(IMAGE_MAX_BYTES + 1) }
+    const bigHtml = { type: 'html', html: 'x'.repeat(HTML_MAX_BYTES + 1) }
+    expect(isNotebookOutputOverlay(overlayWith([bigImg]))).toBe(false)
+    expect(isNotebookOutputOverlay(overlayWith([bigHtml]))).toBe(false)
+  })
+
+  test('rejects a persisted error that is not the OutputTooLarge marker', () => {
+    expect(
+      isNotebookOutputOverlay(overlayWith([{ type: 'error', name: 'TypeError', message: 'x' }])),
+    ).toBe(false)
+    expect(
+      isNotebookOutputOverlay(
+        overlayWith([{ type: 'error', name: OUTPUT_TOO_LARGE_NAME, message: 'x' }]),
+      ),
+    ).toBe(true)
+  })
 })
