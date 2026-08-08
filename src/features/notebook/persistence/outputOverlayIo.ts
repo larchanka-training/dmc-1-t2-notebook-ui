@@ -48,6 +48,15 @@ export async function saveNotebookOutputs(
     cells: readonly CellRunOutputs[]
     currentVersions: ReadonlyMap<string, number>
   },
+  options?: {
+    /**
+     * Checked after the `getOverlay` read and before any write: return `true` to
+     * ABORT (write nothing). Lets the caller cancel a terminal save that a Restart
+     * Kernel invalidated while the read was in flight — otherwise this save could
+     * resurrect the overlay that Restart's own delete just cleared (PR #128 review).
+     */
+    isObsolete?: () => boolean
+  },
 ): Promise<void> {
   const { notebookId, savedAt, currentVersions } = input
 
@@ -66,6 +75,9 @@ export async function saveNotebookOutputs(
 
   // Existing stored records that are still fresh, for cells NOT re-run this time.
   const existing = await storage.getOverlay(notebookId)
+  // A Restart (or other reset) may have run during the read — bail before writing
+  // so this obsolete save cannot undo the reset's cleanup.
+  if (options?.isObsolete?.()) return
   const storedById = new Map((existing?.cells ?? []).map((r) => [r.cellId, r]))
 
   // Merge in notebook order (currentVersions is built in cell order by the caller).

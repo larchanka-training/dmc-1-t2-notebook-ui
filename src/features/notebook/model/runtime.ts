@@ -86,23 +86,28 @@ async function persistOutputs(startedNotebookId: string): Promise<void> {
   // Fence against a mid-run notebook switch: the live `cellsAtom()` now belongs to
   // whatever notebook is loaded, so only persist when it is still the run's own.
   if (activeNotebookIdAtom() !== startedNotebookId) return
+  // Snapshot the kernel generation so a Restart during the async save (which
+  // clears + deletes the overlay) can abort this save before it writes stale
+  // output back (see saveNotebookOutputs `isObsolete`).
+  const generation = kernelGeneration
   const cells: CellRunOutputs[] = []
   const currentVersions = new Map<string, number>()
   for (const c of cellsAtom()) {
     currentVersions.set(c.id, c.updatedAt())
     const start = runStartVersions.get(c.id)
-    const items = c.output()
-    if (start !== undefined && items.length > 0) {
-      cells.push({ cellId: c.id, sourceUpdatedAt: start, items })
+    // Pass EVERY cell that ran this session — including one whose latest run
+    // produced no items — so the save clears its prior stored output (C1). A cell
+    // never run this session (no stamp) is left to the merge's stored-record path.
+    if (start !== undefined) {
+      cells.push({ cellId: c.id, sourceUpdatedAt: start, items: c.output() })
     }
   }
   try {
-    await saveNotebookOutputs(notebookStorage, {
-      notebookId: startedNotebookId,
-      savedAt: Date.now(),
-      cells,
-      currentVersions,
-    })
+    await saveNotebookOutputs(
+      notebookStorage,
+      { notebookId: startedNotebookId, savedAt: Date.now(), cells, currentVersions },
+      { isObsolete: () => generation !== kernelGeneration },
+    )
   } catch (error) {
     console.warn('notebook: failed to persist cell outputs', error)
   }

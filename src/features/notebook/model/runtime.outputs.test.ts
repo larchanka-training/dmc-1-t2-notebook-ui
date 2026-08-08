@@ -46,6 +46,22 @@ describe('runtime — output overlay persistence (Step 6 save wiring)', () => {
     expect(await overlayFor()).toBeUndefined()
   })
 
+  test('a same-source rerun that produces no output clears the prior overlay (C1)', async () => {
+    const [cell] = cellsAtom()
+    // Emits an image on the FIRST execution only (the persistent VM keeps the
+    // flag across runs), so a second run of the SAME source produces nothing.
+    updateCellCode(
+      cell.id,
+      'if (typeof globalThis.__shown === "undefined") { globalThis.__shown = 1; display({ type: "image", mime: "image/png", data: "AAAA" }) }',
+    )
+    await runCell(cell.id)
+    expect(await overlayFor()).toBeDefined()
+
+    await runCell(cell.id) // same source, no output this time → prior overlay cleared
+    expect(cell.output()).toEqual([])
+    expect(await overlayFor()).toBeUndefined()
+  })
+
   test('editing the cell source during its run drops the output (C6.2)', async () => {
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'display({ type: "image", mime: "image/png", data: "AAAA" })')

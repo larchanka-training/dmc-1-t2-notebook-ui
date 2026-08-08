@@ -136,6 +136,29 @@ describe('saveNotebookOutputs', () => {
     expect(overlay?.cells.map((c) => c.cellId)).toEqual(['a'])
   })
 
+  test('aborts the write when isObsolete() is true (Restart-during-read guard, PR #128)', async () => {
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 1,
+      cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [image('AAAA')] }],
+      currentVersions: new Map([['a', 1]]),
+    })
+    const before = await store.getOverlay(NB)
+    // An empty rerun would DELETE the overlay — but a Restart raced the read, so the
+    // save must write nothing and leave the seeded overlay intact.
+    await saveNotebookOutputs(
+      store,
+      {
+        notebookId: NB,
+        savedAt: 2,
+        cells: [{ cellId: 'a', sourceUpdatedAt: 1, items: [] }],
+        currentVersions: new Map([['a', 1]]),
+      },
+      { isObsolete: () => true },
+    )
+    expect(await store.getOverlay(NB)).toEqual(before)
+  })
+
   test('persists only the still-fresh cells when some changed during their run', async () => {
     await saveNotebookOutputs(store, {
       notebookId: NB,
