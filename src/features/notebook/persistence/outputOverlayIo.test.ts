@@ -78,6 +78,64 @@ describe('saveNotebookOutputs', () => {
     expect(await store.getOverlay(NB)).toBeUndefined()
   })
 
+  test('running one cell preserves another cell’s still-fresh stored output (PR #128)', async () => {
+    // Seed A + B.
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 1,
+      cells: [
+        { cellId: 'a', sourceUpdatedAt: 10, items: [image('AAAA')] },
+        { cellId: 'b', sourceUpdatedAt: 20, items: [result(2)] },
+      ],
+      currentVersions: new Map([
+        ['a', 10],
+        ['b', 20],
+      ]),
+    })
+    // Re-run ONLY A (B untouched but still present + fresh).
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 2,
+      cells: [{ cellId: 'a', sourceUpdatedAt: 10, items: [image('BBBB')] }],
+      currentVersions: new Map([
+        ['a', 10],
+        ['b', 20],
+      ]),
+    })
+    const overlay = await store.getOverlay(NB)
+    expect(overlay?.cells.map((c) => c.cellId)).toEqual(['a', 'b'])
+    // A replaced with its new output; B preserved.
+    expect(overlay?.cells.find((c) => c.cellId === 'a')?.items[0]).toMatchObject({ data: 'BBBB' })
+    expect(overlay?.cells.find((c) => c.cellId === 'b')?.items[0]).toMatchObject({ type: 'result' })
+  })
+
+  test('a stored cell edited since it ran is dropped even if not re-run', async () => {
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 1,
+      cells: [
+        { cellId: 'a', sourceUpdatedAt: 10, items: [image('AAAA')] },
+        { cellId: 'b', sourceUpdatedAt: 20, items: [result(2)] },
+      ],
+      currentVersions: new Map([
+        ['a', 10],
+        ['b', 20],
+      ]),
+    })
+    // Re-run A; B was edited (now v21) but not re-run → its stored output is stale.
+    await saveNotebookOutputs(store, {
+      notebookId: NB,
+      savedAt: 2,
+      cells: [{ cellId: 'a', sourceUpdatedAt: 10, items: [image('AAAA')] }],
+      currentVersions: new Map([
+        ['a', 10],
+        ['b', 21],
+      ]),
+    })
+    const overlay = await store.getOverlay(NB)
+    expect(overlay?.cells.map((c) => c.cellId)).toEqual(['a'])
+  })
+
   test('persists only the still-fresh cells when some changed during their run', async () => {
     await saveNotebookOutputs(store, {
       notebookId: NB,

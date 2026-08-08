@@ -6,7 +6,12 @@
 // so this logic stays a pair of unit-testable async functions.
 
 import type { OutputItem } from '../runtime/types'
-import { projectNotebookOverlay, type PersistedOutputItem } from './outputOverlay'
+import {
+  assembleOverlay,
+  projectCellOutputs,
+  type PersistedCellOutput,
+  type PersistedOutputItem,
+} from './outputOverlay'
 import type { NotebookStorageAdapter } from './storageAdapter'
 
 /** One cell's outputs from a finished run, version-stamped at run START (C6.2). */
@@ -18,22 +23,25 @@ export interface CellRunOutputs {
 }
 
 /**
- * Persist the overlay for a notebook from the current set of run outputs,
- * replacing the prior record wholesale (per-run replace, C1). When nothing is
- * persistable — every cell projected to no rich output — the record is DELETED
- * rather than left stale, so a previous run's image never outlives a rerun that
- * produced none.
+ * Persist the notebook overlay after a run via a bounded read-modify-write, so a
+ * run of some cells never destroys the still-valid persisted outputs of the
+ * others (PR #128 review). For each cell CURRENTLY in the notebook
+ * (`currentVersions`, in notebook order) the merged record is:
  *
- * The caller passes ALL cells that carry run output (not just the one that just
- * ran), each with the version captured at ITS run start, plus `currentVersions`
- * — the cells' content versions at save time. A cell whose source changed BETWEEN
- * run start and this save (`currentVersions` differs from its run-start
- * `sourceUpdatedAt`) is dropped and NOT persisted (C6.2), so an edit during a run
- * never lands a stale output in storage. `projectNotebookOverlay` then applies the
- * byte caps and the bounded notebook overflow to the survivors.
+ *   - the freshly-projected run output, if this cell ran AND its content version
+ *     is unchanged since run start (`currentVersions` === run-start
+ *     `sourceUpdatedAt`) — an edit during the run drops it (C6.2); else
+ *   - the EXISTING stored record, if it is still fresh (stored `sourceUpdatedAt`
+ *     === the cell's current version) — this preserves cells that were not re-run
+ *     (e.g. restored from a prior session or run earlier); else
+ *   - nothing (stale or removed cells drop).
+ *
+ * `assembleOverlay` then re-applies the notebook-wide byte cap. When the merge is
+ * empty the record is DELETED rather than left stale. Cells absent from
+ * `currentVersions` (no longer in the notebook) are never carried over.
  */
 export async function saveNotebookOutputs(
-  storage: Pick<NotebookStorageAdapter, 'putOverlay' | 'deleteOverlay'>,
+  storage: Pick<NotebookStorageAdapter, 'getOverlay' | 'putOverlay' | 'deleteOverlay'>,
   input: {
     notebookId: string
     savedAt: number
@@ -41,16 +49,41 @@ export async function saveNotebookOutputs(
     currentVersions: ReadonlyMap<string, number>
   },
 ): Promise<void> {
-  const fresh = input.cells.filter(
-    (cell) => input.currentVersions.get(cell.cellId) === cell.sourceUpdatedAt,
-  )
-  const overlay = projectNotebookOverlay({
-    notebookId: input.notebookId,
-    savedAt: input.savedAt,
-    cells: fresh,
-  })
+  const { notebookId, savedAt, currentVersions } = input
+
+  // Cells that ran this time — their fresh result is authoritative, so they never
+  // fall back to a stored entry (a rerun that produced nothing must CLEAR the
+  // cell's prior output, C1; a stale rerun is dropped below).
+  const ranThisTime = new Set(input.cells.map((c) => c.cellId))
+
+  // Freshly-projected run records, keyed by cell id (stale run outputs dropped).
+  const runById = new Map<string, PersistedCellOutput>()
+  for (const cell of input.cells) {
+    if (currentVersions.get(cell.cellId) !== cell.sourceUpdatedAt) continue // edited during run
+    const projected = projectCellOutputs({ ...cell, savedAt })
+    if (projected.items.length > 0) runById.set(cell.cellId, projected)
+  }
+
+  // Existing stored records that are still fresh, for cells NOT re-run this time.
+  const existing = await storage.getOverlay(notebookId)
+  const storedById = new Map((existing?.cells ?? []).map((r) => [r.cellId, r]))
+
+  // Merge in notebook order (currentVersions is built in cell order by the caller).
+  const merged: PersistedCellOutput[] = []
+  for (const [cellId, version] of currentVersions) {
+    const run = runById.get(cellId)
+    if (run) {
+      merged.push(run)
+      continue
+    }
+    if (ranThisTime.has(cellId)) continue // ran but produced nothing persistable → cleared
+    const stored = storedById.get(cellId)
+    if (stored && stored.sourceUpdatedAt === version) merged.push(stored)
+  }
+
+  const overlay = assembleOverlay(notebookId, savedAt, merged)
   if (overlay.cells.length === 0) {
-    await storage.deleteOverlay(input.notebookId)
+    await storage.deleteOverlay(notebookId)
     return
   }
   await storage.putOverlay(overlay)

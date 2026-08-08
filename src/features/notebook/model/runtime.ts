@@ -74,12 +74,18 @@ export function isCellQueuedOrRunning(id: string): boolean {
 
 /**
  * Persist the notebook's rich cell outputs to the local overlay after a run
- * settles (Step 6 C1/C6.2). Rebuilds the whole overlay from the CURRENT cell
- * outputs — each stamped with the version captured at ITS run start — so
- * `saveNotebookOutputs` drops any cell edited since it ran and applies the byte
- * caps. Best-effort: a failed save must never break execution.
+ * settles (Step 6 C1/C6.2). Bound to `startedNotebookId` — the notebook loaded
+ * when the run began: if the slot has since switched to another notebook, the
+ * save is skipped entirely, so completing a run in notebook A can never write to
+ * or delete notebook B's overlay (PR #128 review). `saveNotebookOutputs` does a
+ * read-modify-write that keeps other cells' still-fresh outputs, drops any cell
+ * edited since it ran, and applies the byte caps. Best-effort: a failed save must
+ * never break execution.
  */
-async function persistOutputs(): Promise<void> {
+async function persistOutputs(startedNotebookId: string): Promise<void> {
+  // Fence against a mid-run notebook switch: the live `cellsAtom()` now belongs to
+  // whatever notebook is loaded, so only persist when it is still the run's own.
+  if (activeNotebookIdAtom() !== startedNotebookId) return
   const cells: CellRunOutputs[] = []
   const currentVersions = new Map<string, number>()
   for (const c of cellsAtom()) {
@@ -92,7 +98,7 @@ async function persistOutputs(): Promise<void> {
   }
   try {
     await saveNotebookOutputs(notebookStorage, {
-      notebookId: activeNotebookIdAtom(),
+      notebookId: startedNotebookId,
       savedAt: Date.now(),
       cells,
       currentVersions,
@@ -110,6 +116,7 @@ export const runCell = action(async (id: string) => {
   if (runtimeStatusAtom() === 'busy') return
   const cell = cellsAtom().find((c) => c.id === id)
   if (!cell) return
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     // `wrap` re-binds the Reatom context across the await boundary. Without
@@ -117,7 +124,7 @@ export const runCell = action(async (id: string) => {
     // with no active stack and throws `missing async stack` under the
     // production `clearStack()` — leaving the toolbar stuck at 'busy'.
     await wrap(executeCell(cell))
-    await wrap(persistOutputs())
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -261,10 +268,11 @@ export const runAll = action(async () => {
   const ids = cellsAtom()
     .filter((c) => c.kind === 'code')
     .map((c) => c.id)
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     await wrap(processQueue(ids))
-    await wrap(persistOutputs())
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -284,10 +292,11 @@ export const resumeQueue = action(async () => {
   })
   skippedCellsAtom.set([])
   if (stillSkipped.length === 0) return
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     await wrap(processQueue(stillSkipped))
-    await wrap(persistOutputs())
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }

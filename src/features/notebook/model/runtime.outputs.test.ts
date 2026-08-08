@@ -46,6 +46,48 @@ describe('runtime — output overlay persistence (Step 6 save wiring)', () => {
     expect(await overlayFor()).toBeUndefined()
   })
 
+  test('editing the cell source during its run drops the output (C6.2)', async () => {
+    const [cell] = cellsAtom()
+    updateCellCode(cell.id, 'display({ type: "image", mime: "image/png", data: "AAAA" })')
+    const p = runCell(cell.id)
+    // Bump the content version mid-run (as a source edit would): the run-start
+    // stamp no longer matches, so the produced output is not persisted.
+    cell.updatedAt.set(cell.updatedAt() + 1)
+    await p
+    expect(await overlayFor()).toBeUndefined()
+  })
+
+  test('a notebook switch during a run leaves the other notebook overlay intact (fence)', async () => {
+    const original = activeNotebookIdAtom()
+    const other = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+    await notebookStorage.putOverlay({
+      notebookId: other,
+      savedAt: 1,
+      overflow: null,
+      cells: [
+        {
+          cellId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          sourceUpdatedAt: 1,
+          savedAt: 1,
+          items: [{ type: 'image', mime: 'image/png', data: 'ZZZZ' }],
+        },
+      ],
+    })
+    try {
+      const [cell] = cellsAtom()
+      updateCellCode(cell.id, 'display({ type: "image", mime: "image/png", data: "AAAA" })')
+      const p = runCell(cell.id)
+      activeNotebookIdAtom.set(other) // the slot switches while the run is in flight
+      await p
+      // Completing the run in the original notebook must NOT touch `other`.
+      const otherOverlay = await notebookStorage.getOverlay(other)
+      expect(otherOverlay?.cells[0]?.items[0]).toMatchObject({ data: 'ZZZZ' })
+    } finally {
+      activeNotebookIdAtom.set(original)
+      await notebookStorage.deleteOverlay(other)
+    }
+  })
+
   test('restartKernel clears the persisted overlay', async () => {
     const [cell] = cellsAtom()
     updateCellCode(cell.id, 'display({ type: "image", mime: "image/png", data: "AAAA" })')
