@@ -214,7 +214,6 @@ export function projectNotebookOverlay(input: {
   cells: ReadonlyArray<{ cellId: string; sourceUpdatedAt: number; items: readonly OutputItem[] }>
 }): NotebookOutputOverlay {
   const { notebookId, savedAt } = input
-
   const projected = input.cells
     .map((cell) =>
       projectCellOutputs({
@@ -225,28 +224,45 @@ export function projectNotebookOverlay(input: {
       }),
     )
     .filter((cell) => cell.items.length > 0)
-  const sizes = projected.map(jsonBytes)
+  return assembleOverlay(notebookId, savedAt, projected)
+}
 
-  // Fast path: all non-empty cells fit with no overflow marker.
+/**
+ * Assemble a notebook overlay from already-projected, non-empty cell records
+ * (each already within {@link CELL_MAX_BYTES}), enforcing the notebook-wide cap on
+ * the ACTUAL `JSON.stringify(overlay)` size. Records are kept in the given order;
+ * once one would push the serialized overlay past {@link NOTEBOOK_MAX_BYTES} it and
+ * all later records are omitted and counted in a single {@link OverlayOverflow}
+ * marker (oldest-first retained, C6.4). Shared by the whole-notebook projection
+ * and the incremental save merge, so both honour the cap identically.
+ */
+export function assembleOverlay(
+  notebookId: string,
+  savedAt: number,
+  records: readonly PersistedCellOutput[],
+): NotebookOutputOverlay {
+  const sizes = records.map(jsonBytes)
+
+  // Fast path: everything fits with no overflow marker.
   if (overlayBytes(notebookId, savedAt, sizes, null) <= NOTEBOOK_MAX_BYTES) {
-    return { notebookId, savedAt, cells: projected, overflow: null }
+    return { notebookId, savedAt, cells: [...records], overflow: null }
   }
 
-  // Overflow: reserve the marker (use the max possible dropped count so the
-  // envelope estimate is an upper bound on the real one). The envelope skeleton is
-  // fixed across the loop, so hoist it and track a running cell-size sum → O(n).
-  const reserve: OverlayOverflow = { droppedCellCount: projected.length }
+  // Overflow: reserve the marker (max possible dropped count → upper bound). The
+  // envelope skeleton is fixed across the loop, so hoist it and track a running
+  // cell-size sum → O(n).
+  const reserve: OverlayOverflow = { droppedCellCount: records.length }
   const skeleton = jsonBytes({ notebookId, savedAt, cells: [], overflow: reserve })
   const kept: PersistedCellOutput[] = []
   let keptSum = 0
-  for (let i = 0; i < projected.length; i++) {
+  for (let i = 0; i < records.length; i++) {
     const cellsArrayBytes = arrayBytesOf(keptSum + sizes[i]!, kept.length + 1)
     if (skeleton - 2 + cellsArrayBytes > NOTEBOOK_MAX_BYTES) break
-    kept.push(projected[i]!)
+    kept.push(records[i]!)
     keptSum += sizes[i]!
   }
 
-  const droppedCellCount = projected.length - kept.length
+  const droppedCellCount = records.length - kept.length
   return {
     notebookId,
     savedAt,

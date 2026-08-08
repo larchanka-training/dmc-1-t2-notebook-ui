@@ -11,7 +11,9 @@ import { requestInterrupt, restartWorker, runInWorker } from '../runtime/workerH
 import { clampTimeoutMs } from '../runtime/limits'
 import type { OutputItem, RuntimeStatus } from '../runtime/types'
 import type { Cell, CellStatus } from '../domain/cell'
-import { cellsAtom } from './notebook'
+import { notebookStorage } from '../persistence/activeStorage'
+import { saveNotebookOutputs, type CellRunOutputs } from '../persistence/outputOverlayIo'
+import { activeNotebookIdAtom, cellsAtom } from './notebook'
 import { enterCommand } from './cellMode'
 import { timeoutMsAtom } from './notebookSettings'
 
@@ -50,6 +52,13 @@ let currentCellId: string | null = null
  * its kernel is gone and refuse to write stale state over the fresh reset.
  */
 let kernelGeneration = 0
+/**
+ * The cell content version (`cell.updatedAt()`) captured at the START of each
+ * cell's run, keyed by cell id (Step 6 C6.2). Used when persisting outputs so a
+ * source edit made during/after the run is detected (`sourceUpdatedAt` !==
+ * current version → that cell's output is not saved). Cleared by restartKernel.
+ */
+const runStartVersions = new Map<string, number>()
 
 /**
  * True while a cell is part of the current run — either executing right now
@@ -63,6 +72,47 @@ export function isCellQueuedOrRunning(id: string): boolean {
   return currentCellId === id || queueAtom().includes(id)
 }
 
+/**
+ * Persist the notebook's rich cell outputs to the local overlay after a run
+ * settles (Step 6 C1/C6.2). Bound to `startedNotebookId` — the notebook loaded
+ * when the run began: if the slot has since switched to another notebook, the
+ * save is skipped entirely, so completing a run in notebook A can never write to
+ * or delete notebook B's overlay (PR #128 review). `saveNotebookOutputs` does a
+ * read-modify-write that keeps other cells' still-fresh outputs, drops any cell
+ * edited since it ran, and applies the byte caps. Best-effort: a failed save must
+ * never break execution.
+ */
+async function persistOutputs(startedNotebookId: string): Promise<void> {
+  // Fence against a mid-run notebook switch: the live `cellsAtom()` now belongs to
+  // whatever notebook is loaded, so only persist when it is still the run's own.
+  if (activeNotebookIdAtom() !== startedNotebookId) return
+  // Snapshot the kernel generation so a Restart during the async save (which
+  // clears + deletes the overlay) can abort this save before it writes stale
+  // output back (see saveNotebookOutputs `isObsolete`).
+  const generation = kernelGeneration
+  const cells: CellRunOutputs[] = []
+  const currentVersions = new Map<string, number>()
+  for (const c of cellsAtom()) {
+    currentVersions.set(c.id, c.updatedAt())
+    const start = runStartVersions.get(c.id)
+    // Pass EVERY cell that ran this session — including one whose latest run
+    // produced no items — so the save clears its prior stored output (C1). A cell
+    // never run this session (no stamp) is left to the merge's stored-record path.
+    if (start !== undefined) {
+      cells.push({ cellId: c.id, sourceUpdatedAt: start, items: c.output() })
+    }
+  }
+  try {
+    await saveNotebookOutputs(
+      notebookStorage,
+      { notebookId: startedNotebookId, savedAt: Date.now(), cells, currentVersions },
+      { isObsolete: () => generation !== kernelGeneration },
+    )
+  } catch (error) {
+    console.warn('notebook: failed to persist cell outputs', error)
+  }
+}
+
 // ─── Run a single cell ───────────────────────────────────────────────────────
 
 export const runCell = action(async (id: string) => {
@@ -71,6 +121,7 @@ export const runCell = action(async (id: string) => {
   if (runtimeStatusAtom() === 'busy') return
   const cell = cellsAtom().find((c) => c.id === id)
   if (!cell) return
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     // `wrap` re-binds the Reatom context across the await boundary. Without
@@ -78,6 +129,7 @@ export const runCell = action(async (id: string) => {
     // with no active stack and throws `missing async stack` under the
     // production `clearStack()` — leaving the toolbar stuck at 'busy'.
     await wrap(executeCell(cell))
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -92,6 +144,9 @@ export const runCell = action(async (id: string) => {
 async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   clearStopRequest(cell.id)
   currentCellId = cell.id
+  // Stamp the content version at run START (C6.2), so an edit while the run is in
+  // flight makes this output stale and it is not persisted.
+  runStartVersions.set(cell.id, cell.updatedAt())
   cell.status.set('running')
   cell.output.set([])
   const counter = execCounterAtom() + 1
@@ -218,9 +273,11 @@ export const runAll = action(async () => {
   const ids = cellsAtom()
     .filter((c) => c.kind === 'code')
     .map((c) => c.id)
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     await wrap(processQueue(ids))
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -240,9 +297,11 @@ export const resumeQueue = action(async () => {
   })
   skippedCellsAtom.set([])
   if (stillSkipped.length === 0) return
+  const startedNotebookId = activeNotebookIdAtom()
   runtimeStatusAtom.set('busy')
   try {
     await wrap(processQueue(stillSkipped))
+    await wrap(persistOutputs(startedNotebookId))
   } finally {
     runtimeStatusAtom.set('idle')
   }
@@ -346,11 +405,15 @@ export const restartKernel = action(() => {
   stopAllRequested = false
   stopRequested.clear()
   currentCellId = null
+  runStartVersions.clear()
   for (const cell of cellsAtom()) {
     cell.status.set('idle')
     cell.executionCount.set(null)
     cell.output.set([])
   }
+  // Restart wipes all outputs → drop the persisted overlay too (best-effort, so
+  // a failed delete never blocks the reset).
+  void notebookStorage.deleteOverlay(activeNotebookIdAtom()).catch(() => {})
 }, 'runtime.restartKernel')
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
