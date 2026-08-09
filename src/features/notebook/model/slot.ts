@@ -19,6 +19,7 @@ import type { NotebookJSON } from '../persistence/schema'
 import {
   activeNotebookIdAtom,
   bootSeedSuppressedAtom,
+  hydratePersistedOutputs,
   LOCAL_NOTEBOOK_ID,
   loadNotebook,
   restoreNotebook,
@@ -421,7 +422,17 @@ async function openResolvedNotebook(
   // bindings so we don't re-adopt the previous owner's / a just-deleted notebook.
   if (expectedGeneration !== slotGeneration) return false
   stopBindings()
-  await wrap(rearmOrDegrade(() => restoreNotebook(stored)))
+  // Adopt the document AND hydrate its persisted outputs before re-arming, so a
+  // sidebar open / stale-while-revalidate reload restores rich outputs the same
+  // way boot does (Step 6 C6.2). `restoreNotebook` stays synchronous; the async
+  // overlay read runs inside the async flip so `rearmOrDegrade`'s degrade guard
+  // still covers it.
+  await wrap(
+    rearmOrDegrade(async () => {
+      restoreNotebook(stored)
+      await wrap(hydratePersistedOutputs(stored))
+    }),
+  )
   return true
 }
 

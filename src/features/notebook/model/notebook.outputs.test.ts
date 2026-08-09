@@ -61,4 +61,16 @@ describe('applyPersistedOutputs — restore-on-load (Step 6 C6.2)', () => {
     await applyPersistedOutputs('ffffffff-ffff-4fff-8fff-ffffffffffff', new Map([[CELL_ID, 5]]))
     expect(outputFor(CELL_ID)).toEqual([])
   })
+
+  test('same-id ABA: does not attach a v5 output to a cell now at v6', async () => {
+    // The overlay + caller snapshot are validated for version 5, but the LIVE
+    // cell was replaced with version 6 while the read was in flight (same id).
+    // The notebook-id fence alone would pass; the per-cell version guard must
+    // still drop the stale output (C6.2). Passing the pre-read v5 snapshot to a
+    // slot already holding the v6 cell reproduces that interleaving deterministically.
+    await notebookStorage.putOverlay(overlay(5))
+    restoreNotebook(notebook(6)) // slot now holds the v6 cell, same NB_ID
+    await applyPersistedOutputs(NB_ID, new Map([[CELL_ID, 5]]))
+    expect(outputFor(CELL_ID)).toEqual([])
+  })
 })

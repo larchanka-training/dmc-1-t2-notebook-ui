@@ -302,7 +302,13 @@ export const applyPersistedOutputs = action(
       if (activeNotebookIdAtom() !== notebookId) return
       for (const cell of cellsAtom()) {
         const items = restored.get(cell.id)
-        if (items) cell.output.set(items)
+        // Same-id ABA guard (C6.2): the active id can stay `notebookId` yet the
+        // cells be replaced with a NEWER projection while `getOverlay` was in
+        // flight (away→back to the same id, remote baseline, reload). The overlay
+        // was validated against the pre-read `versions` snapshot, so re-check the
+        // LIVE cell version here — never attach a version-5 output to a now
+        // version-6 cell.
+        if (items && cell.updatedAt() === versions.get(cell.id)) cell.output.set(items)
       }
     } catch (error) {
       console.warn('notebook: failed to restore cell outputs', error)
@@ -310,6 +316,18 @@ export const applyPersistedOutputs = action(
   },
   'notebook.applyPersistedOutputs',
 )
+
+/**
+ * Hydrate persisted outputs for a document that was just adopted via
+ * `restoreNotebook`. Builds the version snapshot from the stored cells and
+ * defers to `applyPersistedOutputs`. Shared by every path that replaces the
+ * live cells with a stored document — boot (`loadNotebook`), sidebar open /
+ * stale-while-revalidate reload (`openResolvedNotebook`), and remote-baseline /
+ * cross-tab reload (`reloadFromStorage`) — so rich outputs survive save →
+ * reopen through ALL of them, not just boot.
+ */
+export const hydratePersistedOutputs = (stored: NotebookJSON): Promise<void> =>
+  applyPersistedOutputs(stored.id, new Map(stored.cells.map((c) => [c.id, c.updatedAt])))
 
 /**
  * Load the local notebook from the active storage backend on startup. If a
@@ -378,9 +396,7 @@ export const loadNotebook = action(async (pickNewest = false) => {
       restoreNotebook(stored)
       restored = true
       // Re-hydrate this notebook's persisted cell outputs (best-effort).
-      await wrap(
-        applyPersistedOutputs(stored.id, new Map(stored.cells.map((c) => [c.id, c.updatedAt]))),
-      )
+      await wrap(hydratePersistedOutputs(stored))
     } else if (await wrap(isSeedTombstoned())) {
       // The user deleted their welcome/feature-demo seed (TARDIS-167 №23 contract
       // A) AND has no other local notebook (step 3 above found none, so the active

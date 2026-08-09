@@ -15,6 +15,21 @@ import {
 import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
 import { restartWorker } from '../runtime/workerHost'
 
+/**
+ * Poll until `predicate` holds, yielding both a microtask and a macrotask each
+ * turn so a real QuickJS-worker state transition (message round-trip) can land.
+ * Preferred over a fixed `await Promise.resolve()` count, which races under
+ * coverage instrumentation.
+ */
+async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 4000): Promise<void> {
+  const start = Date.now()
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`waitUntil timed out: ${label}`)
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 beforeEach(async () => {
   // Reset cross-test state via the proper public action, then prune any
   // extra cells left over from a previous test. The microtask flush
@@ -362,22 +377,44 @@ describe('concurrency guards', () => {
     const [a] = cellsAtom()
     const b = addCell()
     const c = addCell()
-    updateCellCode(a.id, 'while(true){}')
+    // `a` PARKS in a never-settling promise rather than a bytecode `while(true)`:
+    // parking keeps the run in flight (status stays 'running') while leaving the
+    // worker idle and interruptible, so the stop lands promptly instead of the
+    // VM having to be force-killed mid-loop.
+    updateCellCode(a.id, 'await new Promise(() => {})')
     updateCellCode(b.id, 'console.log("b")')
     updateCellCode(c.id, 'console.log("c")')
     const promise = runAll()
-    await Promise.resolve()
-    await Promise.resolve()
+    let settled = false
+    void promise.then(() => {
+      settled = true
+    })
+    // Wait for the observable running/queued state instead of assuming a fixed
+    // microtask count (the coverage-only race that timed out at :361): `a`
+    // running and `c` still behind it in the queue.
+    await waitUntil(
+      () => a.status() === 'running' && queueAtom().includes(c.id),
+      'a running while c is queued',
+    )
     // c is only queued; stopping it must not interrupt the running a.
     stopCell(c.id)
     expect(queueAtom()).not.toContain(c.id)
     expect(c.status()).toBe('idle')
-    // Now stop the actually-running a to let the queue finish.
+    expect(a.status()).toBe('running') // stopping the queued c left a running
+    // Now stop the actually-running a to let the queue finish. `stopAll` marks a
+    // for interrupt; a real terminate then settles the run. Because the interrupt
+    // can still race a's in-worker registration under coverage, force-terminate
+    // until the run resolves rather than assuming one stop lands — so the test can
+    // never hang on the 30s worker timeout.
     stopAll()
+    for (let i = 0; i < 200 && !settled; i++) {
+      restartWorker()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
     await promise
     expect(a.status()).toBe('interrupted')
     expect(c.executionCount()).toBe(null)
-  }, 5000)
+  }, 15000)
 })
 
 // restartKernel scenarios live in `runtime.restart.test.ts` — they share

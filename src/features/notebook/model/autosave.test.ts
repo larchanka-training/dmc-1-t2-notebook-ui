@@ -55,6 +55,11 @@ describe('notebook autosave', () => {
     lastSavedAtAtom.set(null)
     localSaveCommittedAtom.set(0)
     storageCompatibilityAtom.set('ok')
+    // `reloadFromStorage` now hydrates the output overlay (Step 6 C6.2). Under
+    // fake timers a real fake-indexeddb `getOverlay` never resolves (its
+    // transaction callback is a real macrotask), so stub it to the no-overlay
+    // default — these tests assert baseline/revision semantics, not outputs.
+    vi.spyOn(notebookStorage, 'getOverlay').mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -402,6 +407,11 @@ describe('drainAutosave (slot-switch flush seam)', () => {
     lastSavedAtAtom.set(null)
     localSaveCommittedAtom.set(0)
     storageCompatibilityAtom.set('ok')
+    // `reloadFromStorage` now hydrates the output overlay (Step 6 C6.2). Under
+    // fake timers a real fake-indexeddb `getOverlay` never resolves (its
+    // transaction callback is a real macrotask), so stub it to the no-overlay
+    // default — these tests assert baseline/revision semantics, not outputs.
+    vi.spyOn(notebookStorage, 'getOverlay').mockResolvedValue(undefined)
   })
 
   afterEach(() => {

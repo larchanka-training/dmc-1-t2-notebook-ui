@@ -19,6 +19,7 @@ import { degradeSlotToFloor, openNotebookInSlot, startSlot, stopSlot } from './s
 
 const SERVER_ID = '99999999-9999-4999-8999-999999999999'
 const CELL = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const IMAGE = { type: 'image', mime: 'image/png', data: 'AAAA' } as const
 
 function doc(id: string, title: string): NotebookJSON {
   return {
@@ -74,5 +75,25 @@ describe('slot lifecycle (integration, real bindings + fake-indexeddb)', () => {
     // The editor content is consistent with the winning id.
     const expectedContent = activeId === SERVER_ID ? 'server-content' : '# Welcome to JS Notebook'
     expect(cellsAtom()[0].code()).toBe(expectedContent)
+  })
+
+  test('reopening a notebook through the slot restores its persisted outputs (C6.2)', async () => {
+    // The sidebar/open path adopts a stored document via `openResolvedNotebook`,
+    // NOT `loadNotebook`; before the fix it never hydrated the overlay, so a
+    // switch-away → reopen showed empty output. Store a doc + a version-matched
+    // overlay, open it through the real slot flow, and assert the image is back.
+    await notebookStorage.put(doc(SERVER_ID, 'Backend'))
+    await notebookStorage.putOverlay({
+      notebookId: SERVER_ID,
+      savedAt: 1,
+      overflow: null,
+      cells: [{ cellId: CELL, sourceUpdatedAt: 1, savedAt: 1, items: [IMAGE] }],
+    })
+    startSlot()
+
+    const outcome = await openNotebookInSlot(SERVER_ID)
+    expect(outcome).toBe('opened')
+    const cell = cellsAtom().find((c) => c.id === CELL)
+    expect(cell?.output()).toContainEqual(IMAGE)
   })
 })
