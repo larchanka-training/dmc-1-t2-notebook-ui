@@ -77,7 +77,9 @@ describe('NotebookExportMenu', () => {
     expect(capturedBlob!.type).toMatch(/^application\/json/)
     expect(capturedFilename).toBe('Sample-Doc.json')
     const parsed = JSON.parse(await capturedBlob!.text())
-    expect(parsed.title).toBe('Sample Doc')
+    // JSON export is the versioned bundle (§6 C6.1), so the notebook is nested.
+    expect(parsed.exportVersion).toBe(1)
+    expect(parsed.notebook.title).toBe('Sample Doc')
   })
 
   test('Markdown item produces a text/markdown Blob starting with the title H1', async () => {

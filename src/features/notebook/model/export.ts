@@ -19,6 +19,7 @@
 
 import { action } from '@reatom/core'
 import { toJSON, toMarkdown } from '../persistence/serialize'
+import { toExportBundle } from '../persistence/exportBundle'
 import type { Cell } from '../domain/cell'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -62,15 +63,31 @@ function exportSnapshot(): NotebookJSON {
 
 function buildExport(format: ExportFormat): FormatSpec {
   const snapshot = exportSnapshot()
+  // Project the live cell outputs ONCE through the same caps as the local
+  // overlay, so JSON and Markdown export an identical, bounded output set.
+  // `sourceUpdatedAt` is each cell's current version and `savedAt` reuses the
+  // deterministic export `updatedAt` (no wall-clock, so exports are stable).
+  const bundle = toExportBundle({
+    notebook: snapshot,
+    savedAt: snapshot.updatedAt,
+    cells: cellsAtom().map((cell) => ({
+      cellId: cell.id,
+      sourceUpdatedAt: cell.updatedAt(),
+      items: cell.output(),
+    })),
+  })
   if (format === 'json') {
+    // Emit the versioned bundle — NOT a bare NotebookJSON. Rich outputs must stay
+    // out of the wire contract (§6 C6.1).
     return {
-      body: JSON.stringify(snapshot, null, 2),
+      body: JSON.stringify(bundle, null, 2),
       mime: 'application/json',
       ext: 'json',
     }
   }
+  const outputsByCellId = new Map(bundle.outputs.map((cell) => [cell.cellId, cell.items]))
   return {
-    body: toMarkdown(snapshot),
+    body: toMarkdown(snapshot, outputsByCellId),
     mime: 'text/markdown',
     ext: 'md',
   }
