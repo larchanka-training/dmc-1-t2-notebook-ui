@@ -80,6 +80,11 @@ beforeEach(() => {
   h.drainAutosave.mockResolvedValue(undefined)
   h.pullServerNotebook.mockResolvedValue('accepted')
   getSpy = vi.spyOn(notebookStorage, 'get')
+  // `openResolvedNotebook` now hydrates the output overlay after adopting a doc
+  // (Step 6 C6.2). Stub `getOverlay` to the no-overlay default so the fake-timer
+  // tests here (which assert lock/generation semantics, not outputs) don't hang
+  // on a real fake-indexeddb transaction that never resolves under fake timers.
+  vi.spyOn(notebookStorage, 'getOverlay').mockResolvedValue(undefined)
   // open-into-slot always checks the server version in the background; default
   // the fetch to a benign server doc so tests that don't care about the network
   // don't hang on an unmocked GET.

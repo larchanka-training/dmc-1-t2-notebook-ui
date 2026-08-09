@@ -19,6 +19,7 @@ import { NewerFormatError } from '../persistence/migrations'
 import { openCrossTabChannel } from '../persistence/crosstab'
 import {
   activeNotebookIdAtom,
+  hydratePersistedOutputs,
   notebookBaseUpdatedAtAtom,
   notebookSnapshot,
   restoreNotebook,
@@ -169,6 +170,11 @@ export async function reloadFromStorage(): Promise<boolean> {
     const stored = await wrap(notebookStorage.get(activeNotebookIdAtom()))
     if (!stored) return false
     restoreNotebook(stored)
+    // Re-hydrate persisted outputs on a remote-baseline / cross-tab reload too,
+    // so switching-away edits that land through this path still show outputs
+    // (Step 6 C6.2). Revision-neutral, so it never re-dirties the just-adopted
+    // baseline. Best-effort inside; awaited so the read settles before we report.
+    await wrap(hydratePersistedOutputs(stored))
     acceptStoredBaseline(stored.updatedAt, notebookRevisionAtom())
     lastSavedAtAtom.set(Date.now())
     saveStatusAtom.set('saved')

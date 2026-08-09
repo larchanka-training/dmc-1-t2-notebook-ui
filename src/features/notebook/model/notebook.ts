@@ -1,6 +1,7 @@
 import { action, atom, wrap } from '@reatom/core'
 import { notebookStorage } from '../persistence/activeStorage'
 import { NewerFormatError } from '../persistence/migrations'
+import { restoreNotebookOutputs } from '../persistence/outputOverlayIo'
 import { fromJSON, toJSON } from '../persistence/serialize'
 import type { NotebookJSON } from '../persistence/schema'
 import { reatomCell, type Cell, type CellKind } from '../domain/cell'
@@ -284,6 +285,51 @@ export const restoreNotebook = action((stored: NotebookJSON) => {
 }, 'notebook.restore')
 
 /**
+ * Hydrate persisted rich outputs (Step 6 restore-on-load, C6.2) from the LOCAL
+ * overlay onto the currently-loaded cells. An explicit awaited step in the boot
+ * load — kept OUT of the synchronous `restoreNotebook` so a low-level cell-set
+ * never triggers async I/O. `restoreNotebookOutputs` drops any output whose cell
+ * was edited since it ran; setting `cell.output` does not bump the content
+ * revision, so restored outputs never trigger autosave / a remote push.
+ */
+export const applyPersistedOutputs = action(
+  async (notebookId: string, versions: ReadonlyMap<string, number>): Promise<void> => {
+    try {
+      const restored = await wrap(restoreNotebookOutputs(notebookStorage, notebookId, versions))
+      if (restored.size === 0) return
+      // The slot may have switched while the overlay read was in flight — only
+      // apply when the current cells still belong to the restored notebook.
+      if (activeNotebookIdAtom() !== notebookId) return
+      for (const cell of cellsAtom()) {
+        const items = restored.get(cell.id)
+        // Same-id ABA guard (C6.2): the active id can stay `notebookId` yet the
+        // cells be replaced with a NEWER projection while `getOverlay` was in
+        // flight (away→back to the same id, remote baseline, reload). The overlay
+        // was validated against the pre-read `versions` snapshot, so re-check the
+        // LIVE cell version here — never attach a version-5 output to a now
+        // version-6 cell.
+        if (items && cell.updatedAt() === versions.get(cell.id)) cell.output.set(items)
+      }
+    } catch (error) {
+      console.warn('notebook: failed to restore cell outputs', error)
+    }
+  },
+  'notebook.applyPersistedOutputs',
+)
+
+/**
+ * Hydrate persisted outputs for a document that was just adopted via
+ * `restoreNotebook`. Builds the version snapshot from the stored cells and
+ * defers to `applyPersistedOutputs`. Shared by every path that replaces the
+ * live cells with a stored document — boot (`loadNotebook`), sidebar open /
+ * stale-while-revalidate reload (`openResolvedNotebook`), and remote-baseline /
+ * cross-tab reload (`reloadFromStorage`) — so rich outputs survive save →
+ * reopen through ALL of them, not just boot.
+ */
+export const hydratePersistedOutputs = (stored: NotebookJSON): Promise<void> =>
+  applyPersistedOutputs(stored.id, new Map(stored.cells.map((c) => [c.id, c.updatedAt])))
+
+/**
  * Load the local notebook from the active storage backend on startup. If a
  * notebook is stored, its cells and metadata replace the in-memory seed;
  * otherwise the seed is persisted as the initial "Welcome" notebook so a
@@ -349,6 +395,8 @@ export const loadNotebook = action(async (pickNewest = false) => {
     if (stored) {
       restoreNotebook(stored)
       restored = true
+      // Re-hydrate this notebook's persisted cell outputs (best-effort).
+      await wrap(hydratePersistedOutputs(stored))
     } else if (await wrap(isSeedTombstoned())) {
       // The user deleted their welcome/feature-demo seed (TARDIS-167 №23 contract
       // A) AND has no other local notebook (step 3 above found none, so the active

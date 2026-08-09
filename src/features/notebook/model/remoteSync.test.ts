@@ -113,6 +113,10 @@ beforeEach(() => {
   putSyncStateSpy = vi.spyOn(notebookStorage, 'putSyncState').mockResolvedValue()
   getSpy = vi.spyOn(notebookStorage, 'get').mockResolvedValue(storedDoc(5, [cell(CELL_A)]))
   putIfNewerSpy = vi.spyOn(notebookStorage, 'putIfNewer').mockResolvedValue({ ok: true })
+  // Baseline adoption calls `reloadFromStorage`, which now hydrates the output
+  // overlay (Step 6 C6.2). Stub `getOverlay` to the no-overlay default so a real
+  // fake-indexeddb read never stalls these push/baseline tests under fake timers.
+  vi.spyOn(notebookStorage, 'getOverlay').mockResolvedValue(undefined)
   createSpy = vi.spyOn(notebookApi, 'create').mockResolvedValue(serverResponse([cell(CELL_A)]))
   patchSpy = vi.spyOn(notebookApi, 'patch').mockResolvedValue(serverResponse([cell(CELL_A)]))
 })
