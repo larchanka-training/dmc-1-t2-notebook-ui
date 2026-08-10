@@ -12,8 +12,10 @@ Open any notebook. In the header, to the right of the editable title, there is
 a **Download** icon button (`aria-label="Download notebook"`). Clicking it opens
 a menu with two formats:
 
-- **JSON** — full snapshot, suitable for re-import (future).
-- **Markdown** — human-readable copy of the document.
+- **JSON** — full snapshot **including rich cell outputs**, suitable for
+  re-import (future).
+- **Markdown** — human-readable copy of the document, with cell outputs
+  rendered beneath each cell.
 
 Both download immediately via the browser's native save dialog. There is no
 loading state — the conversion is synchronous.
@@ -22,34 +24,60 @@ loading state — the conversion is synchronous.
 
 ### JSON
 
-Mirrors the on-disk format used by IndexedDB persistence
-(`features/notebook/persistence/schema.ts`). The file is a single
-`NotebookJSON` object:
+The file is a **`NotebookExportBundle`** — a distinct, versioned envelope, **not**
+a bare `NotebookJSON`. This separation is deliberate: `NotebookJSON` doubles as the
+autosync **wire contract** (a size-capped payload pushed to the server), so rich
+outputs must never be folded into it. Export keeps them in a sibling `outputs`
+array (`features/notebook/persistence/exportBundle.ts`):
 
 ```jsonc
 {
-  "formatVersion": 1,
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "title": "My Notebook",
-  "createdAt": 1730000000000,
-  "updatedAt": 1730000500000,
-  "cells": [
-    { "id": "…uuid…", "kind": "code", "content": "const x = 1", "updatedAt": 1730000300000 },
-    { "id": "…uuid…", "kind": "markdown", "content": "# Notes", "updatedAt": 1730000400000 },
+  "exportVersion": 1,
+  "notebook": {
+    "formatVersion": 1,
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "title": "My Notebook",
+    "createdAt": 1730000000000,
+    "updatedAt": 1730000500000,
+    "cells": [
+      { "id": "…uuid…", "kind": "code", "content": "const x = 1", "updatedAt": 1730000300000 },
+      { "id": "…uuid…", "kind": "markdown", "content": "# Notes", "updatedAt": 1730000400000 },
+    ],
+  },
+  "outputs": [
+    {
+      "cellId": "…uuid…",
+      "sourceUpdatedAt": 1730000300000,
+      "savedAt": 1730000500000,
+      "items": [{ "type": "result", "value": { "kind": "primitive", "value": 2 } }],
+    },
   ],
+  "overflow": null,
 }
 ```
 
 Notes:
 
-- `updatedAt` (on both notebook and cells) is Unix epoch milliseconds, not an
-  ISO string — same wire format as the backend (`api/docs/openapi.json`
-  `NotebookResponse`).
-- The notebook-level `updatedAt` is deterministic: it is the maximum of (a) the
-  most recent cell edit, (b) the last persisted base, (c) the create time.
-  Two consecutive exports of an unmodified notebook produce the same value.
-- Run state (`output`, `status`, `executionCount`) is **not** included. It is
-  ephemeral and reproducible by re-running the cell.
+- **`notebook`** is exactly the wire `NotebookJSON` (no `outputs` inside it).
+  `updatedAt` (notebook and cells) is Unix epoch milliseconds — same format as the
+  backend (`api/docs/openapi.json` `NotebookResponse`). The notebook-level
+  `updatedAt` is deterministic (max of latest cell edit, last persisted base,
+  create time), so two exports of an unmodified notebook are byte-identical.
+- **`outputs`** carries the persisted rich output of each cell that has any, keyed
+  by `cellId` and stamped with `sourceUpdatedAt` — the cell's content version
+  **captured when the output was produced**. An output whose cell was edited after
+  its run (version no longer matches) is **excluded** — export never pairs a stale
+  result with a newer source. Persisted item kinds: `result`, `image`, `html`, and
+  the `OutputTooLarge` placeholder (`{ "type": "error", "name": "OutputTooLarge" }`)
+  for an item that exceeded its cap.
+- **Caps** mirror the local overlay exactly (one shared projection): `html` ≤ 256
+  KiB, `image` ≤ 2 MiB, per-cell ≤ 4 MiB, notebook-wide ≤ 32 MiB. An over-cap item
+  becomes `OutputTooLarge`.
+- **`overflow`** is `null` when everything fit; otherwise `{ "droppedCellCount": N }`
+  — when the 32 MiB notebook cap is reached, later cells' outputs are dropped
+  (oldest-first retained) and only their **count** is recorded, never a silent drop.
+- **`status` / `executionCount`** are still **not** exported — ephemeral and
+  reproducible by re-running.
 
 ### Markdown
 
@@ -77,6 +105,22 @@ Rules:
   accidentally close the block (CommonMark §4.5).
 - Cells are separated by a single blank line; the document ends with a trailing
   newline.
+
+Cell outputs (the same version-matched, capped set as the JSON `outputs`) are
+rendered **beneath** their cell:
+
+- **`result`** → a fenced code block of the rendered value.
+- **`image`** → a Markdown image with a bounded `data:` URI
+  (`![output](data:<mime>;base64,<…>)`).
+- **`html`** → **inert**: a fenced ` ```html ` source block, **not** live markup.
+  A plain Markdown renderer has no iframe/CSP sandbox (the app's `OutputFrame`), so
+  emitting raw HTML would be an injection vector in whatever opens the file. Live
+  interactive HTML export is a later, explicit opt-in.
+- **`OutputTooLarge`** → a blockquote note (`> ⚠️ …`).
+- When the notebook-wide cap dropped later cells, a single deterministic warning
+  is appended: `> ⚠️ N cell output(s) omitted: notebook output size limit reached.`
+- Output produced before a later source edit (stale) is **omitted**, mirroring the
+  JSON exclusion.
 
 ## File name
 

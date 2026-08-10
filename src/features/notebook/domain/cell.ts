@@ -26,6 +26,14 @@ export interface Cell {
    * used as the basis for last-write-wins sync (see api/docs/auth.md §7.2).
    */
   updatedAt: Atom<number>
+  /**
+   * The cell's content version (`updatedAt`) captured when the CURRENT `output`
+   * was produced — its run-start version (C6.2). `null` when the cell has never
+   * run this session (or output was cleared). Lets consumers detect output that
+   * is stale relative to a source edit made after the run: `output` is fresh iff
+   * `outputVersion() === updatedAt()`. Not serialized (run state, like `output`).
+   */
+  outputVersion: Atom<number | null>
 }
 
 export function reatomCell(
@@ -43,5 +51,6 @@ export function reatomCell(
     viewMode: atom<CellViewMode>('edit', `notebook.cells#${id}.viewMode`),
     executionCount: atom<number | null>(null, `notebook.cells#${id}.executionCount`),
     updatedAt: atom<number>(updatedAt, `notebook.cells#${id}.updatedAt`),
+    outputVersion: atom<number | null>(null, `notebook.cells#${id}.outputVersion`),
   }
 }

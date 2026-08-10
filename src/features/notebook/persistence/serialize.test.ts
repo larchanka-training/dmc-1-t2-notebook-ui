@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { reatomCell } from '../domain/cell'
 import { isNotebookJSON } from './schema'
 import { fromJSON, toJSON, toMarkdown, type NotebookMeta } from './serialize'
+import type { PersistedOutputItem } from './outputOverlay'
 
 const meta: NotebookMeta = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -150,5 +151,109 @@ describe('toMarkdown', () => {
       meta,
     )
     expect(toMarkdown(json)).toBe('# My notebook\n\n`````javascript\n````\n`````\n')
+  })
+})
+
+describe('toMarkdown — outputs (C3)', () => {
+  const ID = '77777777-7777-7777-7777-777777777777'
+
+  function render(items: PersistedOutputItem[]): string {
+    const json = toJSON([reatomCell('run()', 'code', ID, 1)], meta)
+    return toMarkdown(json, new Map([[ID, items]]))
+  }
+
+  test('result → fenced code block of the rendered value', () => {
+    expect(render([{ type: 'result', value: { kind: 'primitive', value: 42 } }])).toContain(
+      '```\n42\n```',
+    )
+    expect(render([{ type: 'result', value: { kind: 'primitive', value: 'hi' } }])).toContain(
+      '```\n"hi"\n```',
+    )
+  })
+
+  test('result renders every SerializedValue kind', () => {
+    expect(render([{ type: 'result', value: { kind: 'undefined' } }])).toContain(
+      '```\nundefined\n```',
+    )
+    expect(render([{ type: 'result', value: { kind: 'function', name: 'foo' } }])).toContain(
+      '```\n[Function: foo]\n```',
+    )
+    expect(
+      render([{ type: 'result', value: { kind: 'truncated', placeholder: '[deep]' } }]),
+    ).toContain('```\n[deep]\n```')
+    expect(
+      render([
+        {
+          type: 'result',
+          value: {
+            kind: 'array',
+            items: [
+              { kind: 'primitive', value: 1 },
+              { kind: 'primitive', value: 'a' },
+            ],
+          },
+        },
+      ]),
+    ).toContain('```\n[1, "a"]\n```')
+    expect(
+      render([
+        {
+          type: 'result',
+          value: { kind: 'object', entries: [['k', { kind: 'primitive', value: true }]] },
+        },
+      ]),
+    ).toContain('```\n{ k: true }\n```')
+  })
+
+  test('renders multiple outputs of one cell in order', () => {
+    const md = render([
+      { type: 'result', value: { kind: 'primitive', value: 1 } },
+      { type: 'image', mime: 'image/png', data: 'QUJD' },
+    ])
+    const resultAt = md.indexOf('```\n1\n```')
+    const imageAt = md.indexOf('![output](data:image/png;base64,QUJD)')
+    expect(resultAt).toBeGreaterThan(-1)
+    expect(imageAt).toBeGreaterThan(resultAt) // order preserved, both present
+  })
+
+  test('image → bounded data-URI', () => {
+    expect(render([{ type: 'image', mime: 'image/png', data: 'QUJD' }])).toContain(
+      '![output](data:image/png;base64,QUJD)',
+    )
+  })
+
+  test('html → INERT fenced source (never a live/raw block)', () => {
+    const md = render([{ type: 'html', html: '<script>alert(1)</script>' }])
+    expect(md).toContain('```html\n<script>alert(1)</script>\n```')
+  })
+
+  test('html fence grows past any backtick run inside the markup', () => {
+    const md = render([{ type: 'html', html: '``` still inert' }])
+    expect(md).toContain('````html\n``` still inert\n````')
+  })
+
+  test('OutputTooLarge placeholder → blockquote note', () => {
+    const md = render([
+      { type: 'error', name: 'OutputTooLarge', message: 'Image output not saved' },
+    ])
+    expect(md).toContain('> ⚠️ Image output not saved')
+  })
+
+  test('cell with no entry in the map renders no output block', () => {
+    const json = toJSON([reatomCell('run()', 'code', ID, 1)], meta)
+    expect(toMarkdown(json, new Map())).toBe('# My notebook\n\n```javascript\nrun()\n```\n')
+  })
+
+  test('appends a deterministic warning for a notebook-wide overflow marker', () => {
+    const json = toJSON([reatomCell('run()', 'code', ID, 1)], meta)
+    expect(toMarkdown(json, new Map(), { droppedCellCount: 3 })).toContain(
+      '> ⚠️ 3 cell outputs omitted: notebook output size limit reached.',
+    )
+    // Singular grammar for exactly one dropped cell.
+    expect(toMarkdown(json, new Map(), { droppedCellCount: 1 })).toContain(
+      '> ⚠️ 1 cell output omitted:',
+    )
+    // No marker → no warning.
+    expect(toMarkdown(json, new Map(), null)).not.toContain('omitted')
   })
 })

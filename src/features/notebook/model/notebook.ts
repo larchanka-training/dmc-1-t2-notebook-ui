@@ -308,7 +308,12 @@ export const applyPersistedOutputs = action(
         // was validated against the pre-read `versions` snapshot, so re-check the
         // LIVE cell version here — never attach a version-5 output to a now
         // version-6 cell.
-        if (items && cell.updatedAt() === versions.get(cell.id)) cell.output.set(items)
+        if (items && cell.updatedAt() === versions.get(cell.id)) {
+          cell.output.set(items)
+          // Restored output belongs to this exact version (that is why it matched);
+          // stamp it so a later edit correctly marks it stale for export.
+          cell.outputVersion.set(cell.updatedAt())
+        }
       }
     } catch (error) {
       console.warn('notebook: failed to restore cell outputs', error)

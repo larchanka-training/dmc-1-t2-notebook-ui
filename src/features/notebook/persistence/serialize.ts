@@ -8,7 +8,9 @@
 // from JSON start unrun.
 
 import { reatomCell, type Cell } from '../domain/cell'
+import type { SerializedValue } from '../runtime/types'
 import { FORMAT_VERSION, type CellJSON, type NotebookJSON } from './schema'
+import type { OverlayOverflow, PersistedOutputItem } from './outputOverlay'
 
 /** Metadata that lives on the notebook, not on individual cells. */
 export interface NotebookMeta {
@@ -87,11 +89,86 @@ function codeCellToMarkdown(content: string): string {
  * Known limitation: a markdown cell containing a literal ``` fence is emitted
  * verbatim — it can confuse downstream parsers but is not corrupted (round-trip
  * is via JSON export, not Markdown re-parse).
+ *
+ * `outputsByCellId` (optional): rich cell outputs to render beneath each cell
+ * (C3). When omitted the document is code/text only, exactly as before.
+ *
+ * `overflow` (optional): the notebook-wide overflow marker (C6.4/C7). When set, a
+ * deterministic warning is appended so the reader knows later cells' outputs were
+ * dropped to stay within the size cap — never silently omitted.
  */
-export function toMarkdown(json: NotebookJSON): string {
+export function toMarkdown(
+  json: NotebookJSON,
+  outputsByCellId?: ReadonlyMap<string, readonly PersistedOutputItem[]>,
+  overflow?: OverlayOverflow | null,
+): string {
   const parts: string[] = [`# ${json.title || DEFAULT_TITLE}`]
   for (const cell of json.cells) {
     parts.push(cell.kind === 'markdown' ? cell.content : codeCellToMarkdown(cell.content))
+    const outputs = outputsByCellId?.get(cell.id)
+    if (outputs) {
+      for (const item of outputs) parts.push(outputItemToMarkdown(item))
+    }
+  }
+  if (overflow) {
+    const n = overflow.droppedCellCount
+    parts.push(
+      `> ⚠️ ${n} cell output${n === 1 ? '' : 's'} omitted: notebook output size limit reached.`,
+    )
   }
   return parts.join('\n\n') + '\n'
+}
+
+// ─── Output rendering (graphical-output-contract.md §6 C3 / D4) ──────────────
+
+/**
+ * A plain-text rendering of a `result` value, mirroring what `OutputView` shows
+ * on screen (`⟹ …`). Kept here as a small pure copy rather than importing the
+ * UI component, so the persistence layer has no dependency on `features/.../ui`.
+ */
+function formatSerializedValue(value: SerializedValue): string {
+  switch (value.kind) {
+    case 'primitive':
+      return typeof value.value === 'string' ? JSON.stringify(value.value) : String(value.value)
+    case 'undefined':
+      return 'undefined'
+    case 'function':
+      return `[Function: ${value.name}]`
+    case 'truncated':
+      return value.placeholder
+    case 'array':
+      return `[${value.items.map(formatSerializedValue).join(', ')}]`
+    case 'object': {
+      const entries = value.entries.map(([k, v]) => `${k}: ${formatSerializedValue(v)}`).join(', ')
+      return `{ ${entries} }`
+    }
+  }
+}
+
+/**
+ * Map one persisted output item to a Markdown block (C3):
+ * - `result` → a fenced code block of the rendered value;
+ * - `image`  → an image with a bounded `data:` URI (payload already capped);
+ * - `html`   → **inert**: fenced `html` source, because a plain Markdown renderer
+ *   has no iframe/CSP sandbox (`OutputFrame`) — live HTML is a later opt-in;
+ * - `error`  → the `OutputTooLarge` placeholder as a blockquote note (the only
+ *   error kind ever persisted).
+ */
+function outputItemToMarkdown(item: PersistedOutputItem): string {
+  switch (item.type) {
+    case 'result': {
+      const text = formatSerializedValue(item.value)
+      const fence = pickFence(text)
+      return fence + '\n' + text + '\n' + fence
+    }
+    case 'image':
+      return `![output](data:${item.mime};base64,${item.data})`
+    case 'html': {
+      const html = item.html.endsWith('\n') ? item.html.slice(0, -1) : item.html
+      const fence = pickFence(html)
+      return fence + 'html\n' + html + '\n' + fence
+    }
+    case 'error':
+      return `> ⚠️ ${item.message}`
+  }
 }

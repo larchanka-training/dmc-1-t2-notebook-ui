@@ -145,10 +145,13 @@ async function executeCell(cell: Cell): Promise<RuntimeStatus> {
   clearStopRequest(cell.id)
   currentCellId = cell.id
   // Stamp the content version at run START (C6.2), so an edit while the run is in
-  // flight makes this output stale and it is not persisted.
+  // flight makes this output stale and it is not persisted. The same stamp is
+  // mirrored onto the cell (`outputVersion`) so later consumers — export in
+  // particular — can tell whether the visible output still matches the source.
   runStartVersions.set(cell.id, cell.updatedAt())
   cell.status.set('running')
   cell.output.set([])
+  cell.outputVersion.set(cell.updatedAt())
   const counter = execCounterAtom() + 1
   execCounterAtom.set(counter)
   cell.executionCount.set(counter)
@@ -410,6 +413,7 @@ export const restartKernel = action(() => {
     cell.status.set('idle')
     cell.executionCount.set(null)
     cell.output.set([])
+    cell.outputVersion.set(null)
   }
   // Restart wipes all outputs → drop the persisted overlay too (best-effort, so
   // a failed delete never blocks the reset).
