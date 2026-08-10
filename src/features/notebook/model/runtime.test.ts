@@ -13,51 +13,7 @@ import {
   stopCell,
 } from './runtime'
 import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
-import { restartWorker, setWorkerFactory, type WorkerLike } from '../runtime/workerHost'
-import type { HostMsg, WorkerMsg } from '../runtime/types'
-
-/**
- * An inline `WorkerLike` that ACCEPTS a run (records the `postMessage`) but never
- * replies — modelling a cell parked in a pending promise. `workerHost.runOne`
- * sends the `run` message only AFTER it has registered `inFlightResolver`, so
- * `firstRun` resolving is a deterministic proof the run is genuinely in flight —
- * no polling, no worker-registration race. `terminate` is the Stop fallback that
- * finally settles the parked run (jsdom is not cross-origin isolated, so there is
- * no SAB interrupt path).
- */
-function createParkingWorker(): {
-  worker: WorkerLike
-  state: { terminated: boolean; runs: number }
-  firstRun: Promise<void>
-} {
-  const listeners: Array<(event: MessageEvent<WorkerMsg>) => void> = []
-  const state = { terminated: false, runs: 0 }
-  let signalFirstRun: (() => void) | null = null
-  const firstRun = new Promise<void>((resolve) => {
-    signalFirstRun = resolve
-  })
-  const worker: WorkerLike = {
-    postMessage: (msg: HostMsg) => {
-      if (msg.kind !== 'run') return
-      state.runs += 1
-      signalFirstRun?.()
-      signalFirstRun = null
-      // Park: never post `done`; the run stays in flight until `terminate`.
-    },
-    addEventListener: (_type, listener) => {
-      listeners.push(listener)
-    },
-    removeEventListener: (_type, listener) => {
-      const i = listeners.indexOf(listener)
-      if (i >= 0) listeners.splice(i, 1)
-    },
-    terminate: () => {
-      state.terminated = true
-      listeners.length = 0
-    },
-  }
-  return { worker, state, firstRun }
-}
+import { restartWorker } from '../runtime/workerHost'
 
 beforeEach(async () => {
   // Reset cross-test state via the proper public action, then prune any
@@ -401,52 +357,13 @@ describe('concurrency guards', () => {
       runtimeStatusAtom.set('idle')
     }
   })
-
-  test('stopCell on a queued (not running) cell drops it without killing the running one', async () => {
-    // Inject an inline worker that holds the first run in flight and never
-    // replies, so the lifecycle is fully deterministic — no `@vitest/web-worker`
-    // shim, no real QuickJS, no timing loop. Restored in `finally`.
-    const fake = createParkingWorker()
-    const restore = setWorkerFactory(() => fake.worker)
-    try {
-      const [a] = cellsAtom()
-      const b = addCell()
-      const c = addCell()
-      // Code content is irrelevant — the injected worker parks every run.
-      updateCellCode(a.id, 'noop-a')
-      updateCellCode(b.id, 'noop-b')
-      updateCellCode(c.id, 'noop-c')
-      const promise = runAll()
-      // Deterministic gate: `a`'s run reached the worker, and workerHost sends
-      // that message only AFTER registering the in-flight resolver — so `a` is
-      // genuinely running and Stop cannot race its registration.
-      await fake.firstRun
-      expect(a.status()).toBe('running')
-      expect(fake.state.runs).toBe(1) // only a was dispatched; b, c wait in queue
-      expect(queueAtom()).toContain(c.id)
-
-      // c is only queued; stopping it must drop it WITHOUT touching the worker
-      // (which would kill the running a).
-      stopCell(c.id)
-      expect(queueAtom()).not.toContain(c.id)
-      expect(c.status()).toBe('idle')
-      expect(a.status()).toBe('running') // a untouched
-      expect(fake.state.terminated).toBe(false) // the worker was not terminated
-
-      // Now stop the actually-running a. With no SAB (jsdom), Stop falls back to
-      // terminating the worker, which settles the parked run as 'interrupted' and
-      // lets the queue drain — deterministically, no polling.
-      stopAll()
-      await promise
-      expect(fake.state.terminated).toBe(true)
-      expect(a.status()).toBe('interrupted')
-      expect(c.executionCount()).toBe(null)
-    } finally {
-      restore()
-    }
-  }, 5000)
 })
 
+// The queued-stop scheduling test lives in `runtime.queue.test.ts`: it drives an
+// inline controllable worker and must not share a file (hence a vitest worker)
+// with the REAL `while(true)` worker tests above, whose infinite loops can starve
+// the shared event loop under load and time out whichever test runs next.
+//
 // restartKernel scenarios live in `runtime.restart.test.ts` — they share
 // worker / scope state with stopCell/stopAll in subtle ways that the
 // @vitest/web-worker shim handles poorly when both groups run in the
