@@ -57,4 +57,27 @@ describe('toExportBundle', () => {
     expect(item.type).toBe('error')
     expect(item).toMatchObject({ name: OUTPUT_TOO_LARGE_NAME })
   })
+
+  test('no overflow marker when everything fits', () => {
+    const bundle = build([{ type: 'result', value: { kind: 'primitive', value: 1 } }])
+    expect(bundle.overflow).toBeNull()
+  })
+
+  test('carries the notebook-wide overflow marker instead of dropping cells silently', () => {
+    // ~2 MiB image per cell × 20 ≈ 40 MiB > 32 MiB cap → later cells are dropped
+    // and counted in a bounded marker (C6.4/C7).
+    const twoMiB = 'A'.repeat(2 * 1024 * 1024)
+    const bundle = toExportBundle({
+      notebook: notebook(),
+      savedAt: 5,
+      cells: Array.from({ length: 20 }, (_, i) => ({
+        cellId: `c${i}`,
+        sourceUpdatedAt: 5,
+        items: [{ type: 'image', mime: 'image/png', data: twoMiB }] as OutputItem[],
+      })),
+    })
+    expect(bundle.overflow).not.toBeNull()
+    expect(bundle.overflow!.droppedCellCount).toBe(20 - bundle.outputs.length)
+    expect(bundle.outputs.length).toBeGreaterThan(0)
+  })
 })

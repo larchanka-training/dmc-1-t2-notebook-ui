@@ -10,7 +10,7 @@
 import { reatomCell, type Cell } from '../domain/cell'
 import type { SerializedValue } from '../runtime/types'
 import { FORMAT_VERSION, type CellJSON, type NotebookJSON } from './schema'
-import type { PersistedOutputItem } from './outputOverlay'
+import type { OverlayOverflow, PersistedOutputItem } from './outputOverlay'
 
 /** Metadata that lives on the notebook, not on individual cells. */
 export interface NotebookMeta {
@@ -92,10 +92,15 @@ function codeCellToMarkdown(content: string): string {
  *
  * `outputsByCellId` (optional): rich cell outputs to render beneath each cell
  * (C3). When omitted the document is code/text only, exactly as before.
+ *
+ * `overflow` (optional): the notebook-wide overflow marker (C6.4/C7). When set, a
+ * deterministic warning is appended so the reader knows later cells' outputs were
+ * dropped to stay within the size cap — never silently omitted.
  */
 export function toMarkdown(
   json: NotebookJSON,
   outputsByCellId?: ReadonlyMap<string, readonly PersistedOutputItem[]>,
+  overflow?: OverlayOverflow | null,
 ): string {
   const parts: string[] = [`# ${json.title || DEFAULT_TITLE}`]
   for (const cell of json.cells) {
@@ -104,6 +109,12 @@ export function toMarkdown(
     if (outputs) {
       for (const item of outputs) parts.push(outputItemToMarkdown(item))
     }
+  }
+  if (overflow) {
+    const n = overflow.droppedCellCount
+    parts.push(
+      `> ⚠️ ${n} cell output${n === 1 ? '' : 's'} omitted: notebook output size limit reached.`,
+    )
   }
   return parts.join('\n\n') + '\n'
 }

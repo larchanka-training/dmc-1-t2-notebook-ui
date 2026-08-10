@@ -12,7 +12,11 @@
 
 import type { NotebookJSON } from './schema'
 import type { OutputItem } from '../runtime/types'
-import { projectNotebookOverlay, type PersistedCellOutput } from './outputOverlay'
+import {
+  projectNotebookOverlay,
+  type OverlayOverflow,
+  type PersistedCellOutput,
+} from './outputOverlay'
 
 /** Bumped when the bundle shape changes; import (Step 7) gates on it. */
 export const EXPORT_BUNDLE_VERSION = 1
@@ -27,13 +31,19 @@ export interface NotebookExportBundle {
   exportVersion: number
   notebook: NotebookJSON
   outputs: PersistedCellOutput[]
+  /**
+   * The bounded notebook-wide overflow marker (C6.4/C7): non-null when the 32 MiB
+   * cap forced later cells to be dropped, carrying only the dropped COUNT. Mirrors
+   * the local overlay so the diagnostic is never silently lost on export.
+   */
+  overflow: OverlayOverflow | null
 }
 
 /**
  * Build the export bundle from a notebook snapshot and the live per-cell outputs.
- * Outputs go through `projectNotebookOverlay`, so they carry the same caps and
- * `OutputTooLarge` markers as the persisted overlay; cells with no persistable
- * output are omitted.
+ * Outputs go through `projectNotebookOverlay`, so they carry the same caps,
+ * `OutputTooLarge` markers, AND the notebook-wide `overflow` marker as the
+ * persisted overlay; cells with no persistable output are omitted.
  */
 export function toExportBundle(input: {
   notebook: NotebookJSON
@@ -49,5 +59,6 @@ export function toExportBundle(input: {
     exportVersion: EXPORT_BUNDLE_VERSION,
     notebook: input.notebook,
     outputs: overlay.cells,
+    overflow: overlay.overflow,
   }
 }

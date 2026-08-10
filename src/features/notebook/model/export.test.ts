@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { addCell, cellsAtom, setNotebookTitle, updateCellCode } from './notebook'
 import { exportNotebook } from './export'
+import type { Cell } from '../domain/cell'
+import type { OutputItem } from '../runtime/types'
+
+// Simulate a completed run: set the visible output AND stamp the version it was
+// produced at (what the runtime does), so export treats it as fresh (not stale).
+function setFreshOutput(cell: Cell, items: OutputItem[]): void {
+  cell.output.set(items)
+  cell.outputVersion.set(cell.updatedAt())
+}
 
 // jsdom lacks a real Blob.text() and clipboard download surface — we mock the
 // browser plumbing (URL + anchor click) and read body bytes back through the
@@ -57,7 +66,7 @@ describe('exportNotebook', () => {
     setNotebookTitle('With outputs')
     const [cell] = cellsAtom()
     updateCellCode(cell!.id, 'display("hi")')
-    cell!.output.set([{ type: 'result', value: { kind: 'primitive', value: 42 } }])
+    setFreshOutput(cell!, [{ type: 'result', value: { kind: 'primitive', value: 42 } }])
 
     exportNotebook('json')
 
@@ -121,9 +130,9 @@ describe('exportNotebook', () => {
     updateCellCode(a!.id, 'r()')
     updateCellCode(b!.id, 'img()')
     updateCellCode(c!.id, 'html()')
-    a!.output.set([{ type: 'result', value: { kind: 'primitive', value: 'ok' } }])
-    b!.output.set([{ type: 'image', mime: 'image/png', data: 'QUJD' }])
-    c!.output.set([{ type: 'html', html: '<b>bold</b>' }])
+    setFreshOutput(a!, [{ type: 'result', value: { kind: 'primitive', value: 'ok' } }])
+    setFreshOutput(b!, [{ type: 'image', mime: 'image/png', data: 'QUJD' }])
+    setFreshOutput(c!, [{ type: 'html', html: '<b>bold</b>' }])
 
     exportNotebook('markdown')
     const text = await blobText()
@@ -147,4 +156,49 @@ describe('exportNotebook', () => {
     // Just the title + the one code fence, nothing else.
     expect(text).toBe('# Plain\n\n```javascript\nconst x = 1\n```\n')
   })
+
+  test('does NOT export output that is stale after a post-run edit (C6.2)', async () => {
+    setNotebookTitle('Stale guard')
+    const [cell] = cellsAtom()
+    updateCellCode(cell!.id, 'v1()')
+    // Run at v1: output produced, stamped with the v1 version.
+    setFreshOutput(cell!, [{ type: 'result', value: { kind: 'primitive', value: 'v1-out' } }])
+    // Edit to v2 WITHOUT re-running: the old output is still on screen but its
+    // version no longer matches the source. (In production the run spans real time
+    // so the edit's timestamp is strictly newer; bump explicitly so the test does
+    // not depend on `Date.now()` advancing within the same millisecond.)
+    updateCellCode(cell!.id, 'v2()')
+    cell!.updatedAt.set(cell!.updatedAt() + 1)
+
+    exportNotebook('json')
+    const parsed = JSON.parse(await blobText())
+    expect(parsed.outputs).toEqual([]) // stale output dropped, not stamped as v2
+
+    exportNotebook('markdown')
+    const md = await blobText()
+    expect(md).not.toContain('v1-out')
+    expect(md).toBe('# Stale guard\n\n```javascript\nv2()\n```\n')
+  })
+
+  test('notebook-wide overflow is reported, not silently dropped (JSON + Markdown)', async () => {
+    // ~2 MiB image per cell × 20 ≈ 40 MiB > 32 MiB notebook cap, so later cells
+    // are dropped and a bounded overflow marker is recorded (C6.4/C7).
+    setNotebookTitle('Overflow')
+    const twoMiB = 'A'.repeat(2 * 1024 * 1024)
+    const cells = [cellsAtom()[0]!]
+    for (let i = 1; i < 20; i++) cells.push(addCell())
+    for (const cell of cells) {
+      updateCellCode(cell.id, 'img()')
+      setFreshOutput(cell, [{ type: 'image', mime: 'image/png', data: twoMiB }])
+    }
+
+    exportNotebook('json')
+    const parsed = JSON.parse(await blobText())
+    expect(parsed.overflow).not.toBeNull()
+    expect(parsed.overflow.droppedCellCount).toBe(cells.length - parsed.outputs.length)
+
+    exportNotebook('markdown')
+    const md = await blobText()
+    expect(md).toMatch(/> ⚠️ \d+ cell outputs? omitted: notebook output size limit reached\./)
+  }, 15000)
 })

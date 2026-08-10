@@ -73,7 +73,11 @@ function buildExport(format: ExportFormat): FormatSpec {
     cells: cellsAtom().map((cell) => ({
       cellId: cell.id,
       sourceUpdatedAt: cell.updatedAt(),
-      items: cell.output(),
+      // Export only output that still matches its source (C6.2): a cell edited
+      // after its last run keeps the OLD output on screen but a NEWER
+      // `updatedAt`, so exporting it would stamp a stale result with the edited
+      // version. Treat such output as absent — never export a mismatched pair.
+      items: cell.outputVersion() === cell.updatedAt() ? cell.output() : [],
     })),
   })
   if (format === 'json') {
@@ -87,7 +91,7 @@ function buildExport(format: ExportFormat): FormatSpec {
   }
   const outputsByCellId = new Map(bundle.outputs.map((cell) => [cell.cellId, cell.items]))
   return {
-    body: toMarkdown(snapshot, outputsByCellId),
+    body: toMarkdown(snapshot, outputsByCellId, bundle.overflow),
     mime: 'text/markdown',
     ext: 'md',
   }
