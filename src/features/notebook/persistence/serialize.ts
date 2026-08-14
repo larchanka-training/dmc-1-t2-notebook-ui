@@ -125,8 +125,9 @@ export function toMarkdown(
  * A plain-text rendering of a `result` value, mirroring what `OutputView` shows
  * on screen (`⟹ …`). Kept here as a small pure copy rather than importing the
  * UI component, so the persistence layer has no dependency on `features/.../ui`.
+ * Exported so `.ipynb` export renders `result` identically (single source).
  */
-function formatSerializedValue(value: SerializedValue): string {
+export function formatSerializedValue(value: SerializedValue): string {
   switch (value.kind) {
     case 'primitive':
       return typeof value.value === 'string' ? JSON.stringify(value.value) : String(value.value)
