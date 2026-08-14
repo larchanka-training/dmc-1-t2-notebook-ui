@@ -42,16 +42,34 @@ describe('toIpynb', () => {
     expect(nb.metadata.language_info).toEqual({ name: 'javascript' })
   })
 
-  test('maps markdown and code cells in order, source as trailing-newline lines', () => {
+  test('maps markdown and code cells in order, with the cell id + source lines', () => {
     const nb = toIpynb(bundleOf([mdCell, { ...codeCell, content: 'a\nb' }], []))
-    expect(nb.cells[0]).toEqual({ cell_type: 'markdown', metadata: {}, source: ['# Title'] })
+    expect(nb.cells[0]).toEqual({
+      cell_type: 'markdown',
+      id: MD,
+      metadata: {},
+      source: ['# Title'],
+    })
     expect(nb.cells[1]).toEqual({
       cell_type: 'code',
+      id: CODE,
       metadata: {},
       execution_count: null,
       source: ['a\n', 'b'],
       outputs: [],
     })
+  })
+
+  test('every emitted cell carries a schema-valid nbformat 4.5 id', () => {
+    const nb = toIpynb(bundleOf([mdCell, codeCell], []))
+    for (const cell of nb.cells) {
+      expect(typeof cell.id).toBe('string')
+      expect(cell.id.length).toBeGreaterThan(0)
+      expect(cell.id.length).toBeLessThanOrEqual(64)
+      expect(cell.id).toMatch(/^[A-Za-z0-9_-]+$/)
+    }
+    // notebook cells keep their own ids
+    expect(nb.cells.map((c) => c.id)).toEqual([MD, CODE])
   })
 
   test('result → execute_result with text/plain (same rendering as Markdown)', () => {
@@ -167,5 +185,30 @@ describe('toIpynb', () => {
     expect((last as { source: string[] }).source[0]).toMatch(
       /⚠️ \d+ cell outputs? omitted: notebook output size limit reached\./,
     )
+    // The synthetic cell has a schema-valid id that cannot collide with a UUID.
+    expect(last.id).toBe('jsnb-output-overflow')
+    expect(last.id).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(nb.cells.slice(0, -1).map((c) => c.id)).not.toContain(last.id)
+  })
+
+  test('a malformed SVG base64 degrades to a note, never aborts the export', () => {
+    const nb = toIpynb(
+      bundleOf(
+        [mdCell, codeCell],
+        [
+          // Persisted-output validation accepts any string data for an image; only
+          // the .ipynb SVG decode would throw — it must not.
+          { cellId: CODE, items: [{ type: 'image', mime: 'image/svg+xml', data: 'not-base64!!' }] },
+        ],
+      ),
+    )
+    // The whole document is still produced, both cells present.
+    expect(nb.cells).toHaveLength(2)
+    const code = nb.cells[1] as Extract<(typeof nb.cells)[number], { cell_type: 'code' }>
+    expect(code.outputs[0]).toEqual({
+      output_type: 'stream',
+      name: 'stderr',
+      text: 'SVG image output not exportable: invalid base64 data.',
+    })
   })
 })

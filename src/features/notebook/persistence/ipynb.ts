@@ -32,12 +32,14 @@ type JupyterOutput =
 
 interface JupyterMarkdownCell {
   cell_type: 'markdown'
+  id: string
   metadata: Record<string, never>
   source: string[]
 }
 
 interface JupyterCodeCell {
   cell_type: 'code'
+  id: string
   metadata: Record<string, never>
   execution_count: number | null
   source: string[]
@@ -58,6 +60,12 @@ export interface JupyterNotebook {
 
 // ─── Mapping ─────────────────────────────────────────────────────────────────
 
+// nbformat 4.5 requires a cell `id` on every cell. The synthetic overflow-notice
+// cell needs a fixed, schema-valid id (`^[a-zA-Z0-9-_]+$`, ≤ 64 chars) that cannot
+// collide with a real cell id — notebook cell ids are UUIDs (hex + dashes only), so
+// this literal (contains non-hex letters) is guaranteed distinct.
+const OVERFLOW_CELL_ID = 'jsnb-output-overflow'
+
 /**
  * Split cell/text content into nbformat `source` lines: each line keeps its
  * trailing `\n` except the last, and empty content is an empty array — the
@@ -69,11 +77,21 @@ function toSourceLines(text: string): string[] {
   return lines.map((line, i) => (i < lines.length - 1 ? line + '\n' : line))
 }
 
-/** Decode a base64 payload to a UTF-8 string (for `image/svg+xml`, stored as text). */
-function base64ToUtf8(data: string): string {
-  const binary = atob(data)
-  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0))
-  return new TextDecoder().decode(bytes)
+/**
+ * Decode a base64 payload to a UTF-8 string (for `image/svg+xml`, stored as text),
+ * or `null` if the payload is not valid base64. Persisted-output validation checks
+ * the data type and size but NOT base64 validity, so a malformed SVG can reach here;
+ * returning `null` lets the caller degrade one item instead of throwing and aborting
+ * the whole export.
+ */
+function tryBase64ToUtf8(data: string): string | null {
+  try {
+    const binary = atob(data)
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return null
+  }
 }
 
 /** Map one persisted output item to its nbformat output (C3 / export contract §3). */
@@ -91,15 +109,23 @@ function outputItemToJupyter(item: PersistedOutputItem): JupyterOutput {
         data: { 'text/plain': formatSerializedValue(item.value) },
         metadata: {},
       }
-    case 'image':
-      // SVG is stored as text in nbformat; raster mimes carry the raw base64.
-      return {
-        output_type: 'display_data',
-        data: {
-          [item.mime]: item.mime === 'image/svg+xml' ? base64ToUtf8(item.data) : item.data,
-        },
-        metadata: {},
+    case 'image': {
+      if (item.mime === 'image/svg+xml') {
+        // SVG is stored as text in nbformat, so it must be decoded. A malformed
+        // payload degrades to a visible note — one bad item must not abort export.
+        const svg = tryBase64ToUtf8(item.data)
+        if (svg === null) {
+          return {
+            output_type: 'stream',
+            name: 'stderr',
+            text: 'SVG image output not exportable: invalid base64 data.',
+          }
+        }
+        return { output_type: 'display_data', data: { 'image/svg+xml': svg }, metadata: {} }
       }
+      // Raster mimes carry the raw base64 (Jupyter expects base64 for image/png etc.).
+      return { output_type: 'display_data', data: { [item.mime]: item.data }, metadata: {} }
+    }
     case 'html':
       // Live here — Jupyter renders `text/html` through its own sandbox/sanitizer,
       // unlike a plain Markdown file (where we fence HTML inert). See contract §3.
@@ -113,10 +139,11 @@ function outputItemToJupyter(item: PersistedOutputItem): JupyterOutput {
 
 function cellToJupyter(cell: CellJSON, outputs: readonly PersistedOutputItem[]): JupyterCell {
   if (cell.kind === 'markdown') {
-    return { cell_type: 'markdown', metadata: {}, source: toSourceLines(cell.content) }
+    return { cell_type: 'markdown', id: cell.id, metadata: {}, source: toSourceLines(cell.content) }
   }
   return {
     cell_type: 'code',
+    id: cell.id,
     metadata: {},
     execution_count: null,
     source: toSourceLines(cell.content),
@@ -138,6 +165,7 @@ export function toIpynb(bundle: NotebookExportBundle): JupyterNotebook {
     const n = bundle.overflow.droppedCellCount
     cells.push({
       cell_type: 'markdown',
+      id: OVERFLOW_CELL_ID,
       metadata: {},
       source: [
         `> ⚠️ ${n} cell output${n === 1 ? '' : 's'} omitted: notebook output size limit reached.`,
