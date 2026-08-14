@@ -11,9 +11,10 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { exportNotebook } from '../model/export'
 
-// Header-level download menu. Two formats — JSON for a lossless snapshot
-// (re-importable later), Markdown for a human-readable copy. The action lives
-// in `model/export.ts`; this file is purely the UI surface.
+// Header-level download menu. Three formats — JSON for a lossless snapshot
+// (re-importable later), Markdown for a human-readable copy, and Jupyter (.ipynb)
+// for opening in Jupyter/nbconvert. The action lives in `model/export.ts`; this
+// file is purely the UI surface.
 //
 // reatomComponent is required because the onClick handlers call `wrap()` at
 // render time; `wrap()` itself needs an active reatom context (under
@@ -58,6 +59,12 @@ export const NotebookExportMenu = reatomComponent(() => {
           <span className="flex min-w-0 flex-col">
             <span className="text-[13px] font-semibold">Markdown</span>
             <span className="text-[11.5px] text-muted-foreground">Human-readable</span>
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={wrap(() => exportNotebook('ipynb'))}>
+          <span className="flex min-w-0 flex-col">
+            <span className="text-[13px] font-semibold">Jupyter</span>
+            <span className="text-[11.5px] text-muted-foreground">.ipynb notebook</span>
           </span>
         </DropdownMenuItem>
       </DropdownMenuContent>

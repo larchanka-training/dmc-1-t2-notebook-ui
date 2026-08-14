@@ -20,6 +20,7 @@
 import { action } from '@reatom/core'
 import { toJSON, toMarkdown } from '../persistence/serialize'
 import { toExportBundle } from '../persistence/exportBundle'
+import { toIpynb } from '../persistence/ipynb'
 import type { Cell } from '../domain/cell'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -32,7 +33,7 @@ import {
 import { downloadBlob } from '@/shared/lib/downloadBlob'
 import { sanitizeFilename } from '@/shared/lib/sanitizeFilename'
 
-export type ExportFormat = 'json' | 'markdown'
+export type ExportFormat = 'json' | 'markdown' | 'ipynb'
 
 interface FormatSpec {
   body: string
@@ -87,6 +88,14 @@ function buildExport(format: ExportFormat): FormatSpec {
       body: JSON.stringify(bundle, null, 2),
       mime: 'application/json',
       ext: 'json',
+    }
+  }
+  if (format === 'ipynb') {
+    // Jupyter (.ipynb) is the same bundle re-projected into nbformat v4.5.
+    return {
+      body: JSON.stringify(toIpynb(bundle), null, 2),
+      mime: 'application/x-ipynb+json',
+      ext: 'ipynb',
     }
   }
   const outputsByCellId = new Map(bundle.outputs.map((cell) => [cell.cellId, cell.items]))
