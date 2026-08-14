@@ -19,7 +19,7 @@ a menu with three formats:
 - **Jupyter** — a `.ipynb` (nbformat v4.5) document for opening in
   Jupyter / nbconvert, with outputs mapped to Jupyter output types.
 
-Both download immediately via the browser's native save dialog. There is no
+All three download immediately via the browser's native save dialog. There is no
 loading state — the conversion is synchronous.
 
 ## What gets exported
