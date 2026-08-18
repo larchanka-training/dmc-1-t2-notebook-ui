@@ -33,3 +33,6 @@ openapi.yaml
 .env
 .env.*
 !.env.example
+
+# Vendored upstream JSON Schema (kept byte-identical to jupyter/nbformat)
+src/features/notebook/persistence/__fixtures__/nbformat.v4.5.schema.json
