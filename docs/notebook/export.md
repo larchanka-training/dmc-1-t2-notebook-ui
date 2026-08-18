@@ -10,14 +10,16 @@ be able to keep their data before any sunset / migration).
 
 Open any notebook. In the header, to the right of the editable title, there is
 a **Download** icon button (`aria-label="Download notebook"`). Clicking it opens
-a menu with two formats:
+a menu with three formats:
 
 - **JSON** — full snapshot **including rich cell outputs**, suitable for
   re-import (future).
 - **Markdown** — human-readable copy of the document, with cell outputs
   rendered beneath each cell.
+- **Jupyter** — a `.ipynb` (nbformat v4.5) document for opening in
+  Jupyter / nbconvert, with outputs mapped to Jupyter output types.
 
-Both download immediately via the browser's native save dialog. There is no
+All three download immediately via the browser's native save dialog. There is no
 loading state — the conversion is synchronous.
 
 ## What gets exported
@@ -122,6 +124,32 @@ rendered **beneath** their cell:
 - Output produced before a later source edit (stale) is **omitted**, mirroring the
   JSON exclusion.
 
+### Jupyter (`.ipynb`)
+
+A minimal **nbformat v4.5** document (`application/x-ipynb+json`), produced client-
+side from the SAME export bundle as JSON/Markdown — no backend. Frontend-only is a
+deliberate decision (`docs/specs/export-completion-contract.md`): `.ipynb` is
+client-producible JSON, and a client generator keeps the offline / signed-out
+guarantee a backend route could not.
+
+- Every cell carries the required nbformat 4.5 `id` (the notebook cell's own id; the
+  synthetic overflow cell uses a reserved `jsnb-output-overflow`). `execution_count`
+  is `null` (the run counter is UI state).
+- Outputs (the same version-matched, capped set) map to nbformat outputs:
+  - `result` → `execute_result` with `text/plain` (same rendering as Markdown);
+  - `image` → `display_data`; raster mimes carry raw base64, `image/svg+xml` is
+    decoded to text; a malformed SVG payload degrades to a visible `stderr` note
+    rather than aborting the export;
+  - `html` → `display_data` `text/html` — emitted as real HTML, not fenced inert as
+    in the Markdown export. This relies on Jupyter's **trust model**: a notebook you
+    just opened is _untrusted_, so its stored HTML is sanitised and active content
+    (scripts) is blocked. That is a trust decision, **not a guarantee** — after
+    "Trust Notebook" (or re-executing the cell) active content can render, so treat
+    an exported `.ipynb` from an untrusted source with the same care as any notebook;
+  - `OutputTooLarge` → a `stderr` stream; notebook-wide overflow → a trailing
+    markdown warning cell.
+- stdout/stderr are not persisted, so they do not appear (reproducible by re-run).
+
 ## File name
 
 The browser saves the file as `<sanitized-title>.<ext>`. Sanitization
@@ -162,19 +190,21 @@ not been built into this flow:
 - **Server-side export** — `GET /api/v1/notebooks/{id}/export`. Not needed
   because the data is local; would be required only if the source of truth
   moves to the server.
-- **Other formats** — PDF, HTML, Jupyter `.ipynb`.
-- **Import from file** — restoring a notebook from a downloaded JSON.
+- **Other formats** — PDF, HTML. (Jupyter `.ipynb` **is** supported — see above.)
+- **Import from file** — restoring a notebook from a downloaded JSON / `.ipynb`.
 
 ## Implementation map
 
-| File                                              | Role                                                                               |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `src/features/notebook/persistence/serialize.ts`  | Pure `toJSON` / `toMarkdown` converters                                            |
-| `src/shared/lib/sanitizeFilename.ts`              | ASCII-safe download name + `notebook-<id>` fallback                                |
-| `src/shared/lib/downloadBlob.ts`                  | `<a download>` + deferred `URL.revokeObjectURL` (Safari quirk)                     |
-| `src/features/notebook/model/export.ts`           | `exportNotebook(format)` action — builds the snapshot, blob, and triggers download |
-| `src/features/notebook/ui/NotebookExportMenu.tsx` | `reatomComponent` wrapping the DropdownMenu (JSON / Markdown)                      |
-| `src/features/notebook/ui/NotebookHeader.tsx`     | Mounts the menu next to the editable title                                         |
+| File                                                | Role                                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/features/notebook/persistence/serialize.ts`    | Pure `toJSON` / `toMarkdown` converters                                            |
+| `src/features/notebook/persistence/exportBundle.ts` | `toExportBundle` — the shared capped bundle (notebook + outputs + overflow)        |
+| `src/features/notebook/persistence/ipynb.ts`        | Pure `toIpynb` — nbformat v4.5 mapping from the bundle                             |
+| `src/shared/lib/sanitizeFilename.ts`                | ASCII-safe download name + `notebook-<id>` fallback                                |
+| `src/shared/lib/downloadBlob.ts`                    | `<a download>` + deferred `URL.revokeObjectURL` (Safari quirk)                     |
+| `src/features/notebook/model/export.ts`             | `exportNotebook(format)` action — builds the snapshot, blob, and triggers download |
+| `src/features/notebook/ui/NotebookExportMenu.tsx`   | `reatomComponent` wrapping the DropdownMenu (JSON / Markdown / Jupyter)            |
+| `src/features/notebook/ui/NotebookHeader.tsx`       | Mounts the menu next to the editable title                                         |
 
 The action is read-only: it does not write any atoms, does not bump the
 autosave revision, and does not trigger a remote sync.

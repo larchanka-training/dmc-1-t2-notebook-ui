@@ -127,8 +127,12 @@ function outputItemToJupyter(item: PersistedOutputItem): JupyterOutput {
       return { output_type: 'display_data', data: { [item.mime]: item.data }, metadata: {} }
     }
     case 'html':
-      // Live here — Jupyter renders `text/html` through its own sandbox/sanitizer,
-      // unlike a plain Markdown file (where we fence HTML inert). See contract §3.
+      // Emitted as real `text/html` (not fenced inert like the Markdown export),
+      // because Jupyter has a trust model a plain Markdown file does not: a freshly
+      // opened notebook is UNTRUSTED, so its stored HTML is sanitised and active
+      // content (scripts) is blocked. Note this is a trust decision, not a
+      // guarantee — once the user runs "Trust Notebook" (or re-executes the cell),
+      // active content in this output CAN render. See contract §3.
       return {
         output_type: 'display_data',
         data: { 'text/html': item.html },

@@ -79,6 +79,27 @@ describe('exportNotebook', () => {
     ])
   })
 
+  test('Jupyter export produces a parseable nbformat 4.5 document with outputs', async () => {
+    setNotebookTitle('NB Doc')
+    const [cell] = cellsAtom()
+    updateCellCode(cell!.id, 'display("hi")')
+    setFreshOutput(cell!, [{ type: 'image', mime: 'image/png', data: 'QUJD' }])
+
+    exportNotebook('ipynb')
+
+    expect(capturedBlob!.type).toMatch(/^application\/x-ipynb\+json/)
+    const nb = JSON.parse(await blobText())
+    expect(nb.nbformat).toBe(4)
+    expect(nb.nbformat_minor).toBe(5)
+    expect(nb.cells[0].cell_type).toBe('code')
+    expect(nb.cells[0].id).toBe(cell!.id) // nbformat 4.5 requires a cell id
+    expect(nb.cells[0].outputs[0]).toEqual({
+      output_type: 'display_data',
+      data: { 'image/png': 'QUJD' },
+      metadata: {},
+    })
+  })
+
   test('Markdown export wraps code cells in a javascript fence', async () => {
     setNotebookTitle('MD Doc')
     addCell()
@@ -103,6 +124,9 @@ describe('exportNotebook', () => {
 
     exportNotebook('markdown')
     expect(capturedFilename).toBe('Hello-World.md')
+
+    exportNotebook('ipynb')
+    expect(capturedFilename).toBe('Hello-World.ipynb')
   })
 
   test('JSON export updatedAt is deterministic across consecutive clicks (no Date.now drift)', async () => {

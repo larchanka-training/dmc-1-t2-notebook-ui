@@ -3,8 +3,9 @@
 // for the browser-native save dialog. The whole flow is read-only — no atom
 // writes, no autosave bump, no remote sync.
 //
-// Format choice is the caller's: 'json' yields a re-importable snapshot;
-// 'markdown' is a human-readable rendering. Both are produced offline from
+// Format choice is the caller's: 'json' yields a re-importable snapshot (the
+// versioned NotebookExportBundle), 'markdown' is a human-readable rendering, and
+// 'ipynb' is a Jupyter nbformat v4.5 document. All three are produced offline from
 // local state — there is no API call, so the export works even when the user
 // is signed out or offline.
 //
@@ -20,6 +21,7 @@
 import { action } from '@reatom/core'
 import { toJSON, toMarkdown } from '../persistence/serialize'
 import { toExportBundle } from '../persistence/exportBundle'
+import { toIpynb } from '../persistence/ipynb'
 import type { Cell } from '../domain/cell'
 import type { NotebookJSON } from '../persistence/schema'
 import {
@@ -32,7 +34,7 @@ import {
 import { downloadBlob } from '@/shared/lib/downloadBlob'
 import { sanitizeFilename } from '@/shared/lib/sanitizeFilename'
 
-export type ExportFormat = 'json' | 'markdown'
+export type ExportFormat = 'json' | 'markdown' | 'ipynb'
 
 interface FormatSpec {
   body: string
@@ -64,7 +66,7 @@ function exportSnapshot(): NotebookJSON {
 function buildExport(format: ExportFormat): FormatSpec {
   const snapshot = exportSnapshot()
   // Project the live cell outputs ONCE through the same caps as the local
-  // overlay, so JSON and Markdown export an identical, bounded output set.
+  // overlay, so every format exports an identical, bounded output set.
   // `sourceUpdatedAt` is each cell's current version and `savedAt` reuses the
   // deterministic export `updatedAt` (no wall-clock, so exports are stable).
   const bundle = toExportBundle({
@@ -87,6 +89,14 @@ function buildExport(format: ExportFormat): FormatSpec {
       body: JSON.stringify(bundle, null, 2),
       mime: 'application/json',
       ext: 'json',
+    }
+  }
+  if (format === 'ipynb') {
+    // Jupyter (.ipynb) is the same bundle re-projected into nbformat v4.5.
+    return {
+      body: JSON.stringify(toIpynb(bundle), null, 2),
+      mime: 'application/x-ipynb+json',
+      ext: 'ipynb',
     }
   }
   const outputsByCellId = new Map(bundle.outputs.map((cell) => [cell.cellId, cell.items]))

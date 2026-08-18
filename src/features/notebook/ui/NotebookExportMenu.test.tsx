@@ -94,4 +94,18 @@ describe('NotebookExportMenu', () => {
     const text = await capturedBlob!.text()
     expect(text.startsWith('# Sample Doc\n')).toBe(true)
   })
+
+  test('Jupyter item produces a parseable .ipynb Blob', async () => {
+    const user = userEvent.setup()
+    renderMenu()
+
+    await user.click(screen.getByRole('button', { name: /download notebook/i }))
+    await user.click(await screen.findByText('Jupyter'))
+
+    expect(capturedBlob!.type).toMatch(/^application\/x-ipynb\+json/)
+    expect(capturedFilename).toBe('Sample-Doc.ipynb')
+    const nb = JSON.parse(await capturedBlob!.text())
+    expect(nb.nbformat).toBe(4)
+    expect(nb.nbformat_minor).toBe(5)
+  })
 })
