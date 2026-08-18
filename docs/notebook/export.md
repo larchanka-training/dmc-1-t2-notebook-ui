@@ -140,8 +140,12 @@ guarantee a backend route could not.
   - `image` → `display_data`; raster mimes carry raw base64, `image/svg+xml` is
     decoded to text; a malformed SVG payload degrades to a visible `stderr` note
     rather than aborting the export;
-  - `html` → `display_data` `text/html` **live** (Jupyter sandboxes/sanitises HTML,
-    unlike the Markdown file where it is fenced inert);
+  - `html` → `display_data` `text/html` — emitted as real HTML, not fenced inert as
+    in the Markdown export. This relies on Jupyter's **trust model**: a notebook you
+    just opened is _untrusted_, so its stored HTML is sanitised and active content
+    (scripts) is blocked. That is a trust decision, **not a guarantee** — after
+    "Trust Notebook" (or re-executing the cell) active content can render, so treat
+    an exported `.ipynb` from an untrusted source with the same care as any notebook;
   - `OutputTooLarge` → a `stderr` stream; notebook-wide overflow → a trailing
     markdown warning cell.
 - stdout/stderr are not persisted, so they do not appear (reproducible by re-run).

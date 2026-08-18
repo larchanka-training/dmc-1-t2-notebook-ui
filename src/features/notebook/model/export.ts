@@ -3,8 +3,9 @@
 // for the browser-native save dialog. The whole flow is read-only — no atom
 // writes, no autosave bump, no remote sync.
 //
-// Format choice is the caller's: 'json' yields a re-importable snapshot;
-// 'markdown' is a human-readable rendering. Both are produced offline from
+// Format choice is the caller's: 'json' yields a re-importable snapshot (the
+// versioned NotebookExportBundle), 'markdown' is a human-readable rendering, and
+// 'ipynb' is a Jupyter nbformat v4.5 document. All three are produced offline from
 // local state — there is no API call, so the export works even when the user
 // is signed out or offline.
 //
@@ -65,7 +66,7 @@ function exportSnapshot(): NotebookJSON {
 function buildExport(format: ExportFormat): FormatSpec {
   const snapshot = exportSnapshot()
   // Project the live cell outputs ONCE through the same caps as the local
-  // overlay, so JSON and Markdown export an identical, bounded output set.
+  // overlay, so every format exports an identical, bounded output set.
   // `sourceUpdatedAt` is each cell's current version and `savedAt` reuses the
   // deterministic export `updatedAt` (no wall-clock, so exports are stable).
   const bundle = toExportBundle({

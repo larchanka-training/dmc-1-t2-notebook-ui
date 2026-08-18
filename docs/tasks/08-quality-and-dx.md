@@ -50,7 +50,7 @@
   - `raw` cells: импортируем как `markdown` с пометкой «raw cell from .ipynb».
 - [ ] Поля, специфичные для Python (kernelspec, metadata.kernel) — игнорируем, кладём в `notebook.metadata.imported`.
 - [ ] Несовместимый файл (не v4, не JSON) → понятная ошибка.
-- [ ] Export: кнопка `Export → .ipynb` в шапке ноутбука. Обратное преобразование: наши `code` ячейки экспортируются с `cell_type: "code"`, language metadata `javascript`. Скачивается через `Blob` + anchor download.
+- [x] Export: пункт `Jupyter` в меню Download в шапке ноутбука (roadmap Step 7b/7c). Наши `code` ячейки экспортируются с `cell_type: "code"`, language metadata `javascript`; скачивается через `Blob` + anchor download. Реализация: `features/notebook/persistence/ipynb.ts` (`toIpynb`, nbformat v4.5) + `features/notebook/ui/NotebookExportMenu.tsx`. Детали формата — `docs/notebook/export.md`.
 - [ ] Идемпотентность: import → export → import должен дать эквивалентный (по ячейкам) ноутбук.
 
 ### Error boundaries
@@ -93,15 +93,17 @@ src/shared/i18n/
 src/shared/lib/a11y/
   useFocusTrap.ts
   useAnnounce.ts                   ← aria-live API
-src/features/ipynb/
+src/features/notebook/persistence/
+  ipynb.ts                         ← export: toIpynb (nbformat v4.5) — DONE
+  ipynb.test.ts
+src/features/notebook/ui/
+  NotebookExportMenu.tsx           ← JSON / Markdown / Jupyter — DONE
+src/features/ipynb/                ← import only (not built yet)
   model/
     importIpynb.ts
-    exportIpynb.ts
     importIpynb.test.ts
-    exportIpynb.test.ts
   ui/
     ImportIpynbButton.tsx
-    ExportIpynbButton.tsx
 src/entities/telemetry/
   model/track.ts
   ui/TelemetryDevOverlay.tsx
