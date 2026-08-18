@@ -1,6 +1,7 @@
 import { atom, action, wrap, withLocalStorage } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import * as webllm from '@mlc-ai/web-llm'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -137,6 +138,11 @@ export const loadingModelIdAtom = atom<string | null>(null, 'webLlm.loadingModel
 let latestLoadSeq = 0
 
 export const loadModelAction = action(async () => {
+  // Step 8b master switch. This is the single choke point for model DOWNLOADS —
+  // both the manual "Load model" button and the sign-in auto-load reach it — so
+  // "LLM off" cannot cost the user a multi-gigabyte fetch. Guarded before the
+  // sequence bump so a refused load does not invalidate an in-flight one.
+  if (!llmEnabledAtom()) return
   const seq = ++latestLoadSeq
   const modelId = modelIdAtom()
 
@@ -275,6 +281,8 @@ export const reconcileDownloadedModelsAction = action(async () => {
 }, 'webLlm.reconcileDownloadedModels').extend(withAsync())
 
 export const sendMessageAction = action(async (input: string) => {
+  // Step 8b master switch (in-browser playground chat).
+  if (!llmEnabledAtom()) return
   if (!input.trim()) return
 
   const engine = engineAtom()

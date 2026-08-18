@@ -26,6 +26,7 @@ import {
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
 import { displayNameAtom, startViewAtom } from '@/features/settings'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { DEFAULT_USER_SETTINGS, readUserSettings, writeUserSettings } from './userSettings'
 import { startSettingsSync } from './settingsSync'
 
@@ -38,6 +39,7 @@ function resetAtomsToDefaults(): void {
   displayNameAtom.set(DEFAULT_USER_SETTINGS.displayName)
   modelIdAtom.set(DEFAULT_USER_SETTINGS.modelId)
   autoLoadModelAtom.set(DEFAULT_USER_SETTINGS.autoLoadModel)
+  llmEnabledAtom.set(DEFAULT_USER_SETTINGS.llmEnabled)
   inBrowserMaxTokensAtom.set(DEFAULT_USER_SETTINGS.inBrowserMaxTokens)
   thinkTokenBudgetAtom.set(DEFAULT_USER_SETTINGS.thinkTokenBudget)
   startViewAtom.set(DEFAULT_USER_SETTINGS.startView)
@@ -97,6 +99,7 @@ describe('startSettingsSync — sign-in / record application', () => {
       inBrowserMaxTokens: 3000,
       thinkTokenBudget: 1500,
       startView: 'dashboard' as const,
+      llmEnabled: true,
     }
     writeUserSettings('bob', stored)
 
@@ -242,6 +245,70 @@ describe('startSettingsSync — auto-load opt-in', () => {
 
       expect(vi.mocked(webllm.MLCEngine)).not.toHaveBeenCalled()
       expect(reloadMock).not.toHaveBeenCalled()
+    } finally {
+      stop()
+    }
+  })
+
+  // Step 8b: the scenario the master switch exists for — a user who turned LLM
+  // features off but had auto-load armed earlier must not have a multi-gigabyte
+  // model pulled on sign-in.
+  test('does NOT load the model when llmEnabled is false, even with autoLoadModel:true', async () => {
+    writeUserSettings('erin', {
+      ...DEFAULT_USER_SETTINGS,
+      modelId: AVAILABLE_MODELS[0],
+      autoLoadModel: true,
+      llmEnabled: false,
+    })
+
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('erin'))
+      await flush()
+
+      expect(vi.mocked(webllm.MLCEngine)).not.toHaveBeenCalled()
+      expect(reloadMock).not.toHaveBeenCalled()
+      // The preference itself still applies to the atoms.
+      expect(peek(llmEnabledAtom)).toBe(false)
+    } finally {
+      stop()
+    }
+  })
+})
+
+describe('startSettingsSync — llmEnabled round-trip', () => {
+  test('hydrates llmEnabled on sign-in and persists a change back', async () => {
+    writeUserSettings('frank', { ...DEFAULT_USER_SETTINGS, llmEnabled: false })
+
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('frank'))
+      await flush()
+      expect(peek(llmEnabledAtom)).toBe(false)
+
+      llmEnabledAtom.set(true)
+      await flush()
+      expect(readUserSettings('frank')!.llmEnabled).toBe(true)
+    } finally {
+      stop()
+    }
+  })
+
+  test('resets to the default (enabled) on sign-out', async () => {
+    writeUserSettings('gina', { ...DEFAULT_USER_SETTINGS, llmEnabled: false })
+
+    const stop = startSettingsSync()
+    try {
+      userAtom.set(user('gina'))
+      await flush()
+      expect(peek(llmEnabledAtom)).toBe(false)
+
+      userAtom.set(null)
+      await flush()
+
+      // The next account / the login screen must not inherit the previous
+      // user's opt-out.
+      expect(peek(llmEnabledAtom)).toBe(true)
     } finally {
       stop()
     }

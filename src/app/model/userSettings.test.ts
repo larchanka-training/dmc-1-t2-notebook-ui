@@ -40,6 +40,7 @@ describe('readUserSettings', () => {
       inBrowserMaxTokens: 1234,
       thinkTokenBudget: 567,
       startView: 'dashboard',
+      llmEnabled: true,
     }
     localStorage.setItem(settingsKey('present'), JSON.stringify(record))
 
@@ -62,6 +63,7 @@ describe('writeUserSettings', () => {
       inBrowserMaxTokens: 2000,
       thinkTokenBudget: 1000,
       startView: 'last-opened',
+      llmEnabled: true,
     }
 
     writeUserSettings('rt', record)
@@ -93,6 +95,7 @@ describe('ensureUserSettings', () => {
       inBrowserMaxTokens: 3333,
       thinkTokenBudget: 1111,
       startView: 'dashboard',
+      llmEnabled: true,
     }
     writeUserSettings('keep', custom)
 
@@ -199,6 +202,62 @@ describe('coerce (exercised via readUserSettings)', () => {
     expect(readUserSettings('bad-name')!.displayName).toBe('')
   })
 
+  // ─── Step 8b: llmEnabled ───────────────────────────────────────────────────
+
+  test('defaults llmEnabled to true so upgrading users keep LLM features', () => {
+    expect(DEFAULT_USER_SETTINGS.llmEnabled).toBe(true)
+  })
+
+  test('a record written BEFORE Step 8b (no llmEnabled key) reads back as enabled', () => {
+    // The real pre-8b stored shape, spelled out rather than spread from the
+    // current defaults: a `{ ...DEFAULT_USER_SETTINGS }` spread would already
+    // contain the new key, so it could not catch a coercion that turns a missing
+    // field into `false` and silently switches LLM off on upgrade.
+    localStorage.setItem(
+      settingsKey('legacy'),
+      JSON.stringify({
+        displayName: 'Legacy',
+        modelId: AVAILABLE_MODELS[2],
+        autoLoadModel: true,
+        inBrowserMaxTokens: 1500,
+        thinkTokenBudget: 700,
+        startView: 'last-opened',
+      }),
+    )
+
+    const result = readUserSettings('legacy')!
+    expect(result.llmEnabled).toBe(true)
+    // The rest of the legacy record must survive untouched.
+    expect(result.displayName).toBe('Legacy')
+    expect(result.autoLoadModel).toBe(true)
+  })
+
+  test('keeps an explicit llmEnabled: false', () => {
+    localStorage.setItem(
+      settingsKey('opted-out'),
+      JSON.stringify({ ...DEFAULT_USER_SETTINGS, llmEnabled: false }),
+    )
+
+    expect(readUserSettings('opted-out')!.llmEnabled).toBe(false)
+  })
+
+  test('resets a non-boolean llmEnabled to the default (true), not to falsy', () => {
+    // `"false"`, `0` and `null` are all truthy-or-falsy traps: a `!== false`
+    // check would accept the string, and a plain `=== true` check would turn
+    // every one of them into a silent opt-out.
+    for (const [user, value] of [
+      ['bad-llm-str', 'false'],
+      ['bad-llm-zero', 0],
+      ['bad-llm-null', null],
+    ] as const) {
+      localStorage.setItem(
+        settingsKey(user),
+        JSON.stringify({ ...DEFAULT_USER_SETTINGS, llmEnabled: value }),
+      )
+      expect(readUserSettings(user)!.llmEnabled).toBe(true)
+    }
+  })
+
   test('passes valid values through unchanged', () => {
     const valid: UserSettings = {
       displayName: 'Valid User',
@@ -207,6 +266,7 @@ describe('coerce (exercised via readUserSettings)', () => {
       inBrowserMaxTokens: 1000,
       thinkTokenBudget: 500,
       startView: 'last-opened',
+      llmEnabled: true,
     }
     localStorage.setItem(settingsKey('valid'), JSON.stringify(valid))
 

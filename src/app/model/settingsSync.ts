@@ -9,6 +9,7 @@ import {
 } from '@/features/web-llm'
 import { inBrowserMaxTokensAtom, thinkTokenBudgetAtom } from '@/features/notebook'
 import { displayNameAtom, startViewAtom } from '@/features/settings'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import {
   DEFAULT_USER_SETTINGS,
   ensureUserSettings,
@@ -16,7 +17,7 @@ import {
   type UserSettings,
 } from './userSettings'
 
-// Per-user settings sync (TARDIS-181). Owns the seam between the 5 in-memory
+// Per-user settings sync (TARDIS-181). Owns the seam between the in-memory
 // settings atoms and their persisted, user-namespaced records (`settings:<id>`):
 //   - on sign-in: load (or create-with-defaults) the user's record and apply it
 //     to the atoms; auto-load the model if the user opted in;
@@ -39,6 +40,7 @@ function snapshot(): UserSettings {
     inBrowserMaxTokens: inBrowserMaxTokensAtom(),
     thinkTokenBudget: thinkTokenBudgetAtom(),
     startView: startViewAtom(),
+    llmEnabled: llmEnabledAtom(),
   }
 }
 
@@ -51,11 +53,12 @@ function apply(s: UserSettings): void {
   inBrowserMaxTokensAtom.set(s.inBrowserMaxTokens)
   thinkTokenBudgetAtom.set(s.thinkTokenBudget)
   startViewAtom.set(s.startView)
+  llmEnabledAtom.set(s.llmEnabled)
 }
 
 /**
  * Start the per-user settings sync. Returns an unsubscribe handle that detaches
- * the user subscription and all five atom write-back subscriptions.
+ * the user subscription and every atom write-back subscription.
  */
 export function startSettingsSync(): () => void {
   // The id of the user whose record the atom write-backs target. null while
@@ -109,7 +112,16 @@ export function startSettingsSync(): () => void {
       // Honour the per-user auto-load preference now that the record is applied.
       // Best-effort: loadModelAction owns its own progress/error + sequence
       // guard; gate on a valid catalogue id so a coerced default can't misfire.
-      if (settings.autoLoadModel && AVAILABLE_MODELS.includes(settings.modelId)) {
+      // `llmEnabled` is checked here as well as inside `loadModelAction`: this is
+      // the sign-in path where the download would otherwise start unprompted, and
+      // pulling a multi-gigabyte model for a user who switched LLM off is the
+      // exact complaint Step 8b exists to fix — so the intent is legible at the
+      // call site, not only at the choke point.
+      if (
+        settings.llmEnabled &&
+        settings.autoLoadModel &&
+        AVAILABLE_MODELS.includes(settings.modelId)
+      ) {
         void loadModelAction()
       }
     }),
@@ -133,6 +145,7 @@ export function startSettingsSync(): () => void {
     inBrowserMaxTokensAtom.subscribe(persist),
     thinkTokenBudgetAtom.subscribe(persist),
     startViewAtom.subscribe(persist),
+    llmEnabledAtom.subscribe(persist),
   ]
 
   return () => {

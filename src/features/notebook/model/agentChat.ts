@@ -1,6 +1,7 @@
 import { action, atom, wrap } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import { llm } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
@@ -31,6 +32,8 @@ export const closeAgentChatAction = action(() => {
 // it hit. `agentSendAction` is the CLOUD tier (kept under this name so existing
 // callers/tests stay valid).
 export const agentSendAction = action(async (prompt: string) => {
+  // Step 8b master switch (cloud tier). Return before any request or state change.
+  if (!llmEnabledAtom()) return
   const afterId = agentInsertAfterIdAtom()
 
   // Pre-capture before the async boundary.
@@ -56,6 +59,9 @@ export const agentSendAction = action(async (prompt: string) => {
 // generator returns raw code (no result-kind classification), so the inserted
 // cell is always a code cell, matching `generateAndInsertCodeAction`.
 export const agentSendInBrowserAction = action(async (prompt: string) => {
+  // Step 8b master switch (in-browser tier). The switch disables BOTH tiers —
+  // "off" means no generation at all, not "cloud off, local still runs".
+  if (!llmEnabledAtom()) return
   const generator = codeGeneratorAtom()
   if (!generator) return
   // Bail BEFORE closing the dialog if a generation is already running: the

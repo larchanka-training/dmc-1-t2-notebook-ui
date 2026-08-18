@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { wrap } from '@reatom/core'
 import { llm } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { cloudMessagesAtom, cloudSendAction } from './cloudPlayground'
 
 const fakeResponse = (content: string): llm.GenerateCodeResponse => ({
@@ -45,5 +46,26 @@ describe('cloudSendAction', () => {
     await expect(wrap(cloudSendAction('will fail'))).rejects.toThrow('cloud unavailable')
 
     expect(cloudMessagesAtom()).toEqual([{ role: 'user', content: 'will fail' }])
+  })
+})
+
+// Step 8b — the playground's cloud panel is one of the guarded entry points
+// (inventory: `entities/llm-availability`).
+describe('cloudSendAction with LLM features off', () => {
+  afterEach(() => {
+    llmEnabledAtom.set(true)
+  })
+
+  test('sends no request and leaves the transcript untouched', async () => {
+    const spy = vi.spyOn(llm, 'generateCode')
+    llmEnabledAtom.set(false)
+
+    await wrap(cloudSendAction('hello cloud'))
+
+    expect(spy).not.toHaveBeenCalled()
+    // The user message is appended optimistically BEFORE the request, so the
+    // guard has to run first — otherwise the transcript keeps a question that
+    // can never get an answer.
+    expect(cloudMessagesAtom()).toEqual([])
   })
 })
