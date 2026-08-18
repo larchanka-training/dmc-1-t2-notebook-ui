@@ -7,7 +7,7 @@ import type { StartView } from '@/features/settings'
 // preferences. Namespacing by id is what fixes the shared-browser leak (User B
 // must not inherit User A's name / model / limits after a sign-out + sign-in).
 //
-// Only the 5 task settings live here. `downloadedModelIdsAtom` is intentionally
+// Only the task settings live here. `downloadedModelIdsAtom` is intentionally
 // NOT included — it mirrors the device-global WebLLM Cache Storage shared by
 // every user of the browser, so it stays self-persisted in `features/web-llm`.
 
@@ -24,6 +24,12 @@ export interface UserSettings {
   thinkTokenBudget: number
   /** Which screen to open on sign-in (TARDIS-183). */
   startView: StartView
+  /**
+   * Master on/off switch for LLM features (roadmap Step 8b). When false, no
+   * cloud generation request is made and no in-browser model is loaded or run.
+   * A UX preference, NOT a security control — see `entities/llm-availability`.
+   */
+  llmEnabled: boolean
 }
 
 /** Defaults written immediately on first sign-in when no record exists yet. */
@@ -36,6 +42,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   // Default reproduces the pre-183 behaviour (reopen the last/newest notebook),
   // so the dashboard only becomes the start screen on an explicit opt-in.
   startView: 'last-opened',
+  // Default ON: upgrading users must not silently lose LLM features because a
+  // record written before Step 8b has no `llmEnabled` key.
+  llmEnabled: true,
 }
 
 /** localStorage key for a given user's settings record. */
@@ -71,6 +80,11 @@ function coerce(raw: unknown): UserSettings {
       o.startView === 'dashboard' || o.startView === 'last-opened'
         ? o.startView
         : DEFAULT_USER_SETTINGS.startView,
+    // Explicit boolean check rather than `!== false`: a missing key OR a
+    // non-boolean (`"false"`, 0, null) must both fall back to the default,
+    // and the default here is `true` — the opposite of `autoLoadModel` above,
+    // where absence legitimately means "off".
+    llmEnabled: typeof o.llmEnabled === 'boolean' ? o.llmEnabled : DEFAULT_USER_SETTINGS.llmEnabled,
   }
 }
 

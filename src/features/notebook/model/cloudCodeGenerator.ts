@@ -1,6 +1,7 @@
 import { action, atom, wrap } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import { llm } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { cellsAtom, addCell, updateCellCode, notebookTitleAtom } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { cellKindForLlmResult } from './llmResult'
@@ -16,6 +17,10 @@ export const cloudGenerateErrorsAtom = atom<Map<string, Error>>(
 )
 
 export const cloudGenerateAndInsertCodeAction = action(async (cellId: string) => {
+  // Step 8b master switch. Guarded in the ACTION, not only in the UI: the button
+  // is disabled too, but a model-layer guard is what makes "no accidental cloud
+  // request" true for every caller (hotkey, test, future call site).
+  if (!llmEnabledAtom()) return
   const cell = cellsAtom().find((c) => c.id === cellId)
   if (!cell) return
 

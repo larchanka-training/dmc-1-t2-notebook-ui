@@ -1,6 +1,7 @@
 import { atom, action, computed, wrap } from '@reatom/core'
 import { withAsync } from '@reatom/core'
 import type { LlmContextCell } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { cellsAtom, addCell, updateCellCode } from './notebook'
 import { enterEdit, focusCell } from './cellMode'
 import { buildNotebookContext, contextToPromptBlock } from './context-ai/contextBuilder'
@@ -166,6 +167,9 @@ export const inBrowserGenerateErrorsAtom = atom<Map<string, Error>>(
 )
 
 export const generateAndInsertCodeAction = action(async (cellId: string) => {
+  // Step 8b master switch (in-browser tier). Checked before the generator so a
+  // disabled LLM never runs even when a model happens to be loaded already.
+  if (!llmEnabledAtom()) return
   const generator = codeGeneratorAtom()
   if (!generator) return
 

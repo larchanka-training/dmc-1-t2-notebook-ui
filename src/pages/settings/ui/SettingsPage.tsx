@@ -3,6 +3,7 @@ import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Lock } from 'lucide-react'
 import { displayNameAtom, startViewAtom } from '@/features/settings'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { modelIdAtom, autoLoadModelAtom, MODEL_CATALOG, AVAILABLE_MODELS } from '@/features/web-llm'
 import {
   inBrowserMaxTokensAtom,
@@ -17,17 +18,26 @@ import { Input } from '@/shared/ui/input'
 import { Switch } from '@/shared/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 
+// Shown under a control that the Step 8b master switch has disabled. Names the
+// switch by its section title so the user knows where to turn it back on — a
+// greyed-out field with no explanation reads like a bug.
+const DISABLED_NOTE = 'Turn on “LLM features” above to change this.'
+
 // A titled settings group. `locked` greys the card out and shows a lock + a
 // "coming soon" note for features that don't exist yet (start view, Passkey).
+// `note` is a short line rendered under the controls — used to say WHY a control
+// is disabled, so a greyed-out field is never a dead end the user has to guess at.
 function SettingsSection({
   title,
   description,
   locked,
+  note,
   children,
 }: {
   title: string
   description: string
   locked?: boolean
+  note?: string
   children?: React.ReactNode
 }) {
   return (
@@ -44,7 +54,12 @@ function SettingsSection({
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      {children ? <CardContent className="flex flex-col gap-3">{children}</CardContent> : null}
+      {children || note ? (
+        <CardContent className="flex flex-col gap-3">
+          {children}
+          {note ? <p className="text-[13px] text-muted-foreground">{note}</p> : null}
+        </CardContent>
+      ) : null}
     </Card>
   )
 }
@@ -69,16 +84,54 @@ const DisplayNameSection = reatomComponent(() => {
   )
 }, 'DisplayNameSection')
 
+// Roadmap Step 8b: the master on/off switch for LLM features. Placed above the
+// model/limit sections it governs, so the reason those are greyed out is visible
+// right before them rather than somewhere further down the page.
+//
+// Deliberately NOT described as a security or privacy guarantee: it is
+// device-local state (see `entities/llm-availability`). The copy promises exactly
+// what it delivers — no requests, no downloads — and nothing more.
+const LlmFeaturesSection = reatomComponent(() => {
+  const enabled = llmEnabledAtom()
+  return (
+    <SettingsSection
+      title="LLM features"
+      description="Turn code generation off entirely. While off, no cloud request is sent and no in-browser model is downloaded or run."
+    >
+      {/* The visible text is the switch's accessible name (base-ui wires the
+          wrapping label via aria-labelledby, which overrides aria-label), so it
+          must stay STABLE — the on/off state goes in a separate line below
+          rather than in the label, which would rename the control on every
+          toggle and make it unfindable by name. */}
+      <label className="flex items-center gap-2.5 text-sm">
+        <Switch
+          checked={enabled}
+          onCheckedChange={wrap((checked: boolean) => llmEnabledAtom.set(checked))}
+        />
+        <span>Enable LLM features</span>
+      </label>
+      <p className="text-[13px] text-muted-foreground">
+        {enabled
+          ? 'On — code generation is available.'
+          : 'Off — no cloud requests are sent and no model is downloaded.'}
+      </p>
+    </SettingsSection>
+  )
+}, 'LlmFeaturesSection')
+
 const DefaultModelSection = reatomComponent(() => {
   const modelId = modelIdAtom()
   const autoLoad = autoLoadModelAtom()
+  const llmEnabled = llmEnabledAtom()
   return (
     <SettingsSection
       title="Default LLM model"
       description="The in-browser model used for code generation. Auto-load downloads it on app start; otherwise load it manually before the first request."
+      note={llmEnabled ? undefined : DISABLED_NOTE}
     >
       <Select
         value={modelId}
+        disabled={!llmEnabled}
         onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
       >
         <SelectTrigger className="w-full" aria-label="Default model">
@@ -97,9 +150,10 @@ const DefaultModelSection = reatomComponent(() => {
           checked={autoLoad}
           onCheckedChange={wrap((checked: boolean) => autoLoadModelAtom.set(checked))}
           // Defence-in-depth: the Select only offers catalogue ids and `coerce`
-          // resets a phantom id on load, so in practice this is always enabled —
-          // it just guards against arming auto-load for an unknown model id.
-          disabled={!AVAILABLE_MODELS.includes(modelId)}
+          // resets a phantom id on load, so the id check is in practice always
+          // satisfied — it just guards against arming auto-load for an unknown
+          // model id. The `llmEnabled` half is the Step 8b switch.
+          disabled={!llmEnabled || !AVAILABLE_MODELS.includes(modelId)}
         />
         <span>Auto-load this model on start</span>
       </label>
@@ -175,10 +229,12 @@ function TokenLimitField({
 const LimitsSection = reatomComponent(() => {
   const maxTokens = inBrowserMaxTokensAtom()
   const thinkBudget = thinkTokenBudgetAtom()
+  const llmEnabled = llmEnabledAtom()
   return (
     <SettingsSection
       title="Local model limits"
       description="Token budgets for the in-browser model, overriding the built-in defaults. Values are clamped to a safe range when generating."
+      note={llmEnabled ? undefined : DISABLED_NOTE}
     >
       <label className="flex flex-col gap-1.5 text-sm">
         <span>
@@ -253,6 +309,7 @@ export default function SettingsPage() {
       </header>
 
       <DisplayNameSection />
+      <LlmFeaturesSection />
       <DefaultModelSection />
       <LimitsSection />
 

@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 // read the atom directly via `peek`, which is what the test verifies; silencing
 // the warning cleanly belongs to a shared test-harness change, not here.
 import { displayNameAtom, startViewAtom } from '@/features/settings'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { autoLoadModelAtom } from '@/features/web-llm'
 import {
   IN_BROWSER_MAX_TOKENS,
@@ -52,6 +53,7 @@ describe('SettingsPage (TARDIS-181)', () => {
     render(<SettingsPage />)
 
     expect(screen.getByText('Display name')).toBeInTheDocument()
+    expect(screen.getByText('LLM features')).toBeInTheDocument()
     expect(screen.getByText('Default LLM model')).toBeInTheDocument()
     expect(screen.getByText('Local model limits')).toBeInTheDocument()
     expect(screen.getByText('On start')).toBeInTheDocument()
@@ -74,9 +76,10 @@ describe('SettingsPage (TARDIS-181)', () => {
     const user = userEvent.setup()
     render(<SettingsPage />)
 
-    // Two switches now exist (auto-load + On start); the auto-load one is first
-    // in DOM order (Default LLM model section precedes On start).
-    const toggle = screen.getAllByRole('switch')[0]
+    // Selected by accessible name, not DOM index: Step 8b added a third switch
+    // ABOVE this one, and an index-based query silently retargets when sections
+    // are reordered.
+    const toggle = screen.getByRole('switch', { name: 'Auto-load this model on start' })
     expect(toggle).toBeEnabled()
     expect(peek(autoLoadModelAtom)).toBe(false)
 
@@ -137,5 +140,49 @@ describe('SettingsPage (TARDIS-181)', () => {
     await user.tab()
     expect(peek(inBrowserMaxTokensAtom)).toBe(MAX_IN_BROWSER_MAX_TOKENS)
     expect(input).toHaveValue(MAX_IN_BROWSER_MAX_TOKENS)
+  })
+})
+
+// Step 8b — the master switch and the disabled-with-a-reason affordance.
+describe('SettingsPage — LLM features master switch (Step 8b)', () => {
+  afterEach(() => {
+    llmEnabledAtom.set(true)
+  })
+
+  test('is on by default and toggles llmEnabledAtom', async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    const toggle = screen.getByRole('switch', { name: 'Enable LLM features' })
+    expect(peek(llmEnabledAtom)).toBe(true)
+
+    await user.click(toggle)
+
+    expect(peek(llmEnabledAtom)).toBe(false)
+  })
+
+  test('switching off disables the dependent controls and says why', () => {
+    llmEnabledAtom.set(false)
+    render(<SettingsPage />)
+
+    expect(screen.getByLabelText('Default model')).toBeDisabled()
+    // base-ui's Switch renders a <span role="switch"> and marks it with
+    // aria-disabled rather than the native `disabled` attribute, so
+    // `toBeDisabled()` does not apply here.
+    expect(screen.getByRole('switch', { name: 'Auto-load this model on start' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    // Disabled, not hidden — and the note names the switch, so the control is
+    // never a dead end the user has to guess about.
+    expect(screen.getAllByText(/Turn on .*LLM features.* above to change this\./).length).toBe(2)
+  })
+
+  test('the controls are enabled again when it is on', () => {
+    llmEnabledAtom.set(true)
+    render(<SettingsPage />)
+
+    expect(screen.getByLabelText('Default model')).toBeEnabled()
+    expect(screen.queryByText(/above to change this/)).not.toBeInTheDocument()
   })
 })

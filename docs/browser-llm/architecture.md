@@ -20,6 +20,11 @@ features/notebook       ← owns the notebook; has a DI slot for code generation
 
 ```
 src/
+├── entities/
+│   └── llm-availability/
+│       └── model/
+│           └── llmAvailability.ts      ← llmEnabledAtom (master switch) + entry-point inventory
+│
 ├── features/
 │   ├── web-llm/
 │   │   ├── model/
@@ -206,6 +211,35 @@ mirrors the WebLLM Cache Storage shared by every user of the browser; it is
 reconciled against the real cache on startup (`reconcileDownloadedModelsAction` →
 `webllm.hasModelInCache`), so an evicted/cleared model loses its highlight instead
 of showing a stale check.
+
+---
+
+## The LLM master switch (`llmEnabledAtom`)
+
+A per-user switch that turns LLM features off entirely (roadmap Step 8b; decision:
+`docs/specs/llm-provider-toggle-security-contract.md` in the workspace repo). While
+off, **no cloud request is sent and no model is downloaded or run** — including the
+sign-in auto-load, which is the case the switch exists for: a user who turned LLM
+off must never have a multi-gigabyte model pulled for them.
+
+It lives in `entities/llm-availability` rather than `features/settings` because
+three features and two pages read it and a feature must not import a sibling
+feature; `entities` is the lowest layer all of them can reach. Like the other
+per-user settings it is hydrated from and written back to `settings:<userId>` by
+`app/model/settingsSync.ts`, and it defaults to **enabled**, so a record written
+before Step 8b (with no `llmEnabled` key) leaves the user's behaviour unchanged.
+
+Every generation and download path checks it — the authoritative list of guarded
+entry points is the comment in `llmAvailability.ts`, kept next to the atom so a new
+call site has one obvious place to consult. Guards live in the **actions**, not only
+in the UI: the buttons are disabled too, but a model-layer guard is what makes "no
+accidental request" true for every caller.
+
+**It is a UX preference, not a security control.** It is device-local state derived
+from user-editable `localStorage`. The real controls on `POST /llm/generate` are
+server-side and unchanged: authentication, the per-user rate limit, and the request
+byte caps. Do not describe it as authorization, and do not rely on it to keep anyone
+out of anything.
 
 ---
 
