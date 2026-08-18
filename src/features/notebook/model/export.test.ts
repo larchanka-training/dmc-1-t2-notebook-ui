@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { addCell, cellsAtom, setNotebookTitle, updateCellCode } from './notebook'
+import { addCell, cellsAtom, changeCellKind, setNotebookTitle, updateCellCode } from './notebook'
 import { exportNotebook } from './export'
+import { assertValidIpynbFile } from '../persistence/__fixtures__/nbformatSchema'
 import type { Cell } from '../domain/cell'
 import type { OutputItem } from '../runtime/types'
 
@@ -225,4 +226,135 @@ describe('exportNotebook', () => {
     const md = await blobText()
     expect(md).toMatch(/> ⚠️ \d+ cell outputs? omitted: notebook output size limit reached\./)
   }, 15000)
+})
+
+// ─── Step 7d — generated-file validation + no-regression ─────────────────────
+//
+// The tests above assert the mapping; these assert (a) the file a user actually
+// downloads satisfies the official nbformat 4.5 schema, and (b) adding the third
+// format did not change what JSON and Markdown produce.
+
+describe('exportNotebook — generated-file validation (Step 7d)', () => {
+  let capturedBlob: Blob | null = null
+
+  beforeEach(() => {
+    capturedBlob = null
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      capturedBlob = blob
+      return 'blob:mock'
+    })
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function exportText(format: 'json' | 'markdown' | 'ipynb'): Promise<string> {
+    exportNotebook(format)
+    expect(capturedBlob).not.toBeNull()
+    return await capturedBlob!.text()
+  }
+
+  // A notebook exercising every persisted output kind plus a cell with none, so
+  // one fixture covers the whole mapping surface end to end.
+  function seedRichNotebook() {
+    setNotebookTitle('Validation Doc')
+    const [a] = cellsAtom()
+    const b = addCell()
+    const c = addCell()
+    const d = addCell()
+    // A real markdown cell, so the .ipynb markdown-cell branch is validated too.
+    changeCellKind(a!.id, 'markdown')
+    updateCellCode(a!.id, '# Notes\nwith **markdown**')
+    updateCellCode(b!.id, 'const answer = 42\nanswer')
+    updateCellCode(c!.id, 'img()')
+    updateCellCode(d!.id, 'noOutput()')
+    setFreshOutput(b!, [{ type: 'result', value: { kind: 'primitive', value: 42 } }])
+    setFreshOutput(c!, [
+      { type: 'image', mime: 'image/png', data: 'QUJD' },
+      { type: 'html', html: '<b>bold</b>' },
+    ])
+    return { a: a!, b: b!, c: c!, d: d! }
+  }
+
+  test('the downloaded .ipynb satisfies the official nbformat 4.5 schema', async () => {
+    seedRichNotebook()
+    const file = await exportText('ipynb')
+    assertValidIpynbFile(file)
+    const nb = JSON.parse(file)
+    expect(nb.cells.map((cell: { cell_type: string }) => cell.cell_type)).toEqual([
+      'markdown',
+      'code',
+      'code',
+      'code',
+    ])
+  })
+
+  test('an empty, untouched notebook still exports a schema-valid .ipynb', async () => {
+    setNotebookTitle('')
+    assertValidIpynbFile(await exportText('ipynb'))
+  })
+
+  test('JSON export shape is unchanged by the added format', async () => {
+    const { b, c, d } = seedRichNotebook()
+    const parsed = JSON.parse(await exportText('json'))
+
+    // The envelope and the wire-safe notebook keys — the contract an importer and
+    // the autosync payload both depend on (§6 C6.1).
+    expect(Object.keys(parsed).sort()).toEqual(['exportVersion', 'notebook', 'outputs', 'overflow'])
+    expect(parsed.exportVersion).toBe(1)
+    expect(Object.keys(parsed.notebook).sort()).toEqual([
+      'cells',
+      'createdAt',
+      'formatVersion',
+      'id',
+      'title',
+      'updatedAt',
+    ])
+    expect(parsed.notebook).not.toHaveProperty('outputs')
+    // Outputs stay a sibling array, only for cells that have any.
+    expect(parsed.outputs.map((o: { cellId: string }) => o.cellId)).toEqual([b.id, c.id])
+    expect(parsed.outputs.some((o: { cellId: string }) => o.cellId === d.id)).toBe(false)
+    expect(parsed.overflow).toBeNull()
+  })
+
+  test('Markdown export output is unchanged by the added format', async () => {
+    seedRichNotebook()
+    const md = await exportText('markdown')
+
+    expect(md.startsWith('# Validation Doc\n')).toBe(true)
+    expect(md).toContain('```javascript\nconst answer = 42\nanswer\n```')
+    expect(md).toContain('```\n42\n```')
+    expect(md).toContain('![output](data:image/png;base64,QUJD)')
+    // html is still INERT in Markdown — the `.ipynb` mapping emits live text/html,
+    // and that difference must not leak back into this format.
+    expect(md).toContain('```html\n<b>bold</b>\n```')
+    expect(md.endsWith('\n')).toBe(true)
+  })
+
+  test('all three formats carry the same set of output-bearing cells', async () => {
+    const { b, c, d } = seedRichNotebook()
+
+    const bundle = JSON.parse(await exportText('json'))
+    const jsonCells: string[] = bundle.outputs.map((o: { cellId: string }) => o.cellId)
+
+    const nb = JSON.parse(await exportText('ipynb'))
+    const ipynbCells: string[] = nb.cells
+      .filter((cell: { outputs?: unknown[] }) => (cell.outputs?.length ?? 0) > 0)
+      .map((cell: { id: string }) => cell.id)
+
+    // One shared projection feeds every format, so this must hold by construction —
+    // the assertion is what makes a future divergence fail loudly.
+    expect(ipynbCells).toEqual(jsonCells)
+    expect(jsonCells).toEqual([b.id, c.id])
+
+    const md = await exportText('markdown')
+    expect(md).toContain('42')
+    expect(md).toContain('QUJD')
+    // The output-less cell contributes source only, no output block.
+    const nbCellD = nb.cells.find((cell: { id: string }) => cell.id === d.id)
+    expect(nbCellD.outputs).toEqual([])
+  })
 })

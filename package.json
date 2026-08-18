@@ -72,6 +72,8 @@
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "4.1.10",
     "@vitest/web-worker": "^4.1.10",
+    "ajv": "^8.20.0",
+    "ajv-draft-04": "^1.0.0",
     "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",

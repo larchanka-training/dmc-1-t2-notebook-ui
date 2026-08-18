@@ -150,6 +150,16 @@ guarantee a backend route could not.
     markdown warning cell.
 - stdout/stderr are not persisted, so they do not appear (reproducible by re-run).
 
+**Validation.** The generated file is checked against the **official nbformat v4.5
+JSON Schema**, vendored verbatim from `jupyter/nbformat` into
+`persistence/__fixtures__/nbformat.v4.5.schema.json` and applied by
+`assertValidIpynbFile` (test-only; `ajv` + `ajv-draft-04` are devDependencies). Both
+the serializer unit tests and an end-to-end test of the downloaded Blob run through
+it, so a schema-level regression (a missing 4.5 cell `id`, an unknown property, a
+bad `output_type`) fails the build rather than surfacing when someone opens the file
+in Jupyter. Executing the notebook in a real kernel is deliberately out of scope —
+structural validation only, matching the frontend-only decision.
+
 ## File name
 
 The browser saves the file as `<sanitized-title>.<ext>`. Sanitization
@@ -195,16 +205,18 @@ not been built into this flow:
 
 ## Implementation map
 
-| File                                                | Role                                                                               |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `src/features/notebook/persistence/serialize.ts`    | Pure `toJSON` / `toMarkdown` converters                                            |
-| `src/features/notebook/persistence/exportBundle.ts` | `toExportBundle` — the shared capped bundle (notebook + outputs + overflow)        |
-| `src/features/notebook/persistence/ipynb.ts`        | Pure `toIpynb` — nbformat v4.5 mapping from the bundle                             |
-| `src/shared/lib/sanitizeFilename.ts`                | ASCII-safe download name + `notebook-<id>` fallback                                |
-| `src/shared/lib/downloadBlob.ts`                    | `<a download>` + deferred `URL.revokeObjectURL` (Safari quirk)                     |
-| `src/features/notebook/model/export.ts`             | `exportNotebook(format)` action — builds the snapshot, blob, and triggers download |
-| `src/features/notebook/ui/NotebookExportMenu.tsx`   | `reatomComponent` wrapping the DropdownMenu (JSON / Markdown / Jupyter)            |
-| `src/features/notebook/ui/NotebookHeader.tsx`       | Mounts the menu next to the editable title                                         |
+| File                                                                       | Role                                                                               |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/features/notebook/persistence/serialize.ts`                           | Pure `toJSON` / `toMarkdown` converters                                            |
+| `src/features/notebook/persistence/exportBundle.ts`                        | `toExportBundle` — the shared capped bundle (notebook + outputs + overflow)        |
+| `src/features/notebook/persistence/ipynb.ts`                               | Pure `toIpynb` — nbformat v4.5 mapping from the bundle                             |
+| `src/shared/lib/sanitizeFilename.ts`                                       | ASCII-safe download name + `notebook-<id>` fallback                                |
+| `src/shared/lib/downloadBlob.ts`                                           | `<a download>` + deferred `URL.revokeObjectURL` (Safari quirk)                     |
+| `src/features/notebook/model/export.ts`                                    | `exportNotebook(format)` action — builds the snapshot, blob, and triggers download |
+| `src/features/notebook/ui/NotebookExportMenu.tsx`                          | `reatomComponent` wrapping the DropdownMenu (JSON / Markdown / Jupyter)            |
+| `src/features/notebook/ui/NotebookHeader.tsx`                              | Mounts the menu next to the editable title                                         |
+| `src/features/notebook/persistence/__fixtures__/nbformat.v4.5.schema.json` | Vendored upstream nbformat schema (test-only)                                      |
+| `src/features/notebook/persistence/__fixtures__/nbformatSchema.ts`         | `assertValidIpynbFile` — validates a generated file (test-only)                    |
 
 The action is read-only: it does not write any atoms, does not bump the
 autosave revision, and does not trigger a remote sync.
