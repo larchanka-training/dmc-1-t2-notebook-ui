@@ -2,8 +2,11 @@
 // nbformat v4.5 JSON Schema (roadmap Step 7d).
 //
 // The schema next to this file is vendored VERBATIM from jupyter/nbformat
-// (`nbformat/v4/nbformat.v4.5.schema.json`) and is prettier-ignored so it stays
-// byte-identical to upstream — it is an external contract, not our source. Using
+// (`nbformat/v4/nbformat.v4.5.schema.json`, pinned at upstream commit `c419830d`)
+// and is prettier-ignored so it stays byte-identical to upstream — it is an
+// external contract, not our source. It is BSD-3-Clause licensed; the required
+// copyright notice, conditions, and disclaimer are in `THIRD_PARTY_NOTICES.md` at
+// the repo root, which also records the pinned commit and the file's SHA-256. Using
 // the real schema (rather than hand-rolled shape assertions) is the point: it
 // catches the requirements we would otherwise forget, e.g. the 4.5 cell `id`, the
 // `^[a-zA-Z0-9-_]+$` id pattern, `additionalProperties: false` on cells/outputs,

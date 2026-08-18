@@ -151,8 +151,9 @@ guarantee a backend route could not.
 - stdout/stderr are not persisted, so they do not appear (reproducible by re-run).
 
 **Validation.** The generated file is checked against the **official nbformat v4.5
-JSON Schema**, vendored verbatim from `jupyter/nbformat` into
-`persistence/__fixtures__/nbformat.v4.5.schema.json` and applied by
+JSON Schema**, vendored verbatim from `jupyter/nbformat` (BSD-3-Clause — see
+`THIRD_PARTY_NOTICES.md`, which pins the upstream commit and the file's SHA-256)
+into `persistence/__fixtures__/nbformat.v4.5.schema.json` and applied by
 `assertValidIpynbFile` (test-only; `ajv` + `ajv-draft-04` are devDependencies). Both
 the serializer unit tests and an end-to-end test of the downloaded Blob run through
 it, so a schema-level regression (a missing 4.5 cell `id`, an unknown property, a

@@ -334,6 +334,20 @@ describe('exportNotebook — generated-file validation (Step 7d)', () => {
     expect(md.endsWith('\n')).toBe(true)
   })
 
+  // Markdown carries no cell ids, so attribution has to come from position: slice
+  // the document at each cell's own fence and keep everything up to the next one.
+  // A whole-document `toContain` would not do — it cannot tell "cell b kept its
+  // result" from "some cell somewhere emitted a 42", and `42` already appears in
+  // cell b's SOURCE, so such an assertion passes even if every output is dropped.
+  function markdownSections(md: string, fences: string[]): string[] {
+    const starts = fences.map((fence) => {
+      const at = md.indexOf(fence)
+      expect(at, `source fence not found in Markdown export: ${fence}`).toBeGreaterThan(-1)
+      return { at, end: at + fence.length }
+    })
+    return starts.map((s, i) => md.slice(s.end, starts[i + 1]?.at ?? md.length))
+  }
+
   test('all three formats carry the same set of output-bearing cells', async () => {
     const { b, c, d } = seedRichNotebook()
 
@@ -349,12 +363,26 @@ describe('exportNotebook — generated-file validation (Step 7d)', () => {
     // the assertion is what makes a future divergence fail loudly.
     expect(ipynbCells).toEqual(jsonCells)
     expect(jsonCells).toEqual([b.id, c.id])
-
-    const md = await exportText('markdown')
-    expect(md).toContain('42')
-    expect(md).toContain('QUJD')
-    // The output-less cell contributes source only, no output block.
     const nbCellD = nb.cells.find((cell: { id: string }) => cell.id === d.id)
     expect(nbCellD.outputs).toEqual([])
+
+    // Markdown: assert each output lands under ITS OWN cell, and that the
+    // output-less cell contributes source only.
+    const md = await exportText('markdown')
+    const [sectionB, sectionC, sectionD] = markdownSections(md, [
+      '```javascript\nconst answer = 42\nanswer\n```',
+      '```javascript\nimg()\n```',
+      '```javascript\nnoOutput()\n```',
+    ])
+
+    expect(sectionB).toContain('```\n42\n```')
+    expect(sectionB).not.toContain('QUJD')
+
+    expect(sectionC).toContain('![output](data:image/png;base64,QUJD)')
+    expect(sectionC).toContain('```html\n<b>bold</b>\n```')
+    expect(sectionC).not.toContain('```\n42\n```')
+
+    // Nothing but whitespace follows the last cell's fence.
+    expect(sectionD!.trim()).toBe('')
   })
 })
