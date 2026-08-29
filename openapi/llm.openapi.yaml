@@ -34,6 +34,8 @@ paths:
                 $ref: '#/components/schemas/GenerateResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -162,6 +164,14 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
+    Forbidden:
+      description: >-
+        Account is not on the cloud LLM allowlist. Returned only when the backend
+        sets LLM_ALLOWED_EMAILS; an empty allowlist means no restriction.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
     ValidationError:
       description: Request validation failed or prompt/code rejected
       content:
@@ -186,13 +196,13 @@ components:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
     BadGateway:
-      description: Bedrock provider failed
+      description: Cloud LLM provider failed
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
     ServiceUnavailable:
-      description: Bedrock provider is not configured or unavailable
+      description: Cloud LLM provider is not configured or unavailable
       content:
         application/json:
           schema:

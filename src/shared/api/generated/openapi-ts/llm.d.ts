@@ -92,6 +92,15 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
+        /** @description Account is not on the cloud LLM allowlist. Returned only when the backend sets LLM_ALLOWED_EMAILS; an empty allowlist means no restriction. */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ApiErrorResponse"];
+            };
+        };
         /** @description Request validation failed or prompt/code rejected */
         ValidationError: {
             headers: {
@@ -121,7 +130,7 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
-        /** @description Bedrock provider failed */
+        /** @description Cloud LLM provider failed */
         BadGateway: {
             headers: {
                 [name: string]: unknown;
@@ -130,7 +139,7 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
-        /** @description Bedrock provider is not configured or unavailable */
+        /** @description Cloud LLM provider is not configured or unavailable */
         ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
@@ -170,6 +179,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
