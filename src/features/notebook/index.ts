@@ -181,3 +181,13 @@ export {
   CONTEXT_BYTE_CAP,
   DEFAULT_CONTEXT_WINDOW,
 } from './model/context-ai/contextBuilder'
+// Public-facing cloud-LLM copy (Step 8d-2). Exported because the LLM playground
+// page renders the same beta wording and must not fork it.
+export {
+  CLOUD_LLM_BETA_HINT,
+  CLOUD_LLM_BETA_LABEL,
+  CLOUD_LLM_RESTRICTED_MESSAGE,
+  formatCloudLlmError,
+  TRY_AGAIN_SUGGESTION,
+  USE_IN_BROWSER_SUGGESTION,
+} from './lib/cloudLlmAvailability'

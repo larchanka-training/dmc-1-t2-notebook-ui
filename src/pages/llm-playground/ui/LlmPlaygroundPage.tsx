@@ -3,7 +3,12 @@ import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Bot, Check, Cloud, Cpu, Send } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
-import { RateLimitedError } from '@/shared/api/errors'
+import {
+  CLOUD_LLM_BETA_HINT,
+  CLOUD_LLM_BETA_LABEL,
+  formatCloudLlmError,
+  TRY_AGAIN_SUGGESTION,
+} from '@/features/notebook'
 import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
@@ -25,35 +30,7 @@ import { cn } from '@/shared/lib/cn'
 import { cloudMessagesAtom, cloudSendAction } from '../model/cloudPlayground'
 
 function formatCloudSendError(err: Error): string {
-  if (err instanceof RateLimitedError) {
-    const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
-    return `Rate limit reached.${wait}`
-  }
-
-  const msg = err.message.toLowerCase()
-  if (msg.includes('invalid_token') || msg.includes('401') || msg.includes('sign in')) {
-    return 'Cloud AI requires sign-in. Log in and try again.'
-  }
-  if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
-    return 'Prompt was flagged by the safety filter.'
-  }
-  if (msg.includes('llm_timeout') || msg.includes('timeout')) {
-    return 'Cloud generation timed out. Try again.'
-  }
-  if (
-    msg.includes('llm_provider_not_configured') ||
-    msg.includes('llm_provider_error') ||
-    msg.includes('llm_unavailable') ||
-    msg.includes('503') ||
-    msg.includes('502')
-  ) {
-    return 'Cloud AI is temporarily unavailable. Try again later.'
-  }
-  if (msg.includes('request_too_large')) {
-    return 'Prompt is too large for the cloud request.'
-  }
-
-  return `Cloud generation failed: ${err.message}`
+  return formatCloudLlmError(err, TRY_AGAIN_SUGGESTION)
 }
 
 // ── Local panel ──────────────────────────────────────────────────────────────
@@ -226,11 +203,18 @@ const CloudPanel = reatomComponent(() => {
       <div className="border-b px-4 py-3">
         <div className="flex items-center gap-1.5 text-sm font-medium">
           <Cloud className="size-4 text-muted-foreground" />
-          Cloud (AWS Bedrock)
+          {/* Provider-neutral since Step 8d-1: the backend picks the cloud
+              adapter from config, so naming one vendor in the UI goes stale the
+              moment it is switched. */}
+          Cloud AI
+          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            {CLOUD_LLM_BETA_LABEL}
+          </span>
           <span className="ml-auto rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             requires sign-in
           </span>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">{CLOUD_LLM_BETA_HINT}</p>
         {sendError && (
           <p className="mt-1 text-xs text-destructive">{formatCloudSendError(sendError)}</p>
         )}

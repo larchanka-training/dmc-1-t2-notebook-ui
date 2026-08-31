@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { CLOUD_LLM_BETA_HINT, CLOUD_LLM_BETA_LABEL } from '../lib/cloudLlmAvailability'
 import { MarkdownSearchHighlight } from './MarkdownSearchHighlight'
 
 // Toolbar icon button (new-design-v2 REC.toolBtn): square, muted, hover-filled.
@@ -139,6 +140,10 @@ export function NotebookCell({
   const agentCloudLabel = isCode
     ? 'Improve with cloud agent (suggest a diff)'
     : 'Generate code · cloud agent'
+  // Step 8d-2: cloud is in limited testing, so say so wherever it is offered.
+  // The badge is unconditional — the client cannot know whether this account is
+  // allowlisted, and an endpoint that answered that would leak the policy.
+  const agentCloudTooltip = `${agentCloudLabel} · ${CLOUD_LLM_BETA_LABEL} — ${CLOUD_LLM_BETA_HINT}`
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -327,7 +332,7 @@ export function NotebookCell({
                   }
                 />
                 <TooltipContent>
-                  {onCloudGenerate ? agentCloudLabel : 'Cloud AI is temporarily unavailable'}
+                  {onCloudGenerate ? agentCloudTooltip : 'Cloud AI is temporarily unavailable'}
                 </TooltipContent>
               </Tooltip>
             )}

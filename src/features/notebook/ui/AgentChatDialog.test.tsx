@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { llm } from '@/shared/api'
-import { ApiError, RateLimitedError } from '@/shared/api/errors'
+import { ApiError, ForbiddenError, RateLimitedError } from '@/shared/api/errors'
+import { CLOUD_LLM_RESTRICTED_MESSAGE } from '../lib/cloudLlmAvailability'
 import { cellsAtom } from '../model/notebook'
 import {
   agentChatOpenAtom,
@@ -97,7 +98,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'create a variable')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (Beta)' }))
     await act(async () => {})
 
     expect(llm.generateCode).toHaveBeenCalledWith(
@@ -122,7 +123,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'explain closures')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (Beta)' }))
     await act(async () => {})
 
     expect(cellsAtom().length).toBe(cellsBefore + 1)
@@ -160,7 +161,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'bad prompt')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (Beta)' }))
     await act(async () => {})
 
     expect(screen.getByText(/flagged by the safety filter/i)).toBeInTheDocument()
@@ -178,7 +179,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'anything')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (Beta)' }))
     await act(async () => {})
 
     expect(screen.getByText(/generation failed/i)).toBeInTheDocument()
@@ -199,7 +200,7 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
     })
     expect(screen.getByRole('button', { name: /in-browser/i })).toBeDisabled()
     // The cloud tier stays available regardless of a local model.
-    expect(screen.getByRole('button', { name: /^cloud$/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cloud (Beta)' })).not.toBeDisabled()
   })
 
   // The in-browser TIER behaviour is covered at the model level (below): driving
@@ -314,5 +315,37 @@ describe('AgentChatDialog — cloud generate action (model level)', () => {
     const err = agentSendAction.error()
     expect(err).toBeInstanceOf(RateLimitedError)
     expect((err as RateLimitedError).retryAfter).toBe(30)
+  })
+})
+
+// Step 8d-2 review follow-up: Ask-agent is the third cloud entry point and was
+// the one that kept showing a raw `Generation failed: ...` for an allowlist 403.
+describe('AgentChatDialog — allowlist denial (Step 8d-2)', () => {
+  test('a 403 shows the limited-testing copy, not a raw error', async () => {
+    vi.spyOn(llm, 'generateCode').mockRejectedValue(
+      new ForbiddenError('llm_access_denied', 'not allowlisted'),
+    )
+
+    render(<AgentChatDialog />)
+    await act(async () => {
+      agentChatOpenAtom.set(true)
+    })
+    await userEvent.setup().type(screen.getByRole('textbox'), 'make a thing')
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud (Beta)' }))
+    await act(async () => {})
+
+    expect(screen.getByText(CLOUD_LLM_RESTRICTED_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByText(/generation failed/i)).not.toBeInTheDocument()
+  })
+
+  test('the cloud button has a readable accessible name', async () => {
+    // "CloudBeta" (adjacent nodes, no separator) is announced as one word, so the
+    // name is set explicitly rather than derived.
+    render(<AgentChatDialog />)
+    await act(async () => {
+      agentChatOpenAtom.set(true)
+    })
+
+    expect(screen.getByRole('button', { name: 'Cloud (Beta)' })).toBeInTheDocument()
   })
 })
