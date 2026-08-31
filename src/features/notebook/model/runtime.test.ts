@@ -286,64 +286,87 @@ describe('stopCell / stopAll', () => {
   }, 5000)
 
   // The two stopAll tests below drive a PARKED worker rather than a real
-  // `while(true){}` run. They assert queue/skip bookkeeping, which does not need a
-  // live engine, and a real infinite loop made them flaky: it burns a core until
-  // something terminates it, and under `test:coverage` a lingering loop starved the
-  // event loop and timed out the next test (CI: 30s against a 5s budget, green in
-  // the plain `pnpm test` run and locally). `await fake.firstRun` also replaces the
-  // "await two microtasks and hope the resolver is installed" dance with a
-  // deterministic signal. The real interrupt path stays covered by the timeout test
-  // above, `workerHost.test.ts`, `quickjs.test.ts`, and the acceptance suite.
-  test('stopAll halts the queue and marks remaining cells as skipped', async () => {
-    const fake = createParkedWorker()
-    const restore = setWorkerFactory(() => fake.worker)
-    try {
-      const [a] = cellsAtom()
-      const b = addCell()
-      const c = addCell()
-      updateCellCode(a.id, 'parked-a')
-      updateCellCode(b.id, 'console.log("b")')
-      updateCellCode(c.id, 'console.log("c")')
+  // `while(true){}` run, and carry a deliberately generous budget. Both parts are
+  // needed, for different reasons:
+  //
+  //   1. The parked worker removes this file's own CPU burn and, more usefully,
+  //      the timing guesswork: `await fake.firstRun` is a deterministic signal that
+  //      the run is in flight, replacing "await two microtasks and hope the
+  //      resolver is installed". With `interruptFlag` unset (a parked worker never
+  //      completes the SAB handshake), `stopAll` -> `requestInterrupt` ->
+  //      `restartWorker` resolves the run SYNCHRONOUSLY — no timer on the path.
+  //
+  //   2. The budget still had to grow. Converting this file did NOT stop the
+  //      failure, because the starvation comes from OTHER files running in
+  //      parallel: `quickjs.test.ts` alone runs three `while(true)` cases with
+  //      60s kernel timeouts, and CI is a 2-core `ubuntu-latest` where
+  //      `test:coverage` adds v8 instrumentation on top. When the box is saturated
+  //      the whole file gets no CPU for seconds, and 5000ms measured nothing about
+  //      the product — these tests assert queue/skip BOOKKEEPING, not latency.
+  //
+  // The number is chosen to stay BELOW the host watchdog (`timeoutMs + 100` =
+  // 30100ms): a genuinely hung run must still fail here rather than be rescued by
+  // the watchdog and pass. The real interrupt path stays covered by the timeout
+  // test above, `workerHost.test.ts`, `quickjs.test.ts`, and the acceptance suite.
+  const STARVATION_TOLERANT_MS = 20_000
+  test(
+    'stopAll halts the queue and marks remaining cells as skipped',
+    async () => {
+      const fake = createParkedWorker()
+      const restore = setWorkerFactory(() => fake.worker)
+      try {
+        const [a] = cellsAtom()
+        const b = addCell()
+        const c = addCell()
+        updateCellCode(a.id, 'parked-a')
+        updateCellCode(b.id, 'console.log("b")')
+        updateCellCode(c.id, 'console.log("c")')
 
-      const promise = runAll()
-      await fake.firstRun
-      stopAll()
-      await promise
+        const promise = runAll()
+        await fake.firstRun
+        stopAll()
+        await promise
 
-      expect(a.status()).toBe('interrupted')
-      // b and c never ran — either skipped (we noticed before they came up)
-      // or idle (queue was drained before their turn). Both are acceptable
-      // outcomes; the strict guarantee is they did NOT run.
-      expect(['skipped', 'idle']).toContain(b.status())
-      expect(['skipped', 'idle']).toContain(c.status())
-      expect(b.executionCount()).toBe(null)
-      expect(c.executionCount()).toBe(null)
-      expect(queueAtom()).toEqual([])
-    } finally {
-      restore()
-    }
-  }, 5000)
+        expect(a.status()).toBe('interrupted')
+        // b and c never ran — either skipped (we noticed before they came up)
+        // or idle (queue was drained before their turn). Both are acceptable
+        // outcomes; the strict guarantee is they did NOT run.
+        expect(['skipped', 'idle']).toContain(b.status())
+        expect(['skipped', 'idle']).toContain(c.status())
+        expect(b.executionCount()).toBe(null)
+        expect(c.executionCount()).toBe(null)
+        expect(queueAtom()).toEqual([])
+      } finally {
+        restore()
+      }
+    },
+    STARVATION_TOLERANT_MS,
+  )
 
-  test('stopAll leaves no resume trail (no Continue after an explicit stop)', async () => {
-    const fake = createParkedWorker()
-    const restore = setWorkerFactory(() => fake.worker)
-    try {
-      const [a] = cellsAtom()
-      const b = addCell()
-      updateCellCode(a.id, 'parked-a')
-      updateCellCode(b.id, 'console.log("b")')
-      const promise = runAll()
-      await fake.firstRun
-      stopAll()
-      await promise
-      // A user stop is not a skip-on-error: the skipped list must be empty so
-      // the toolbar shows no Continue button.
-      expect(skippedCellsAtom()).toEqual([])
-      expect(runtimeStatusAtom()).toBe('idle')
-    } finally {
-      restore()
-    }
-  }, 5000)
+  test(
+    'stopAll leaves no resume trail (no Continue after an explicit stop)',
+    async () => {
+      const fake = createParkedWorker()
+      const restore = setWorkerFactory(() => fake.worker)
+      try {
+        const [a] = cellsAtom()
+        const b = addCell()
+        updateCellCode(a.id, 'parked-a')
+        updateCellCode(b.id, 'console.log("b")')
+        const promise = runAll()
+        await fake.firstRun
+        stopAll()
+        await promise
+        // A user stop is not a skip-on-error: the skipped list must be empty so
+        // the toolbar shows no Continue button.
+        expect(skippedCellsAtom()).toEqual([])
+        expect(runtimeStatusAtom()).toBe('idle')
+      } finally {
+        restore()
+      }
+    },
+    STARVATION_TOLERANT_MS,
+  )
 })
 
 describe('concurrency guards', () => {
