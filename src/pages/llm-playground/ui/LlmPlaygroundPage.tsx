@@ -3,7 +3,12 @@ import { wrap } from '@reatom/core'
 import { reatomComponent } from '@reatom/react'
 import { Bot, Check, Cloud, Cpu, Send } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
-import { RateLimitedError } from '@/shared/api/errors'
+import { ForbiddenError, RateLimitedError } from '@/shared/api/errors'
+import {
+  CLOUD_LLM_BETA_HINT,
+  CLOUD_LLM_BETA_LABEL,
+  CLOUD_LLM_RESTRICTED_MESSAGE,
+} from '@/features/notebook'
 import { Textarea } from '@/shared/ui/textarea'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
@@ -28,6 +33,13 @@ function formatCloudSendError(err: Error): string {
   if (err instanceof RateLimitedError) {
     const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
     return `Rate limit reached.${wait}`
+  }
+
+  // Step 8d-2 allowlist denial. Matched by STATUS, not by message text: the same
+  // `llm_access_denied` code also arrives with HTTP 500 when the SERVER's provider
+  // credentials are rejected, and only that one is worth retrying.
+  if (err instanceof ForbiddenError) {
+    return CLOUD_LLM_RESTRICTED_MESSAGE
   }
 
   const msg = err.message.toLowerCase()
@@ -226,11 +238,18 @@ const CloudPanel = reatomComponent(() => {
       <div className="border-b px-4 py-3">
         <div className="flex items-center gap-1.5 text-sm font-medium">
           <Cloud className="size-4 text-muted-foreground" />
-          Cloud (AWS Bedrock)
+          {/* Provider-neutral since Step 8d-1: the backend picks the cloud
+              adapter from config, so naming one vendor in the UI goes stale the
+              moment it is switched. */}
+          Cloud AI
+          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            {CLOUD_LLM_BETA_LABEL}
+          </span>
           <span className="ml-auto rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             requires sign-in
           </span>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">{CLOUD_LLM_BETA_HINT}</p>
         {sendError && (
           <p className="mt-1 text-xs text-destructive">{formatCloudSendError(sendError)}</p>
         )}

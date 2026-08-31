@@ -97,7 +97,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'create a variable')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud/i }))
     await act(async () => {})
 
     expect(llm.generateCode).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'explain closures')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud/i }))
     await act(async () => {})
 
     expect(cellsAtom().length).toBe(cellsBefore + 1)
@@ -160,7 +160,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'bad prompt')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud/i }))
     await act(async () => {})
 
     expect(screen.getByText(/flagged by the safety filter/i)).toBeInTheDocument()
@@ -178,7 +178,7 @@ describe('AgentChatDialog — code generation', () => {
     })
 
     await user.type(screen.getByRole('textbox'), 'anything')
-    fireEvent.click(screen.getByRole('button', { name: /^cloud$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cloud/i }))
     await act(async () => {})
 
     expect(screen.getByText(/generation failed/i)).toBeInTheDocument()
@@ -199,7 +199,7 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
     })
     expect(screen.getByRole('button', { name: /in-browser/i })).toBeDisabled()
     // The cloud tier stays available regardless of a local model.
-    expect(screen.getByRole('button', { name: /^cloud$/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /^cloud/i })).not.toBeDisabled()
   })
 
   // The in-browser TIER behaviour is covered at the model level (below): driving

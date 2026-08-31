@@ -64,7 +64,8 @@ import { openAgentChatAction } from '../model/agentChat'
 import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
 import { ThinkingBlock } from './ThinkingBlock'
-import { ApiError, RateLimitedError } from '@/shared/api/errors'
+import { ApiError, ForbiddenError, RateLimitedError } from '@/shared/api/errors'
+import { CLOUD_LLM_RESTRICTED_MESSAGE } from '../lib/cloudLlmAvailability'
 import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
@@ -94,6 +95,15 @@ export function formatCloudGenerateError(err: Error): string {
   if (err instanceof RateLimitedError) {
     const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
     return `Rate limit reached.${wait}`
+  }
+  // Allowlist denial (roadmap Step 8d-2). Checked by STATUS, not by code: the
+  // backend uses `llm_access_denied` for two different things — 403 means this
+  // account is outside the private test group (permanent; retrying is pointless),
+  // while 500 means the SERVER's provider credentials were rejected (a real
+  // outage). Treating the 403 as "temporarily unavailable" would invite a retry
+  // loop against something that will never succeed.
+  if (err instanceof ForbiddenError) {
+    return CLOUD_LLM_RESTRICTED_MESSAGE
   }
   if (err instanceof ApiError) {
     if (err.code === 'llm_internal' || err.code === 'llm_access_denied') {

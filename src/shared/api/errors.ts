@@ -24,6 +24,24 @@ export class UnauthorizedError extends ApiError {
   }
 }
 
+/**
+ * Thrown when the backend returns 403.
+ *
+ * On `POST /llm/generate` this is the developer-allowlist denial
+ * (`llm_access_denied`): the account is authenticated but cloud generation is
+ * restricted to allowlisted accounts while the provider runs in private testing.
+ * It is NOT transient — retrying will not help — which is why callers must key
+ * off the status rather than the code alone: the same `llm_access_denied` code
+ * also arrives with HTTP 500 when the SERVER's provider credentials are rejected,
+ * and that one really is an outage.
+ */
+export class ForbiddenError extends ApiError {
+  constructor(code?: string, message?: string) {
+    super(403, code, message)
+    this.name = 'ForbiddenError'
+  }
+}
+
 export class NotFoundError extends ApiError {
   constructor(code?: string, message?: string) {
     super(404, code, message)
@@ -121,6 +139,8 @@ export function toApiError(status: number, body: unknown, retryAfter?: number): 
       return new BadRequestError(error?.code, error?.message)
     case 401:
       return new UnauthorizedError(error?.code, error?.message)
+    case 403:
+      return new ForbiddenError(error?.code, error?.message)
     case 404:
       return new NotFoundError(error?.code, error?.message)
     case 409:

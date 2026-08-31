@@ -10,6 +10,7 @@ export {
   ApiError,
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NetworkError,
   NotFoundError,
   RateLimitedError,

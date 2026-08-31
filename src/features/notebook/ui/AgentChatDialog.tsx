@@ -12,6 +12,7 @@ import {
   agentSendInBrowserAction,
   closeAgentChatAction,
 } from '../model/agentChat'
+import { CLOUD_LLM_BETA_HINT, CLOUD_LLM_BETA_LABEL } from '../lib/cloudLlmAvailability'
 import { codeGeneratorAtom } from '../model/codeGenerator'
 
 export const AgentChatDialog = reatomComponent(() => {
@@ -138,10 +139,13 @@ export const AgentChatDialog = reatomComponent(() => {
                       <Cloud className="size-4" />
                     )}
                     Cloud
+                    <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] font-medium">
+                      {CLOUD_LLM_BETA_LABEL}
+                    </span>
                   </Button>
                 }
               />
-              <TooltipContent>Generate with the cloud agent</TooltipContent>
+              <TooltipContent>Generate with the cloud agent · {CLOUD_LLM_BETA_HINT}</TooltipContent>
             </Tooltip>
           </div>
         </div>

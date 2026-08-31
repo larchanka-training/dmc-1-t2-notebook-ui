@@ -45,7 +45,9 @@ describe('LlmPlaygroundPage', () => {
 
     expect(screen.getByRole('heading', { name: 'LLM Playground' })).toBeInTheDocument()
     expect(screen.getByText('Local (In-Browser)')).toBeInTheDocument()
-    expect(screen.getByText('Cloud (AWS Bedrock)')).toBeInTheDocument()
+    // Renamed in Step 8d-2: the vendor name moved out of the UI when the backend
+    // gained a config-selected provider adapter.
+    expect(screen.getByText('Cloud AI')).toBeInTheDocument()
     expect(screen.getByText('Load a model to enable local responses.')).toBeInTheDocument()
     expect(screen.getByText('Cloud responses will appear here.')).toBeInTheDocument()
   })
@@ -69,5 +71,23 @@ describe('LlmPlaygroundPage', () => {
     expect(screen.getAllByText('compare map and reduce')).toHaveLength(2)
     expect(screen.getByText('— Load a model to see a local response —')).toBeInTheDocument()
     expect(await screen.findByText('cloud reply')).toBeInTheDocument()
+  })
+})
+
+// Step 8d-2: the cloud tier is in limited testing and the page must say so.
+describe('LlmPlaygroundPage — cloud beta messaging', () => {
+  test('labels the cloud panel as Beta and explains what that means', () => {
+    render(<LlmPlaygroundPage />)
+
+    expect(screen.getByText('Beta')).toBeInTheDocument()
+    expect(screen.getByText(/limited testing/i)).toBeInTheDocument()
+  })
+
+  test('no longer names a specific cloud vendor', () => {
+    // The backend picks the adapter from config (Step 8d-1), so a vendor name in
+    // the UI goes stale the moment it is switched.
+    render(<LlmPlaygroundPage />)
+
+    expect(screen.queryByText(/bedrock/i)).not.toBeInTheDocument()
   })
 })

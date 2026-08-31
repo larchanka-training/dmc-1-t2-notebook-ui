@@ -243,6 +243,39 @@ out of anything.
 
 ---
 
+## Cloud tier availability (Step 8d-2)
+
+The cloud tier is in **limited testing**. The backend can restrict
+`POST /llm/generate` to an allowlist of developer accounts (`LLM_ALLOWED_EMAILS`);
+while that is set, cloud generation is not generally available.
+
+The UI reflects this in two places, and the split matters:
+
+- **Unconditional `Beta` labelling** on every cloud entry point (cell toolbar
+  tooltip, Ask-agent dialog button, playground panel), with a hint explaining that
+  the in-browser model works for everyone. The client **cannot** know whether the
+  signed-in account is allowlisted — that is a server-side decision, deliberately
+  not exposed, because an endpoint answering "am I allowlisted?" would leak the
+  policy and invite probing. So the UI states the feature's _status_; it does not
+  predict the verdict.
+- **A specific message after an actual 403**, keyed off the HTTP **status**, not
+  the error code. The backend uses `llm_access_denied` for two different things:
+  `403` means this account is outside the private test group (permanent — retrying
+  is pointless), while `500` means the _server's_ provider credentials were
+  rejected (a real outage, worth retrying). Treating the 403 as "temporarily
+  unavailable" would invite a retry loop against something that can never succeed.
+
+Copy lives in one place, `features/notebook/lib/cloudLlmAvailability.ts`, and is
+re-exported from the feature's public API so the playground page renders the same
+wording instead of forking it. Wording rules are in that file's header: say limited
+testing rather than broken, promise no date, and never imply a retry will help.
+
+The UI also no longer names a cloud vendor. Since Step 8d-1 the backend selects the
+adapter from config, so a vendor name in the interface goes stale the moment it is
+switched.
+
+---
+
 ## SharedArrayBuffer requirement
 
 WebLLM's WASM backend uses `SharedArrayBuffer` for parallel memory access. Browsers require **cross-origin isolation** headers to enable it:

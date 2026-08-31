@@ -8,6 +8,7 @@ import {
   parseRetryAfter,
   UnauthorizedError,
   toApiError,
+  ForbiddenError,
 } from './errors'
 
 describe('toApiError', () => {
@@ -120,5 +121,25 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter(undefined)).toBeUndefined()
     expect(parseRetryAfter('')).toBeUndefined()
     expect(parseRetryAfter('soon')).toBeUndefined()
+  })
+})
+
+describe('toApiError — 403 (Step 8d-2 allowlist)', () => {
+  test('maps 403 to ForbiddenError, not the generic ApiError', () => {
+    const err = toApiError(403, { error: { code: 'llm_access_denied', message: 'nope' } })
+
+    expect(err).toBeInstanceOf(ForbiddenError)
+    expect(err.status).toBe(403)
+    expect(err.code).toBe('llm_access_denied')
+  })
+
+  test('a 500 with the same code stays a generic ApiError', () => {
+    // The distinction the UI copy depends on: same code, different status,
+    // different meaning (allowlist denial vs the server's provider credentials
+    // being rejected).
+    const err = toApiError(500, { error: { code: 'llm_access_denied', message: 'nope' } })
+
+    expect(err).not.toBeInstanceOf(ForbiddenError)
+    expect(err.status).toBe(500)
   })
 })
