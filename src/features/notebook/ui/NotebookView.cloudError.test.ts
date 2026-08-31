@@ -17,7 +17,7 @@ describe('formatCloudGenerateError', () => {
   test('llm_internal returns user-friendly unavailable message', () => {
     const err = new ApiError(500, 'llm_internal', 'LLM provider validation failed')
     expect(formatCloudGenerateError(err)).toBe(
-      'Cloud AI is temporarily unavailable. Use the local model instead.',
+      'Cloud AI is temporarily unavailable. Use the in-browser model instead.',
     )
   })
 
@@ -26,7 +26,7 @@ describe('formatCloudGenerateError', () => {
     // rejected. That IS an outage, and retrying later can succeed.
     const err = new ApiError(500, 'llm_access_denied', 'LLM provider access denied')
     expect(formatCloudGenerateError(err)).toBe(
-      'Cloud AI is temporarily unavailable. Use the local model instead.',
+      'Cloud AI is temporarily unavailable. Use the in-browser model instead.',
     )
   })
 
@@ -61,14 +61,14 @@ describe('formatCloudGenerateError', () => {
   test('timeout', () => {
     const err = new Error('llm_timeout exceeded')
     expect(formatCloudGenerateError(err)).toBe(
-      'Cloud generation timed out. Try the local model instead.',
+      'Cloud generation timed out. Use the in-browser model instead.',
     )
   })
 
   test('503 unavailable', () => {
     const err = new Error('503 service unavailable')
     expect(formatCloudGenerateError(err)).toBe(
-      'Cloud AI is temporarily unavailable. Try the local model instead.',
+      'Cloud AI is temporarily unavailable. Use the in-browser model instead.',
     )
   })
 

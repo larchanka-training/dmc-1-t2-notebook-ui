@@ -12,7 +12,12 @@ import {
   agentSendInBrowserAction,
   closeAgentChatAction,
 } from '../model/agentChat'
-import { CLOUD_LLM_BETA_HINT, CLOUD_LLM_BETA_LABEL } from '../lib/cloudLlmAvailability'
+import {
+  CLOUD_LLM_BETA_HINT,
+  CLOUD_LLM_BETA_LABEL,
+  formatCloudLlmError,
+  USE_IN_BROWSER_SUGGESTION,
+} from '../lib/cloudLlmAvailability'
 import { codeGeneratorAtom } from '../model/codeGenerator'
 
 export const AgentChatDialog = reatomComponent(() => {
@@ -83,9 +88,7 @@ export const AgentChatDialog = reatomComponent(() => {
 
           {sendError && (
             <p className="text-sm text-destructive">
-              {sendError.message.includes('prompt_rejected')
-                ? 'Prompt was flagged by the safety filter. Try rephrasing.'
-                : `Generation failed: ${sendError.message}`}
+              {formatCloudLlmError(sendError, USE_IN_BROWSER_SUGGESTION)}
             </p>
           )}
 
@@ -132,7 +135,15 @@ export const AgentChatDialog = reatomComponent(() => {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button onClick={doSendCloud} disabled={isSending} className="gap-2">
+                  <Button
+                    onClick={doSendCloud}
+                    disabled={isSending}
+                    className="gap-2"
+                    // Explicit, because the visible label and the badge are
+                    // adjacent nodes: the derived name would be "CloudBeta" with
+                    // no separator, which a screen reader announces as one word.
+                    aria-label={`Cloud (${CLOUD_LLM_BETA_LABEL})`}
+                  >
                     {isCloudSending ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (

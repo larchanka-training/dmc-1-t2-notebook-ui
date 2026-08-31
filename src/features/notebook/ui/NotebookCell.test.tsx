@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import type { OutputItem } from '../runtime/types'
 import { NotebookCell } from './NotebookCell'
@@ -183,5 +184,21 @@ describe('NotebookCell — Output footer header', () => {
       executionCount: 1,
     })
     expect(container.textContent).toMatch(/Output \[\d+\]/)
+  })
+})
+
+// Step 8d-2 review follow-up: the cell toolbar is the third cloud surface and its
+// Beta state had no test.
+describe('NotebookCell — cloud tier beta labelling (Step 8d-2)', () => {
+  test('hovering the cloud control surfaces the limited-testing hint', async () => {
+    const user = userEvent.setup()
+    renderCell({ kind: 'markdown', onCloudGenerate: () => {} })
+
+    const cloudButton = screen.getByRole('button', { name: /cloud agent/i })
+    await user.hover(cloudButton)
+
+    // The tooltip carries the beta status; the button's own label stays the
+    // action, so the control is still findable by what it does.
+    expect(await screen.findByText(/limited testing/i)).toBeInTheDocument()
   })
 })

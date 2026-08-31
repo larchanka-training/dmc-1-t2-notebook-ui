@@ -187,4 +187,7 @@ export {
   CLOUD_LLM_BETA_HINT,
   CLOUD_LLM_BETA_LABEL,
   CLOUD_LLM_RESTRICTED_MESSAGE,
+  formatCloudLlmError,
+  TRY_AGAIN_SUGGESTION,
+  USE_IN_BROWSER_SUGGESTION,
 } from './lib/cloudLlmAvailability'

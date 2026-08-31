@@ -64,8 +64,7 @@ import { openAgentChatAction } from '../model/agentChat'
 import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
 import { ThinkingBlock } from './ThinkingBlock'
-import { ApiError, ForbiddenError, RateLimitedError } from '@/shared/api/errors'
-import { CLOUD_LLM_RESTRICTED_MESSAGE } from '../lib/cloudLlmAvailability'
+import { formatCloudLlmError, USE_IN_BROWSER_SUGGESTION } from '../lib/cloudLlmAvailability'
 import { slotOpeningPhaseAtom } from '../model/slot'
 import { useIsMobile } from '@/shared/lib/use-mobile'
 import { prewarmWorker } from '../runtime/workerHost'
@@ -91,36 +90,11 @@ function runAndInsertBelow(cellId: string) {
   enterEdit(inserted.id)
 }
 
+// Thin wrapper kept so existing imports/tests keep working; the logic lives in
+// one place now (see `formatCloudLlmError`), because three separate formatters is
+// how the Step 8d-2 allowlist branch reached two surfaces and missed the third.
 export function formatCloudGenerateError(err: Error): string {
-  if (err instanceof RateLimitedError) {
-    const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
-    return `Rate limit reached.${wait}`
-  }
-  // Allowlist denial (roadmap Step 8d-2). Checked by STATUS, not by code: the
-  // backend uses `llm_access_denied` for two different things — 403 means this
-  // account is outside the private test group (permanent; retrying is pointless),
-  // while 500 means the SERVER's provider credentials were rejected (a real
-  // outage). Treating the 403 as "temporarily unavailable" would invite a retry
-  // loop against something that will never succeed.
-  if (err instanceof ForbiddenError) {
-    return CLOUD_LLM_RESTRICTED_MESSAGE
-  }
-  if (err instanceof ApiError) {
-    if (err.code === 'llm_internal' || err.code === 'llm_access_denied') {
-      return 'Cloud AI is temporarily unavailable. Use the local model instead.'
-    }
-  }
-  const msg = err.message.toLowerCase()
-  if (msg.includes('prompt_rejected') || msg.includes('rejected')) {
-    return 'Prompt was flagged by the safety filter.'
-  }
-  if (msg.includes('llm_timeout') || msg.includes('timeout')) {
-    return 'Cloud generation timed out. Try the local model instead.'
-  }
-  if (msg.includes('503') || msg.includes('502') || msg.includes('unavailable')) {
-    return 'Cloud AI is temporarily unavailable. Try the local model instead.'
-  }
-  return `Cloud generation failed: ${err.message}`
+  return formatCloudLlmError(err, USE_IN_BROWSER_SUGGESTION)
 }
 
 interface NotebookRowProps {
