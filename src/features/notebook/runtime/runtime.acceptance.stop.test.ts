@@ -6,8 +6,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { addCell, cellsAtom, deleteCell, updateCellCode } from '../model/notebook'
 import { queueAtom, restartKernel, runAll, runCell, stopAll, stopCell } from '../model/runtime'
-import type { HostMsg, WorkerMsg } from './types'
-import { restartWorker, setWorkerFactory, type WorkerLike } from './workerHost'
+import { restartWorker, setWorkerFactory } from './workerHost'
+// Shared with `model/runtime.test.ts`, which switched its stopAll tests onto the
+// same parked worker to remove a real `while(true)` flake.
+import { createParkedWorker } from './__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   restartKernel()
@@ -23,39 +25,6 @@ afterEach(async () => {
   restartWorker()
   for (let i = 0; i < 5; i++) await Promise.resolve()
 })
-
-function createParkedWorker(): {
-  worker: WorkerLike
-  firstRun: Promise<void>
-  terminated: () => boolean
-} {
-  let resolveFirstRun: (() => void) | null = null
-  let terminated = false
-  const listeners: Array<(event: MessageEvent<WorkerMsg>) => void> = []
-  const firstRun = new Promise<void>((resolve) => {
-    resolveFirstRun = resolve
-  })
-  const worker: WorkerLike = {
-    postMessage: (msg: HostMsg) => {
-      if (msg.kind !== 'run') return
-      resolveFirstRun?.()
-      resolveFirstRun = null
-      // Park forever: Stop All must resolve the in-flight run via requestInterrupt.
-    },
-    addEventListener: (_type, listener) => {
-      listeners.push(listener)
-    },
-    removeEventListener: (_type, listener) => {
-      const i = listeners.indexOf(listener)
-      if (i >= 0) listeners.splice(i, 1)
-    },
-    terminate: () => {
-      terminated = true
-      listeners.length = 0
-    },
-  }
-  return { worker, firstRun, terminated: () => terminated }
-}
 
 describe('Epic 01 AC — Stop', () => {
   test('AC: stopCell interrupts a running cell quickly with a stderr note', async () => {

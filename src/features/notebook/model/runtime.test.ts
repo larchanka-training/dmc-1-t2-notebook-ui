@@ -13,7 +13,8 @@ import {
   stopCell,
 } from './runtime'
 import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
-import { restartWorker } from '../runtime/workerHost'
+import { restartWorker, setWorkerFactory } from '../runtime/workerHost'
+import { createParkedWorker } from '../runtime/__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   // Reset cross-test state via the proper public action, then prune any
@@ -284,46 +285,64 @@ describe('stopCell / stopAll', () => {
     )
   }, 5000)
 
+  // The two stopAll tests below drive a PARKED worker rather than a real
+  // `while(true){}` run. They assert queue/skip bookkeeping, which does not need a
+  // live engine, and a real infinite loop made them flaky: it burns a core until
+  // something terminates it, and under `test:coverage` a lingering loop starved the
+  // event loop and timed out the next test (CI: 30s against a 5s budget, green in
+  // the plain `pnpm test` run and locally). `await fake.firstRun` also replaces the
+  // "await two microtasks and hope the resolver is installed" dance with a
+  // deterministic signal. The real interrupt path stays covered by the timeout test
+  // above, `workerHost.test.ts`, `quickjs.test.ts`, and the acceptance suite.
   test('stopAll halts the queue and marks remaining cells as skipped', async () => {
-    const [a] = cellsAtom()
-    const b = addCell()
-    const c = addCell()
-    updateCellCode(a.id, 'while(true){}')
-    updateCellCode(b.id, 'console.log("b")')
-    updateCellCode(c.id, 'console.log("c")')
+    const fake = createParkedWorker()
+    const restore = setWorkerFactory(() => fake.worker)
+    try {
+      const [a] = cellsAtom()
+      const b = addCell()
+      const c = addCell()
+      updateCellCode(a.id, 'parked-a')
+      updateCellCode(b.id, 'console.log("b")')
+      updateCellCode(c.id, 'console.log("c")')
 
-    const promise = runAll()
-    // Microtask yield to let runAll's first executeCell install the resolver.
-    await Promise.resolve()
-    await Promise.resolve()
-    stopAll()
-    await promise
+      const promise = runAll()
+      await fake.firstRun
+      stopAll()
+      await promise
 
-    expect(a.status()).toBe('interrupted')
-    // b and c never ran — either skipped (we noticed before they came up)
-    // or idle (queue was drained before their turn). Both are acceptable
-    // outcomes; the strict guarantee is they did NOT run.
-    expect(['skipped', 'idle']).toContain(b.status())
-    expect(['skipped', 'idle']).toContain(c.status())
-    expect(b.executionCount()).toBe(null)
-    expect(c.executionCount()).toBe(null)
-    expect(queueAtom()).toEqual([])
+      expect(a.status()).toBe('interrupted')
+      // b and c never ran — either skipped (we noticed before they came up)
+      // or idle (queue was drained before their turn). Both are acceptable
+      // outcomes; the strict guarantee is they did NOT run.
+      expect(['skipped', 'idle']).toContain(b.status())
+      expect(['skipped', 'idle']).toContain(c.status())
+      expect(b.executionCount()).toBe(null)
+      expect(c.executionCount()).toBe(null)
+      expect(queueAtom()).toEqual([])
+    } finally {
+      restore()
+    }
   }, 5000)
 
   test('stopAll leaves no resume trail (no Continue after an explicit stop)', async () => {
-    const [a] = cellsAtom()
-    const b = addCell()
-    updateCellCode(a.id, 'while(true){}')
-    updateCellCode(b.id, 'console.log("b")')
-    const promise = runAll()
-    await Promise.resolve()
-    await Promise.resolve()
-    stopAll()
-    await promise
-    // A user stop is not a skip-on-error: the skipped list must be empty so
-    // the toolbar shows no Continue button.
-    expect(skippedCellsAtom()).toEqual([])
-    expect(runtimeStatusAtom()).toBe('idle')
+    const fake = createParkedWorker()
+    const restore = setWorkerFactory(() => fake.worker)
+    try {
+      const [a] = cellsAtom()
+      const b = addCell()
+      updateCellCode(a.id, 'parked-a')
+      updateCellCode(b.id, 'console.log("b")')
+      const promise = runAll()
+      await fake.firstRun
+      stopAll()
+      await promise
+      // A user stop is not a skip-on-error: the skipped list must be empty so
+      // the toolbar shows no Continue button.
+      expect(skippedCellsAtom()).toEqual([])
+      expect(runtimeStatusAtom()).toBe('idle')
+    } finally {
+      restore()
+    }
   }, 5000)
 })
 

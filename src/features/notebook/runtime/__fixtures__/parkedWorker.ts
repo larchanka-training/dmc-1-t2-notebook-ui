@@ -1,0 +1,61 @@
+// A `WorkerLike` that accepts a run and then parks forever, so the only way the
+// in-flight run ever settles is the interrupt path (Stop / Stop All).
+//
+// Why this exists: the stop tests used to drive a REAL QuickJS worker executing
+// `while(true){}`. That works, but it burns a CPU core until something terminates
+// it, and vitest runs test files in parallel — so under `test:coverage` (v8
+// instrumentation makes everything slower) a not-yet-terminated loop starves the
+// event loop and times out whichever test is running next. That is exactly how
+// `runtime.test.ts > stopAll leaves no resume trail` failed in CI at 30s against a
+// 5s budget while passing locally and in the plain `pnpm test` run.
+//
+// A parked worker removes the hazard at the source: no loop, no CPU burn, and the
+// stop path under test is unchanged — the host still has to issue the interrupt
+// and resolve the run. It is also STRICTLY more deterministic, because
+// `firstRun` resolves exactly when `workerHost` has posted the run message, which
+// replaces the fragile "await two microtasks and hope the resolver is installed"
+// dance.
+//
+// This does NOT reduce coverage of the real engine: the real interrupt/timeout
+// paths are still exercised against a live worker in `quickjs.test.ts`,
+// `workerHost.test.ts`, and the timeout test in `runtime.test.ts`.
+
+import type { HostMsg, WorkerMsg } from '../types'
+import type { WorkerLike } from '../workerHost'
+
+export interface ParkedWorker {
+  worker: WorkerLike
+  /** Resolves once the host has actually posted a `run` message to this worker. */
+  firstRun: Promise<void>
+  /** True after the host terminated the worker (what Stop All must do). */
+  terminated: () => boolean
+}
+
+export function createParkedWorker(): ParkedWorker {
+  let resolveFirstRun: (() => void) | null = null
+  let terminated = false
+  const listeners: Array<(event: MessageEvent<WorkerMsg>) => void> = []
+  const firstRun = new Promise<void>((resolve) => {
+    resolveFirstRun = resolve
+  })
+  const worker: WorkerLike = {
+    postMessage: (msg: HostMsg) => {
+      if (msg.kind !== 'run') return
+      resolveFirstRun?.()
+      resolveFirstRun = null
+      // Park forever: the run can only end through requestInterrupt.
+    },
+    addEventListener: (_type, listener) => {
+      listeners.push(listener)
+    },
+    removeEventListener: (_type, listener) => {
+      const i = listeners.indexOf(listener)
+      if (i >= 0) listeners.splice(i, 1)
+    },
+    terminate: () => {
+      terminated = true
+      listeners.length = 0
+    },
+  }
+  return { worker, firstRun, terminated: () => terminated }
+}
