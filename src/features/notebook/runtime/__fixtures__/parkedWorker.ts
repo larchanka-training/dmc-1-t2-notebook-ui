@@ -59,3 +59,20 @@ export function createParkedWorker(): ParkedWorker {
   }
   return { worker, firstRun, terminated: () => terminated }
 }
+
+/**
+ * Timeout budget for stop/queue tests that assert BOOKKEEPING rather than latency.
+ *
+ * These tests do not measure how fast anything is, so the default 5000ms was
+ * asserting nothing about the product — it was only measuring how loaded the
+ * machine happened to be. CI is a 2-core `ubuntu-latest`, `test:coverage` adds v8
+ * instrumentation, and other files still spin real infinite loops in parallel
+ * (`quickjs.test.ts` alone runs three `while(true)` cases with 60s kernel
+ * timeouts), so a file can go seconds without CPU. That starvation is CROSS-FILE:
+ * making one file stop burning CPU does not protect it from the others.
+ *
+ * The value stays BELOW the host watchdog (`timeoutMs + 100` = 30100ms) on
+ * purpose: a genuinely hung run must still fail these tests rather than be
+ * rescued by the watchdog and pass.
+ */
+export const STARVATION_TOLERANT_MS = 20_000

@@ -14,7 +14,7 @@ import {
 } from './runtime'
 import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
 import { restartWorker, setWorkerFactory } from '../runtime/workerHost'
-import { createParkedWorker } from '../runtime/__fixtures__/parkedWorker'
+import { createParkedWorker, STARVATION_TOLERANT_MS } from '../runtime/__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   // Reset cross-test state via the proper public action, then prune any
@@ -304,11 +304,10 @@ describe('stopCell / stopAll', () => {
   //      the whole file gets no CPU for seconds, and 5000ms measured nothing about
   //      the product — these tests assert queue/skip BOOKKEEPING, not latency.
   //
-  // The number is chosen to stay BELOW the host watchdog (`timeoutMs + 100` =
-  // 30100ms): a genuinely hung run must still fail here rather than be rescued by
-  // the watchdog and pass. The real interrupt path stays covered by the timeout
-  // test above, `workerHost.test.ts`, `quickjs.test.ts`, and the acceptance suite.
-  const STARVATION_TOLERANT_MS = 20_000
+  // The budget itself lives with the fixture (`STARVATION_TOLERANT_MS`) so every
+  // stop test shares one number and one rationale. The real interrupt path stays
+  // covered by the timeout test above, `workerHost.test.ts`, `quickjs.test.ts`,
+  // and the acceptance suite.
   test(
     'stopAll halts the queue and marks remaining cells as skipped',
     async () => {
