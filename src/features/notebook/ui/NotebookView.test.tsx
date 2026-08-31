@@ -1,10 +1,13 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
+import { llmEnabledAtom } from '@/entities/llm-availability'
+import { llm } from '@/shared/api'
 import { NotebookView } from './NotebookView'
-import { cellsAtom, updateCellCode } from '../model/notebook'
+import { addCell, cellsAtom, updateCellCode } from '../model/notebook'
 import { slotOpeningPhaseAtom } from '../model/slot'
+import { codeGeneratorAtom } from '../model/codeGenerator'
 
 function renderView() {
   return render(
@@ -21,6 +24,14 @@ function renderView() {
 function getCodeEditors() {
   return Array.from(document.querySelectorAll('.cm-content')) as HTMLElement[]
 }
+
+afterEach(() => {
+  act(() => {
+    llmEnabledAtom.set(true)
+    codeGeneratorAtom.set(null)
+  })
+  vi.restoreAllMocks()
+})
 
 async function addCodeCell(user: UserEvent) {
   // TARDIS-167 (№11): the end-of-notebook inserter is now a single "Add cell"
@@ -101,5 +112,47 @@ describe('NotebookView (RTL integration)', () => {
     const [firstAfter, secondAfter] = cellsAtom()
     expect(firstAfter).toBe(first)
     expect(secondAfter).toBe(second)
+  })
+
+  test('cloud agent works without a local model and inserts code without executing it', async () => {
+    const user = userEvent.setup()
+    const cloudSpy = vi.spyOn(llm, 'generateCode').mockResolvedValue({
+      resultKind: 'code',
+      content: 'console.log("cloud")',
+      model: 'test-model',
+      tier: 'backend',
+      tokens: { prompt: 4, completion: 6 },
+      requestId: 'req-cell-cloud',
+    })
+    let promptCellId = ''
+
+    act(() => {
+      llmEnabledAtom.set(true)
+      codeGeneratorAtom.set(null)
+      const promptCell = addCell(cellsAtom()[0]?.id, 'markdown')
+      promptCellId = promptCell.id
+      updateCellCode(promptCell.id, 'Create code that logs cloud')
+    })
+
+    renderView()
+    await user.click(screen.getByRole('button', { name: /generate code.*cloud agent/i }))
+
+    await waitFor(() => expect(cloudSpy).toHaveBeenCalledOnce())
+    expect(cloudSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Create code that logs cloud',
+        language: 'javascript',
+      }),
+    )
+
+    await waitFor(() => {
+      const promptIndex = cellsAtom().findIndex((cell) => cell.id === promptCellId)
+      const inserted = cellsAtom()[promptIndex + 1]
+      expect(inserted?.kind).toBe('code')
+      expect(inserted?.code()).toBe('console.log("cloud")')
+      expect(inserted?.status()).toBe('idle')
+      expect(inserted?.executionCount()).toBeNull()
+      expect(inserted?.output()).toEqual([])
+    })
   })
 })

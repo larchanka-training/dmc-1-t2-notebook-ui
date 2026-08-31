@@ -24,6 +24,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { resolvedThemeAtom } from '@/entities/theme'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { cn } from '@/shared/lib/cn'
 import { NotebookCell } from './NotebookCell'
 import { NotebookOutline } from './NotebookOutline'
@@ -59,7 +60,11 @@ import {
   inBrowserGeneratingCellIdAtom,
   inBrowserGenerateErrorsAtom,
 } from '../model/codeGenerator'
-import { cloudGeneratingCellIdsAtom, cloudGenerateErrorsAtom } from '../model/cloudCodeGenerator'
+import {
+  cloudGenerateAndInsertCodeAction,
+  cloudGeneratingCellIdsAtom,
+  cloudGenerateErrorsAtom,
+} from '../model/cloudCodeGenerator'
 import { openAgentChatAction } from '../model/agentChat'
 import { thinkingSessionAtom } from '../model/inBrowserThinking'
 import { AgentChatDialog } from './AgentChatDialog'
@@ -106,7 +111,8 @@ interface NotebookRowProps {
 const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }) => {
   const isActive = activeCellIdAtom() === cell.id
   const mode = cellModeAtom()
-  const hasGenerator = !!codeGeneratorAtom()
+  const llmEnabled = llmEnabledAtom()
+  const hasGenerator = llmEnabled && !!codeGeneratorAtom()
   // Per-cell (TARDIS-168): the spinner/Stop and the error must show only on the
   // row that is actually generating, not on every markdown cell.
   const isGenerating = inBrowserGeneratingCellIdAtom() === cell.id
@@ -162,6 +168,12 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
         onInBrowserGenerate={
           cell.kind === 'markdown' ? wrap(() => generateAndInsertCodeAction(cell.id)) : undefined
         }
+        onCloudGenerate={
+          cell.kind === 'markdown' && llmEnabled
+            ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
+            : undefined
+        }
+        llmEnabled={llmEnabled}
         generatorLoaded={hasGenerator}
         isGenerating={isGenerating}
         isCloudGenerating={isCloudGenerating}

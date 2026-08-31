@@ -201,4 +201,19 @@ describe('NotebookCell — cloud tier beta labelling (Step 8d-2)', () => {
     // action, so the control is still findable by what it does.
     expect(await screen.findByText(/limited testing/i)).toBeInTheDocument()
   })
+
+  test('master switch disables both agent tiers even when their dependencies are ready', () => {
+    const { container } = renderCell({
+      kind: 'markdown',
+      llmEnabled: false,
+      generatorLoaded: true,
+      onInBrowserGenerate: vi.fn(),
+      onCloudGenerate: vi.fn(),
+    })
+
+    expect(
+      container.querySelector('button[aria-label="Generate code · in-browser agent"]'),
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: /generate code.*cloud agent/i })).toBeDisabled()
+  })
 })

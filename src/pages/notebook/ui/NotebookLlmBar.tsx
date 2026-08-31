@@ -5,6 +5,7 @@ import { Button } from '@/shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { cn } from '@/shared/lib/cn'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import {
   MODEL_CATALOG,
   downloadedModelIdsAtom,
@@ -17,6 +18,7 @@ import {
 } from '@/features/web-llm'
 
 export const NotebookLlmBar = reatomComponent(() => {
+  const llmEnabled = llmEnabledAtom()
   const engine = engineAtom()
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
@@ -60,6 +62,7 @@ export const NotebookLlmBar = reatomComponent(() => {
           value={modelId}
           onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
           data-test-id="llm-bar-select"
+          disabled={!llmEnabled}
         >
           <SelectTrigger className="h-8 w-100 text-xs">
             <SelectValue />
@@ -104,7 +107,7 @@ export const NotebookLlmBar = reatomComponent(() => {
                 onClick={wrap(() => {
                   loadModelAction()
                 })}
-                disabled={isLoadingSelected}
+                disabled={!llmEnabled || isLoadingSelected}
                 variant={isSelectedLoaded ? 'outline' : 'default'}
                 className="h-8 text-xs"
               >
@@ -119,7 +122,9 @@ export const NotebookLlmBar = reatomComponent(() => {
               </Button>
             }
           />
-          <TooltipContent>{actionHint}</TooltipContent>
+          <TooltipContent>
+            {llmEnabled ? actionHint : 'Turn on LLM features in Settings'}
+          </TooltipContent>
         </Tooltip>
       </div>
 

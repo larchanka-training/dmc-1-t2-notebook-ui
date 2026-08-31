@@ -24,7 +24,7 @@ const TOOL_BTN =
 // Agent toolbar button (new-design-v2 REC.toolBtnAgent): square, primary-tinted
 // to set the AI actions apart from the neutral cell tools.
 const AGENT_BTN =
-  'grid size-7 place-items-center rounded-[6px] text-primary transition-colors hover:bg-[color-mix(in_oklch,var(--primary)_14%,transparent)] hover:text-primary'
+  'grid size-7 place-items-center rounded-[6px] text-primary transition-colors hover:bg-[color-mix(in_oklch,var(--primary)_14%,transparent)] hover:text-primary disabled:opacity-40'
 
 // Run button (new-design-v2 cell-runbtn): square with a soft success tint that
 // deepens on hover; the Stop variant uses the destructive tint.
@@ -79,6 +79,7 @@ export interface NotebookCellProps {
   onInBrowserGenerate?: () => void
   isGenerating?: boolean
   generatorLoaded?: boolean
+  llmEnabled?: boolean
   onCloudGenerate?: () => void
   isCloudGenerating?: boolean
 }
@@ -113,6 +114,7 @@ export function NotebookCell({
   onInBrowserGenerate,
   isGenerating,
   generatorLoaded,
+  llmEnabled = true,
   onCloudGenerate,
   isCloudGenerating,
 }: NotebookCellProps) {
@@ -144,6 +146,7 @@ export function NotebookCell({
   // The badge is unconditional — the client cannot know whether this account is
   // allowlisted, and an endpoint that answered that would leak the policy.
   const agentCloudTooltip = `${agentCloudLabel} · ${CLOUD_LLM_BETA_LABEL} — ${CLOUD_LLM_BETA_HINT}`
+  const disabledLlmTooltip = 'Turn on LLM features in Settings'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -275,10 +278,7 @@ export function NotebookCell({
               hover/focus (new-design-v2 — no "⋯" overflow menu). */}
           <div className="ml-auto flex items-center gap-0.5 opacity-20 transition-opacity group-hover/cell:opacity-100 focus-within:opacity-100">
             {/* Agent actions (new-design-v2): two explicit tiers per
-                ai-architecture.md §2 — in-browser (T1) and cloud (T2). The label
-                differs by kind (generate vs improve-diff). Presentational only:
-                the buttons click but do nothing until the LLM epic (07) wires
-                them; no handler, no fetch, no new dependency. */}
+                ai-architecture.md §2 — in-browser (T1) and cloud (T2). */}
             {isMarkdown && (
               <Tooltip>
                 <TooltipTrigger
@@ -288,10 +288,10 @@ export function NotebookCell({
                       aria-label={agentInBrowserLabel}
                       className={cn(
                         AGENT_BTN,
-                        !generatorLoaded &&
+                        (!llmEnabled || !generatorLoaded) &&
                           'text-muted-foreground hover:bg-transparent hover:text-muted-foreground',
                       )}
-                      disabled={!generatorLoaded || isGenerating}
+                      disabled={!llmEnabled || !generatorLoaded || isGenerating}
                       onClick={onInBrowserGenerate}
                     >
                       {/* While generating, this stays a spinner; the Stop
@@ -307,7 +307,11 @@ export function NotebookCell({
                   }
                 />
                 <TooltipContent>
-                  {generatorLoaded ? agentInBrowserLabel : 'Load LLM model first'}
+                  {!llmEnabled
+                    ? disabledLlmTooltip
+                    : generatorLoaded
+                      ? agentInBrowserLabel
+                      : 'Load LLM model first'}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -319,8 +323,12 @@ export function NotebookCell({
                     <button
                       type="button"
                       aria-label={agentCloudLabel}
-                      className={AGENT_BTN}
-                      disabled={isCloudGenerating || !onCloudGenerate}
+                      className={cn(
+                        AGENT_BTN,
+                        (!llmEnabled || !onCloudGenerate) &&
+                          'text-muted-foreground hover:bg-transparent hover:text-muted-foreground',
+                      )}
+                      disabled={!llmEnabled || isCloudGenerating || !onCloudGenerate}
                       onClick={onCloudGenerate}
                     >
                       {isCloudGenerating ? (
@@ -332,7 +340,11 @@ export function NotebookCell({
                   }
                 />
                 <TooltipContent>
-                  {onCloudGenerate ? agentCloudTooltip : 'Cloud AI is temporarily unavailable'}
+                  {!llmEnabled
+                    ? disabledLlmTooltip
+                    : onCloudGenerate
+                      ? agentCloudTooltip
+                      : 'Cloud AI is temporarily unavailable'}
                 </TooltipContent>
               </Tooltip>
             )}
