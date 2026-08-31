@@ -46,6 +46,13 @@ describe('formatCloudGenerateError', () => {
     expect(formatCloudGenerateError(outage)).not.toBe(formatCloudGenerateError(notAllowlisted))
   })
 
+  test('a 403 with a DIFFERENT code is not treated as an allowlist denial', () => {
+    // The status alone must not decide: only 403 + llm_access_denied is the
+    // allowlist case. Anything else falls through to generic handling.
+    const err = new ForbiddenError('some_other_reason', 'forbidden for another reason')
+    expect(formatCloudGenerateError(err)).not.toBe(CLOUD_LLM_RESTRICTED_MESSAGE)
+  })
+
   test('the 403 copy does not suggest retrying', () => {
     const err = new ForbiddenError('llm_access_denied', 'not allowlisted')
     const message = formatCloudGenerateError(err).toLowerCase()
