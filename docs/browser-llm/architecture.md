@@ -6,10 +6,10 @@ The browser LLM functionality spans three layers of the [fractal frontend archit
 
 ```
 pages/notebook          ← wires features together (bridge)
-pages/llm-playground    ← uses web-llm directly
+pages/llm-playground    ← combines local WebLLM and provider-neutral Cloud chat
 
 features/web-llm        ← owns the engine, loading, chat
-features/notebook       ← owns the notebook; has a DI slot for code generation
+features/notebook       ← owns notebook generation actions and in-browser DI slot
 ```
 
 `features/web-llm` and `features/notebook` **never import from each other** — cross-feature imports are forbidden. The page layer (`pages/notebook`) sits above both and is the only place that knows about both.
@@ -33,16 +33,19 @@ src/
 │   │
 │   └── notebook/
 │       ├── model/
-│       │   └── codeGenerator.ts        ← DI slot: codeGeneratorAtom
+│       │   ├── codeGenerator.ts        ← in-browser DI slot + generation action
+│       │   └── cloudCodeGenerator.ts   ← provider-neutral Cloud generation action
 │       └── ui/
-│           ├── NotebookView.tsx        ← reads codeGeneratorAtom, passes onInBrowserGenerate
-│           ├── NotebookCell.tsx        ← bot button (disabled state + tooltip)
+│           ├── NotebookView.tsx        ← wires in-browser and Cloud handlers
+│           ├── NotebookCell.tsx        ← separate in-browser and Cloud controls
 │           └── NotebookHeader.tsx      ← shows the loaded model (loadedModelIdAtom) in breadcrumb
 │
 └── pages/
     ├── llm-playground/
+    │   ├── model/
+    │   │   └── cloudPlayground.ts      ← provider-neutral Cloud chat action
     │   └── ui/
-    │       └── LlmPlaygroundPage.tsx   ← local + cloud panels with their own model selector
+    │       └── LlmPlaygroundPage.tsx   ← local model panel + Cloud panel
     │
     └── notebook/
         ├── model/
@@ -54,9 +57,11 @@ src/
 
 ---
 
-## DI slot pattern
+## In-browser DI slot and Cloud action
 
-The notebook feature cannot call the LLM directly. Instead it exposes a **dependency injection slot** — a plain atom that starts as `null` and is filled from outside:
+The in-browser tier cannot import `features/web-llm` directly. Instead the notebook
+feature exposes a **dependency injection slot** — a plain atom that starts as
+`null` and is filled from the page layer:
 
 ```ts
 // src/features/notebook/model/codeGenerator.ts
@@ -78,7 +83,12 @@ actually loaded into the engine) — which `NotebookHeader` reads directly for t
 breadcrumb (TARDIS-167 / review PR #88). A second notebook-side `loadedModelAtom`
 was removed to avoid two copies of the same fact drifting apart.
 
-Nothing inside `features/notebook` knows _how_ the generator works or which LLM is behind it.
+The Cloud tier is deliberately separate. `cloudCodeGenerator.ts` calls the
+provider-neutral `llm.generateCode` facade from `@/shared/api`; provider selection
+and credentials remain server-owned. `NotebookView` passes `onCloudGenerate` for
+markdown cells independently of the local `codeGeneratorAtom`, so Cloud generation
+does not require a downloaded browser model. `llmEnabledAtom` disables both UI
+tiers, and each model action retains its own guard against bypassing the UI.
 
 ---
 
@@ -249,7 +259,10 @@ The cloud tier is in **limited testing**. The backend can restrict
 `POST /llm/generate` to an allowlist of developer accounts (`LLM_ALLOWED_EMAILS`);
 while that is set, cloud generation is not generally available.
 
-The UI reflects this in two places, and the split matters:
+The cell toolbar calls `cloudGenerateAndInsertCodeAction`, which inserts a successful
+response below the prompt as an idle code or markdown cell. It does not execute the
+generated content. The UI reflects Cloud availability in two ways, and the split
+matters:
 
 - **Unconditional `Beta` labelling** on every cloud entry point (cell toolbar
   tooltip, Ask-agent dialog button, playground panel), with a hint explaining that

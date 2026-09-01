@@ -169,7 +169,7 @@ const NotebookRow = reatomComponent<NotebookRowProps>(({ cell, isFirst, isLast }
           cell.kind === 'markdown' ? wrap(() => generateAndInsertCodeAction(cell.id)) : undefined
         }
         onCloudGenerate={
-          cell.kind === 'markdown' && llmEnabled
+          cell.kind === 'markdown'
             ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
             : undefined
         }

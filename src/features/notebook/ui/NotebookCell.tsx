@@ -147,6 +147,9 @@ export function NotebookCell({
   // allowlisted, and an endpoint that answered that would leak the policy.
   const agentCloudTooltip = `${agentCloudLabel} · ${CLOUD_LLM_BETA_LABEL} — ${CLOUD_LLM_BETA_HINT}`
   const disabledLlmTooltip = 'Turn on LLM features in Settings'
+  // Defensive copy for standalone consumers that render a markdown cell
+  // without wiring the Cloud action. NotebookView always supplies the handler.
+  const unavailableCloudTooltip = 'Cloud generation is unavailable in this context'
 
   // Empty markdown cells stay in edit — preview of nothing is just a blank box.
   const showPreview = isMarkdown && viewMode === 'preview' && code.trim().length > 0
@@ -322,7 +325,7 @@ export function NotebookCell({
                   render={
                     <button
                       type="button"
-                      aria-label={agentCloudLabel}
+                      aria-label={`${agentCloudLabel} (${CLOUD_LLM_BETA_LABEL})`}
                       className={cn(
                         AGENT_BTN,
                         (!llmEnabled || !onCloudGenerate) &&
@@ -344,7 +347,7 @@ export function NotebookCell({
                     ? disabledLlmTooltip
                     : onCloudGenerate
                       ? agentCloudTooltip
-                      : 'Cloud AI is temporarily unavailable'}
+                      : unavailableCloudTooltip}
                 </TooltipContent>
               </Tooltip>
             )}

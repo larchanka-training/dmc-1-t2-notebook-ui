@@ -190,6 +190,14 @@ describe('NotebookCell — Output footer header', () => {
 // Step 8d-2 review follow-up: the cell toolbar is the third cloud surface and its
 // Beta state had no test.
 describe('NotebookCell — cloud tier beta labelling (Step 8d-2)', () => {
+  test('includes the Beta status in the cloud control accessible name', () => {
+    renderCell({ kind: 'markdown', onCloudGenerate: () => {} })
+
+    expect(
+      screen.getByRole('button', { name: 'Generate code · cloud agent (Beta)' }),
+    ).toBeInTheDocument()
+  })
+
   test('hovering the cloud control surfaces the limited-testing hint', async () => {
     const user = userEvent.setup()
     renderCell({ kind: 'markdown', onCloudGenerate: () => {} })
@@ -197,8 +205,7 @@ describe('NotebookCell — cloud tier beta labelling (Step 8d-2)', () => {
     const cloudButton = screen.getByRole('button', { name: /cloud agent/i })
     await user.hover(cloudButton)
 
-    // The tooltip carries the beta status; the button's own label stays the
-    // action, so the control is still findable by what it does.
+    // The tooltip explains the Beta status beyond the concise accessible name.
     expect(await screen.findByText(/limited testing/i)).toBeInTheDocument()
   })
 

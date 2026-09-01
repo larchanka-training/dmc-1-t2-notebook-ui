@@ -264,12 +264,13 @@ const CloudPanel = reatomComponent(() => {
 
 const LlmPlaygroundPage = reatomComponent(() => {
   const llmEnabled = llmEnabledAtom()
-  const isBusy = !llmEnabled || !sendMessageAction.ready() || !cloudSendAction.ready()
+  const isSending = !sendMessageAction.ready() || !cloudSendAction.ready()
+  const interactionDisabled = !llmEnabled || isSending
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const doSend = wrap(() => {
     const val = textareaRef.current?.value.trim()
-    if (!val || isBusy || !llmEnabled) return
+    if (!val || interactionDisabled) return
     if (textareaRef.current) textareaRef.current.value = ''
     sendMessageAction(val)
     cloudSendAction(val)
@@ -307,7 +308,7 @@ const LlmPlaygroundPage = reatomComponent(() => {
               ? 'Send a message to both models… (Enter to send, Shift+Enter for newline)'
               : 'LLM features are disabled in Settings.'
           }
-          disabled={isBusy}
+          disabled={interactionDisabled}
           rows={2}
           className="resize-none"
           onKeyDown={handleKeyDown}
@@ -315,7 +316,7 @@ const LlmPlaygroundPage = reatomComponent(() => {
         <Button
           size="icon"
           onClick={doSend}
-          disabled={isBusy}
+          disabled={interactionDisabled}
           className="shrink-0 self-end"
           aria-label="Send message"
         >
