@@ -30,14 +30,22 @@ describe('Epic 01 AC — Stop', () => {
   test(
     'AC: stopCell interrupts a running cell quickly with a stderr note',
     async () => {
+      // Parked, not a real `while(true)`: this was the LAST real infinite loop in
+      // the file, and it sat immediately before the parked test that hung for ~30s
+      // in CI — a far more proximate suspect than another file. The AC being
+      // traced here is "Stop interrupts promptly and leaves a stderr note", which
+      // the host's own stop path provides; the real QuickJS interrupt is covered
+      // against a live engine in `quickjs.test.ts` and `workerHost.test.ts`.
+      const fake = createParkedWorker()
+      const restore = setWorkerFactory(() => fake.worker)
       const [cell] = cellsAtom()
-      updateCellCode(cell.id, 'while(true){}')
+      updateCellCode(cell.id, 'parked-cell')
       const promise = runCell(cell.id)
-      await Promise.resolve()
-      await Promise.resolve()
+      await fake.firstRun
       const start = Date.now()
       stopCell(cell.id)
       await promise
+      restore()
       const elapsed = Date.now() - start
       expect(cell.status()).toBe('interrupted')
       expect(elapsed).toBeLessThan(500)

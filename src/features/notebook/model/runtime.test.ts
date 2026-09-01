@@ -292,9 +292,11 @@ describe('stopCell / stopAll', () => {
   //   1. The parked worker removes this file's own CPU burn and, more usefully,
   //      the timing guesswork: `await fake.firstRun` is a deterministic signal that
   //      the run is in flight, replacing "await two microtasks and hope the
-  //      resolver is installed". With `interruptFlag` unset (a parked worker never
-  //      completes the SAB handshake), `stopAll` -> `requestInterrupt` ->
-  //      `restartWorker` resolves the run SYNCHRONOUSLY — no timer on the path.
+  //      resolver is installed". `interruptFlag` is null under jsdom — NOT because
+  //      of anything the parked worker does, but because `ensureWorker` only
+  //      allocates the SharedArrayBuffer when `crossOriginIsolated` is true, which
+  //      jsdom does not set. With it null, `stopAll` -> `requestInterrupt` ->
+  //      `restartWorker` resolves the run synchronously, with no timer on the path.
   //
   //   2. The budget still had to grow. Converting this file did NOT stop the
   //      failure, because the starvation comes from OTHER files running in

@@ -74,5 +74,11 @@ export function createParkedWorker(): ParkedWorker {
  * The value stays BELOW the host watchdog (`timeoutMs + 100` = 30100ms) on
  * purpose: a genuinely hung run must still fail these tests rather than be
  * rescued by the watchdog and pass.
+ *
+ * CAVEAT, recorded honestly: both observed CI hangs measured ~30.0-30.1s, which is
+ * suspiciously exactly that host watchdog. If a hang is the run waiting for the
+ * watchdog rather than the file waiting for CPU, then NO budget below 30.1s can
+ * make it pass, and this constant is not the fix. Treat a recurrence at ~30s as
+ * evidence for that second explanation, not as a reason to raise the number.
  */
 export const STARVATION_TOLERANT_MS = 20_000
