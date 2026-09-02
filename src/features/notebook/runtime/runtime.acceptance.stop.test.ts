@@ -38,20 +38,29 @@ describe('Epic 01 AC — Stop', () => {
       // against a live engine in `quickjs.test.ts` and `workerHost.test.ts`.
       const fake = createParkedWorker()
       const restore = setWorkerFactory(() => fake.worker)
-      const [cell] = cellsAtom()
-      updateCellCode(cell.id, 'parked-cell')
-      const promise = runCell(cell.id)
-      await fake.firstRun
-      const start = Date.now()
-      stopCell(cell.id)
-      await promise
-      restore()
-      const elapsed = Date.now() - start
-      expect(cell.status()).toBe('interrupted')
-      expect(elapsed).toBeLessThan(500)
-      expect(cell.output().some((it) => it.type === 'stderr' && /interrupt/i.test(it.text))).toBe(
-        true,
-      )
+      try {
+        const [cell] = cellsAtom()
+        updateCellCode(cell.id, 'parked-cell')
+        const promise = runCell(cell.id)
+        await fake.firstRun
+        const start = Date.now()
+        stopCell(cell.id)
+        await promise
+        const elapsed = Date.now() - start
+        expect(cell.status()).toBe('interrupted')
+        // The 500ms here is a PRODUCT contract — Stop must feel immediate — and is
+        // unrelated to the outer vitest budget, which only bounds how long the
+        // runner waits when the machine is loaded.
+        expect(elapsed).toBeLessThan(500)
+        expect(cell.output().some((it) => it.type === 'stderr' && /interrupt/i.test(it.text))).toBe(
+          true,
+        )
+      } finally {
+        // `finally`, not a trailing call: on a rejection or a timeout the global
+        // worker factory would otherwise stay patched and leak into every later
+        // test in this file (`afterEach` only restarts the worker).
+        restore()
+      }
     },
     STARVATION_TOLERANT_MS,
   )

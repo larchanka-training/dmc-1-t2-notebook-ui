@@ -61,24 +61,30 @@ export function createParkedWorker(): ParkedWorker {
 }
 
 /**
- * Timeout budget for stop/queue tests that assert BOOKKEEPING rather than latency.
+ * Outer vitest budget for stop/queue tests that repeatedly timed out in CI.
  *
- * These tests do not measure how fast anything is, so the default 5000ms was
- * asserting nothing about the product — it was only measuring how loaded the
- * machine happened to be. CI is a 2-core `ubuntu-latest`, `test:coverage` adds v8
- * instrumentation, and other files still spin real infinite loops in parallel
- * (`quickjs.test.ts` alone runs three `while(true)` cases with 60s kernel
- * timeouts), so a file can go seconds without CPU. That starvation is CROSS-FILE:
- * making one file stop burning CPU does not protect it from the others.
+ * OBSERVED FACTS (the only things stated here as fact):
+ *   - the failures happened in the `test:coverage` step only; the plain `pnpm
+ *     test` step of the same run was green;
+ *   - the reported durations were ~30013ms and ~30079ms against a 5000ms budget;
+ *   - CI is a 2-core `ubuntu-latest`; `test:coverage` adds v8 instrumentation;
+ *   - the file that hung had a real `while(true)` test immediately before it
+ *     (now removed).
  *
- * The value stays BELOW the host watchdog (`timeoutMs + 100` = 30100ms) on
- * purpose: a genuinely hung run must still fail these tests rather than be
- * rescued by the watchdog and pass.
+ * TWO HYPOTHESES, neither proven:
+ *   A. CPU starvation — the test body simply gets no CPU for seconds. A larger
+ *      outer budget is the right instrument for this one.
+ *   B. The run is waiting for the host watchdog (`timeoutMs + 100` = 30100ms)
+ *      because the stop did not resolve it. Both durations sit suspiciously
+ *      close to that number. If B is the real cause, NO budget below 30100ms can
+ *      help and this constant is not the cure.
  *
- * CAVEAT, recorded honestly: both observed CI hangs measured ~30.0-30.1s, which is
- * suspiciously exactly that host watchdog. If a hang is the run waiting for the
- * watchdog rather than the file waiting for CPU, then NO budget below 30.1s can
- * make it pass, and this constant is not the fix. Treat a recurrence at ~30s as
- * evidence for that second explanation, not as a reason to raise the number.
+ * A recurrence at ~30s is evidence for B — investigate the stop path rather than
+ * raising this number. The value stays below 30100ms deliberately, so a hung run
+ * still fails instead of being rescued by the watchdog and passing.
+ *
+ * Scope: this bounds how long the RUNNER waits. It is not a latency assertion —
+ * where a test does assert product latency (e.g. `elapsed < 500` for Stop
+ * feeling immediate), that assertion is separate and unaffected by this value.
  */
 export const STARVATION_TOLERANT_MS = 20_000

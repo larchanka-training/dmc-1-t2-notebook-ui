@@ -285,31 +285,22 @@ describe('stopCell / stopAll', () => {
     )
   }, 5000)
 
-  // The two stopAll tests below drive a PARKED worker rather than a real
-  // `while(true){}` run, and carry a deliberately generous budget. Both parts are
-  // needed, for different reasons:
+  // The two stopAll tests below drive a PARKED worker and carry the shared outer
+  // budget `STARVATION_TOLERANT_MS`. That constant's header records what is
+  // OBSERVED versus what is HYPOTHESIS about the CI failures — the cause is not
+  // proven, so it is deliberately not restated here.
   //
-  //   1. The parked worker removes this file's own CPU burn and, more usefully,
-  //      the timing guesswork: `await fake.firstRun` is a deterministic signal that
-  //      the run is in flight, replacing "await two microtasks and hope the
-  //      resolver is installed". `interruptFlag` is null under jsdom — NOT because
-  //      of anything the parked worker does, but because `ensureWorker` only
-  //      allocates the SharedArrayBuffer when `crossOriginIsolated` is true, which
-  //      jsdom does not set. With it null, `stopAll` -> `requestInterrupt` ->
-  //      `restartWorker` resolves the run synchronously, with no timer on the path.
+  // What parking buys regardless of the cause: no real infinite loop in this file,
+  // and `await fake.firstRun` is a deterministic in-flight signal instead of
+  // "await two microtasks and hope the resolver is installed". `interruptFlag` is
+  // null under jsdom because `ensureWorker` only allocates the SharedArrayBuffer
+  // when `crossOriginIsolated` is true — nothing to do with the parked worker —
+  // so `stopAll` -> `requestInterrupt` -> `restartWorker` resolves synchronously.
   //
-  //   2. The budget still had to grow. Converting this file did NOT stop the
-  //      failure, because the starvation comes from OTHER files running in
-  //      parallel: `quickjs.test.ts` alone runs three `while(true)` cases with
-  //      60s kernel timeouts, and CI is a 2-core `ubuntu-latest` where
-  //      `test:coverage` adds v8 instrumentation on top. When the box is saturated
-  //      the whole file gets no CPU for seconds, and 5000ms measured nothing about
-  //      the product — these tests assert queue/skip BOOKKEEPING, not latency.
-  //
-  // The budget itself lives with the fixture (`STARVATION_TOLERANT_MS`) so every
-  // stop test shares one number and one rationale. The real interrupt path stays
-  // covered by the timeout test above, `workerHost.test.ts`, `quickjs.test.ts`,
-  // and the acceptance suite.
+  // These two tests assert queue/skip BOOKKEEPING, so the outer budget is not a
+  // latency claim about them. Live-engine coverage of the real interrupt and
+  // timeout paths stays in the `timeoutMs` test above (a genuine `while(true)`),
+  // `workerHost.test.ts` and `quickjs.test.ts`.
   test(
     'stopAll halts the queue and marks remaining cells as skipped',
     async () => {
