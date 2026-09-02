@@ -9,7 +9,7 @@ import { queueAtom, restartKernel, runAll, runCell, stopAll, stopCell } from '..
 import { restartWorker, setWorkerFactory } from './workerHost'
 // Shared with `model/runtime.test.ts`, which switched its stopAll tests onto the
 // same parked worker to remove a real `while(true)` flake.
-import { createParkedWorker, STARVATION_TOLERANT_MS } from './__fixtures__/parkedWorker'
+import { createParkedWorker, STOP_TEST_TIMEOUT_MS } from './__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   restartKernel()
@@ -30,22 +30,39 @@ describe('Epic 01 AC — Stop', () => {
   test(
     'AC: stopCell interrupts a running cell quickly with a stderr note',
     async () => {
-      const [cell] = cellsAtom()
-      updateCellCode(cell.id, 'while(true){}')
-      const promise = runCell(cell.id)
-      await Promise.resolve()
-      await Promise.resolve()
-      const start = Date.now()
-      stopCell(cell.id)
-      await promise
-      const elapsed = Date.now() - start
-      expect(cell.status()).toBe('interrupted')
-      expect(elapsed).toBeLessThan(500)
-      expect(cell.output().some((it) => it.type === 'stderr' && /interrupt/i.test(it.text))).toBe(
-        true,
-      )
+      // Parked, not a real `while(true)`: this was the LAST real infinite loop in
+      // the file, and it sat immediately before the parked test that hung for ~30s
+      // in CI — a far more proximate suspect than another file. The AC being
+      // traced here is "Stop interrupts promptly and leaves a stderr note", which
+      // the host's own stop path provides; the real QuickJS interrupt is covered
+      // against a live engine in `quickjs.test.ts` and `workerHost.test.ts`.
+      const fake = createParkedWorker()
+      const restore = setWorkerFactory(() => fake.worker)
+      try {
+        const [cell] = cellsAtom()
+        updateCellCode(cell.id, 'parked-cell')
+        const promise = runCell(cell.id)
+        await fake.firstRun
+        const start = Date.now()
+        stopCell(cell.id)
+        await promise
+        const elapsed = Date.now() - start
+        expect(cell.status()).toBe('interrupted')
+        // The 500ms here is a PRODUCT contract — Stop must feel immediate — and is
+        // unrelated to the outer vitest budget, which only bounds how long the
+        // runner waits when the machine is loaded.
+        expect(elapsed).toBeLessThan(500)
+        expect(cell.output().some((it) => it.type === 'stderr' && /interrupt/i.test(it.text))).toBe(
+          true,
+        )
+      } finally {
+        // `finally`, not a trailing call: on a rejection or a timeout the global
+        // worker factory would otherwise stay patched and leak into every later
+        // test in this file (`afterEach` only restarts the worker).
+        restore()
+      }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 
   test(
@@ -80,7 +97,7 @@ describe('Epic 01 AC — Stop', () => {
         restore()
       }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 })
 

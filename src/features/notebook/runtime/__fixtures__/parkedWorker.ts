@@ -41,9 +41,25 @@ export function createParkedWorker(): ParkedWorker {
   const worker: WorkerLike = {
     postMessage: (msg: HostMsg) => {
       if (msg.kind !== 'run') return
+      if (terminated) {
+        // A run that arrives AFTER Stop terminated this worker. In production
+        // `ensureWorker` would have built a FRESH worker here, which answers; the
+        // stub factory hands back the same dead object instead, so without this
+        // branch the run gets no reply and sits until the host watchdog fires at
+        // `timeoutMs + 100` (30100ms). That is precisely the ~30s hang seen in CI
+        // three times — it was an artefact of this fixture, not of the product.
+        // Answer immediately so the queue drains at test speed.
+        const done: WorkerMsg = { kind: 'done', runId: msg.runId, status: 'interrupted' }
+        queueMicrotask(() => {
+          for (const listener of [...listeners]) {
+            listener({ data: done } as MessageEvent<WorkerMsg>)
+          }
+        })
+        return
+      }
       resolveFirstRun?.()
       resolveFirstRun = null
-      // Park forever: the run can only end through requestInterrupt.
+      // Park: the FIRST run can only end through requestInterrupt.
     },
     addEventListener: (_type, listener) => {
       listeners.push(listener)
@@ -61,18 +77,23 @@ export function createParkedWorker(): ParkedWorker {
 }
 
 /**
- * Timeout budget for stop/queue tests that assert BOOKKEEPING rather than latency.
+ * Budget for the stop/queue tests.
  *
- * These tests do not measure how fast anything is, so the default 5000ms was
- * asserting nothing about the product — it was only measuring how loaded the
- * machine happened to be. CI is a 2-core `ubuntu-latest`, `test:coverage` adds v8
- * instrumentation, and other files still spin real infinite loops in parallel
- * (`quickjs.test.ts` alone runs three `while(true)` cases with 60s kernel
- * timeouts), so a file can go seconds without CPU. That starvation is CROSS-FILE:
- * making one file stop burning CPU does not protect it from the others.
+ * History, because the number moved twice for the wrong reason:
+ *   - the tests failed in CI at ~30013ms, ~30079ms and ~30016ms against budgets
+ *     of 5000ms and then 20000ms. Three hangs landing on the same ~30.0s is not
+ *     the scatter CPU starvation produces;
+ *   - ~30100ms is exactly the host watchdog (`timeoutMs + 100`), so the run was
+ *     waiting for that watchdog, not for CPU. Raising the budget could never fix
+ *     it, and did not;
+ *   - the cause was in THIS fixture: after Stop terminated the parked worker, the
+ *     stub factory handed the same dead object to the next queued run, which
+ *     therefore got no reply. `createParkedWorker` now answers post-termination
+ *     runs immediately, which is what a real fresh worker would do.
  *
- * The value stays BELOW the host watchdog (`timeoutMs + 100` = 30100ms) on
- * purpose: a genuinely hung run must still fail these tests rather than be
- * rescued by the watchdog and pass.
+ * With no path that can reach the watchdog, a tight budget is meaningful again:
+ * these tests settle in milliseconds, so anything near a second means the stop
+ * path genuinely broke. Keep it small — a large budget here would only hide the
+ * next real hang.
  */
-export const STARVATION_TOLERANT_MS = 20_000
+export const STOP_TEST_TIMEOUT_MS = 5_000
