@@ -14,7 +14,7 @@ import {
 } from './runtime'
 import { DEFAULT_TIMEOUT_MS, timeoutMsAtom } from './notebookSettings'
 import { restartWorker, setWorkerFactory } from '../runtime/workerHost'
-import { createParkedWorker, STARVATION_TOLERANT_MS } from '../runtime/__fixtures__/parkedWorker'
+import { createParkedWorker, STOP_TEST_TIMEOUT_MS } from '../runtime/__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   // Reset cross-test state via the proper public action, then prune any
@@ -285,22 +285,21 @@ describe('stopCell / stopAll', () => {
     )
   }, 5000)
 
-  // The two stopAll tests below drive a PARKED worker and carry the shared outer
-  // budget `STARVATION_TOLERANT_MS`. That constant's header records what is
-  // OBSERVED versus what is HYPOTHESIS about the CI failures — the cause is not
-  // proven, so it is deliberately not restated here.
+  // The two stopAll tests below drive a PARKED worker. They assert queue/skip
+  // BOOKKEEPING, which needs no live engine, and parking removes both the real
+  // infinite loop and the timing guesswork: `await fake.firstRun` is a
+  // deterministic in-flight signal instead of "await two microtasks and hope the
+  // resolver is installed".
   //
-  // What parking buys regardless of the cause: no real infinite loop in this file,
-  // and `await fake.firstRun` is a deterministic in-flight signal instead of
-  // "await two microtasks and hope the resolver is installed". `interruptFlag` is
-  // null under jsdom because `ensureWorker` only allocates the SharedArrayBuffer
-  // when `crossOriginIsolated` is true — nothing to do with the parked worker —
-  // so `stopAll` -> `requestInterrupt` -> `restartWorker` resolves synchronously.
+  // `interruptFlag` is null under jsdom because `ensureWorker` only allocates the
+  // SharedArrayBuffer when `crossOriginIsolated` is true — nothing to do with the
+  // parked worker — so `stopAll` -> `requestInterrupt` -> `restartWorker` resolves
+  // the in-flight run synchronously.
   //
-  // These two tests assert queue/skip BOOKKEEPING, so the outer budget is not a
-  // latency claim about them. Live-engine coverage of the real interrupt and
-  // timeout paths stays in the `timeoutMs` test above (a genuine `while(true)`),
-  // `workerHost.test.ts` and `quickjs.test.ts`.
+  // These used to hang for ~30s in CI. The cause was in the fixture, not here:
+  // see `STOP_TEST_TIMEOUT_MS` for the full account. Live-engine coverage of the
+  // real interrupt and timeout paths stays in the `timeoutMs` test above (a
+  // genuine `while(true)`), `workerHost.test.ts` and `quickjs.test.ts`.
   test(
     'stopAll halts the queue and marks remaining cells as skipped',
     async () => {
@@ -332,7 +331,7 @@ describe('stopCell / stopAll', () => {
         restore()
       }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 
   test(
@@ -357,7 +356,7 @@ describe('stopCell / stopAll', () => {
         restore()
       }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 })
 

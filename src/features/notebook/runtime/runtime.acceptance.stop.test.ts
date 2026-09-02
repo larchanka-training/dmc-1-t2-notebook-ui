@@ -9,7 +9,7 @@ import { queueAtom, restartKernel, runAll, runCell, stopAll, stopCell } from '..
 import { restartWorker, setWorkerFactory } from './workerHost'
 // Shared with `model/runtime.test.ts`, which switched its stopAll tests onto the
 // same parked worker to remove a real `while(true)` flake.
-import { createParkedWorker, STARVATION_TOLERANT_MS } from './__fixtures__/parkedWorker'
+import { createParkedWorker, STOP_TEST_TIMEOUT_MS } from './__fixtures__/parkedWorker'
 
 beforeEach(async () => {
   restartKernel()
@@ -62,7 +62,7 @@ describe('Epic 01 AC — Stop', () => {
         restore()
       }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 
   test(
@@ -97,7 +97,7 @@ describe('Epic 01 AC — Stop', () => {
         restore()
       }
     },
-    STARVATION_TOLERANT_MS,
+    STOP_TEST_TIMEOUT_MS,
   )
 })
 

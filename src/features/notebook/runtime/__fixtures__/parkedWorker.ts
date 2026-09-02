@@ -41,9 +41,25 @@ export function createParkedWorker(): ParkedWorker {
   const worker: WorkerLike = {
     postMessage: (msg: HostMsg) => {
       if (msg.kind !== 'run') return
+      if (terminated) {
+        // A run that arrives AFTER Stop terminated this worker. In production
+        // `ensureWorker` would have built a FRESH worker here, which answers; the
+        // stub factory hands back the same dead object instead, so without this
+        // branch the run gets no reply and sits until the host watchdog fires at
+        // `timeoutMs + 100` (30100ms). That is precisely the ~30s hang seen in CI
+        // three times — it was an artefact of this fixture, not of the product.
+        // Answer immediately so the queue drains at test speed.
+        const done: WorkerMsg = { kind: 'done', runId: msg.runId, status: 'interrupted' }
+        queueMicrotask(() => {
+          for (const listener of [...listeners]) {
+            listener({ data: done } as MessageEvent<WorkerMsg>)
+          }
+        })
+        return
+      }
       resolveFirstRun?.()
       resolveFirstRun = null
-      // Park forever: the run can only end through requestInterrupt.
+      // Park: the FIRST run can only end through requestInterrupt.
     },
     addEventListener: (_type, listener) => {
       listeners.push(listener)
@@ -61,30 +77,23 @@ export function createParkedWorker(): ParkedWorker {
 }
 
 /**
- * Outer vitest budget for stop/queue tests that repeatedly timed out in CI.
+ * Budget for the stop/queue tests.
  *
- * OBSERVED FACTS (the only things stated here as fact):
- *   - the failures happened in the `test:coverage` step only; the plain `pnpm
- *     test` step of the same run was green;
- *   - the reported durations were ~30013ms and ~30079ms against a 5000ms budget;
- *   - CI is a 2-core `ubuntu-latest`; `test:coverage` adds v8 instrumentation;
- *   - the file that hung had a real `while(true)` test immediately before it
- *     (now removed).
+ * History, because the number moved twice for the wrong reason:
+ *   - the tests failed in CI at ~30013ms, ~30079ms and ~30016ms against budgets
+ *     of 5000ms and then 20000ms. Three hangs landing on the same ~30.0s is not
+ *     the scatter CPU starvation produces;
+ *   - ~30100ms is exactly the host watchdog (`timeoutMs + 100`), so the run was
+ *     waiting for that watchdog, not for CPU. Raising the budget could never fix
+ *     it, and did not;
+ *   - the cause was in THIS fixture: after Stop terminated the parked worker, the
+ *     stub factory handed the same dead object to the next queued run, which
+ *     therefore got no reply. `createParkedWorker` now answers post-termination
+ *     runs immediately, which is what a real fresh worker would do.
  *
- * TWO HYPOTHESES, neither proven:
- *   A. CPU starvation — the test body simply gets no CPU for seconds. A larger
- *      outer budget is the right instrument for this one.
- *   B. The run is waiting for the host watchdog (`timeoutMs + 100` = 30100ms)
- *      because the stop did not resolve it. Both durations sit suspiciously
- *      close to that number. If B is the real cause, NO budget below 30100ms can
- *      help and this constant is not the cure.
- *
- * A recurrence at ~30s is evidence for B — investigate the stop path rather than
- * raising this number. The value stays below 30100ms deliberately, so a hung run
- * still fails instead of being rescued by the watchdog and passing.
- *
- * Scope: this bounds how long the RUNNER waits. It is not a latency assertion —
- * where a test does assert product latency (e.g. `elapsed < 500` for Stop
- * feeling immediate), that assertion is separate and unaffected by this value.
+ * With no path that can reach the watchdog, a tight budget is meaningful again:
+ * these tests settle in milliseconds, so anything near a second means the stop
+ * path genuinely broke. Keep it small — a large budget here would only hide the
+ * next real hang.
  */
-export const STARVATION_TOLERANT_MS = 20_000
+export const STOP_TEST_TIMEOUT_MS = 5_000
