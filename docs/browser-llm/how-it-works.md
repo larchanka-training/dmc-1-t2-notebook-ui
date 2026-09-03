@@ -1,8 +1,17 @@
-# How Browser LLM Works
+# How Browser and Cloud LLM Work
 
 ## Overview
 
-Language models run entirely in the user's browser via **WebLLM** (`@mlc-ai/web-llm`). No backend, no API key, no network call to any LLM provider. The model weights are downloaded once from a CDN, cached in the browser's **Cache Storage**, and executed using **WebGPU** (or WASM as a fallback).
+The in-browser tier runs entirely in the user's browser via **WebLLM**
+(`@mlc-ai/web-llm`). It uses no backend provider or API key: model weights are
+downloaded from a CDN, cached in the browser's **Cache Storage**, and executed
+using **WebGPU** (or WASM as a fallback).
+
+The separate **Cloud** tier sends an authenticated request through the
+provider-neutral `/llm/generate` API. The backend owns provider selection and
+credentials; the UI does not name or configure a cloud vendor.
+
+### In-browser data flow
 
 ```
 User's browser
@@ -25,7 +34,9 @@ User's browser
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Everything stays on-device. The inference runs on the GPU (WebGPU) or CPU (WASM fallback).
+For the in-browser tier, inference stays on-device and runs on the GPU (WebGPU) or
+CPU (WASM fallback). Cloud prompts and selected notebook context are sent to the
+backend only when the user chooses a Cloud action.
 
 ---
 
@@ -38,9 +49,11 @@ Everything stays on-device. The inference runs on the GPU (WebGPU) or CPU (WASM 
 3. A progress bar tracks download + initialization.
 4. Once the bar disappears the model is ready for chat.
 
-### Automatic (Notebook page)
+### Opt-in (Notebook page)
 
-When you open the Notebook page, `NotebookLlmBar` auto-loads `Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC` (the lightest code model) if no model is already active. The same progress bar appears at the top of the page. You can change the model in the dropdown and click **Reload** to swap.
+`NotebookLlmBar` exposes the same model selector and progress bar, but it does not
+auto-load a multi-gigabyte model. Select a model and click **Load**; use **Reload**
+to re-initialize the selected model after it is active.
 
 State atoms that track loading:
 
@@ -52,9 +65,13 @@ State atoms that track loading:
 
 ---
 
-## Code generation flow (step by step)
+## Code generation flows (step by step)
 
-This is what happens when a user types a prompt in a **Text** cell and clicks the **Bot** button.
+This is what happens when a user types a prompt in a **Text** cell and chooses one
+of its two generation controls:
+
+- **Bot** runs the downloaded in-browser model.
+- **Cloud** calls the authenticated backend and does not require a local model.
 
 ### Step 1 — User writes a prompt in a Text cell
 
@@ -64,14 +81,16 @@ A Text cell (`kind: 'markdown'`) stores its content in `cell.code()`. The user t
 function to generate fibonacci numbers
 ```
 
-### Step 2 — Bot button click
+### Step 2 — Choose the in-browser or Cloud control
 
-The button is shown on all Text cells. It is:
+Both controls are shown on Text cells:
 
-- **Gray + disabled** when no model is loaded (tooltip: "Load LLM model first")
-- **Active** once `codeGeneratorAtom` is non-null (i.e. a model has been loaded)
+- **Bot** is disabled when no local model is loaded and becomes active once
+  `codeGeneratorAtom` is non-null.
+- **Cloud** is independent of `codeGeneratorAtom`. It is labelled `Beta` and is
+  disabled only while its request is running or the LLM master switch is off.
 
-`NotebookView` passes the handler:
+`NotebookView` passes separate handlers:
 
 ```tsx
 onInBrowserGenerate={
@@ -79,11 +98,16 @@ onInBrowserGenerate={
     ? wrap(() => generateAndInsertCodeAction(cell.id))
     : undefined
 }
+onCloudGenerate={
+  cell.kind === 'markdown'
+    ? wrap(() => cloudGenerateAndInsertCodeAction(cell.id))
+    : undefined
+}
 ```
 
 `wrap` is required here — React event handlers fire outside any Reatom context, and `clearStack()` is enabled in this project.
 
-### Step 3 — `generateAndInsertCodeAction` runs
+### Step 3a — In-browser `generateAndInsertCodeAction` runs
 
 ```
 src/features/notebook/model/codeGenerator.ts
@@ -121,7 +145,19 @@ await wrap(
 
 The `wrap()` around `runInBrowserGeneration` is critical — the callbacks fire across the generator's internal `await` boundaries (the WebLLM stream), so the Reatom context must be restored. See [architecture.md](./architecture.md#pre-capture-wrap-pattern). The Ask-agent dialog (`agentSendInBrowserAction`) goes through the **same** helper; the only difference is the error path (it omits `onError`, so a failure keeps the in-notebook failure block instead of a per-cell error).
 
-### Step 4 — The generator streams the LLM (`buildGenerator` → `streamOnce`)
+### Step 3b — Cloud `cloudGenerateAndInsertCodeAction` runs
+
+```
+src/features/notebook/model/cloudCodeGenerator.ts
+```
+
+The action checks the master switch and prompt, builds notebook context from the
+cells above the prompt, then calls `llm.generateCode` through `@/shared/api`. A
+successful response is inserted directly below the prompt using the backend's
+`resultKind` (`code` or `markdown`). The inserted cell starts in `idle` state with
+no execution count or output; generated code is never run automatically.
+
+### Step 4 — The in-browser generator streams the LLM (`buildGenerator` → `streamOnce`)
 
 `generator` is the function injected via `codeGeneratorAtom`, built by the bridge in `pages/notebook/model/codeGeneratorBridge.ts`. It returns a structured result, **not** a bare string:
 
@@ -200,13 +236,19 @@ write a function that filters users by name prefix
 
 ## LLM Playground chat
 
-The Playground page (`pages/llm-playground`) exposes the full conversational interface:
+The Playground page (`pages/llm-playground`) compares both tiers side by side:
 
-- Select and load any model.
-- Send messages; responses stream token-by-token back to the UI.
+- **Local:** select and load a browser model; responses stream token-by-token.
+- **Cloud:** send the same prompt through `cloudSendAction`; the response arrives
+  from the authenticated backend without loading a local model.
 - Errors from loading or sending are shown inline.
 
-Streaming works by creating a streaming completion and iterating `for await (chunk of stream)`. Because each loop iteration is an async boundary under `clearStack()`, the streaming atom updates use the **pre-capture wrap** pattern — see [architecture.md](./architecture.md#pre-capture-wrap-pattern).
+Local streaming creates a streaming completion and iterates
+`for await (chunk of stream)`. Because each loop iteration is an async boundary
+under `clearStack()`, the streaming atom updates use the **pre-capture wrap**
+pattern — see [architecture.md](./architecture.md#pre-capture-wrap-pattern). The
+Cloud action uses `llm.generateCode` through `@/shared/api` and appends the returned
+content to its separate transcript.
 
 ---
 

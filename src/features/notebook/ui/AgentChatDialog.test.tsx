@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { llm } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { ApiError, ForbiddenError, RateLimitedError } from '@/shared/api/errors'
 import { CLOUD_LLM_RESTRICTED_MESSAGE } from '../lib/cloudLlmAvailability'
 import { cellsAtom } from '../model/notebook'
@@ -30,10 +31,12 @@ const fakeResponse = (
 })
 
 beforeEach(() => {
+  llmEnabledAtom.set(true)
   vi.restoreAllMocks()
 })
 
 afterEach(() => {
+  llmEnabledAtom.set(true)
   vi.restoreAllMocks()
 })
 
@@ -201,6 +204,21 @@ describe('AgentChatDialog — two agent tiers (TARDIS-167 №13)', () => {
     expect(screen.getByRole('button', { name: /in-browser/i })).toBeDisabled()
     // The cloud tier stays available regardless of a local model.
     expect(screen.getByRole('button', { name: 'Cloud (Beta)' })).not.toBeDisabled()
+  })
+
+  test('master switch disables input and both agent tiers without closing the dialog', async () => {
+    render(<AgentChatDialog />)
+    await act(async () => {
+      llmEnabledAtom.set(false)
+      codeGeneratorAtom.set(() => vi.fn())
+      agentChatOpenAtom.set(true)
+    })
+
+    expect(screen.getByRole('textbox')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /in-browser/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cloud (Beta)' })).toBeDisabled()
+    expect(screen.getByText(/llm features are disabled in settings/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /cancel/i })).not.toBeDisabled()
   })
 
   // The in-browser TIER behaviour is covered at the model level (below): driving

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { engineAtom, isReasoningModel, MODEL_CATALOG } from '@/features/web-llm'
 import { NotebookLlmBar } from './NotebookLlmBar'
 
 afterEach(() => {
   act(() => {
     engineAtom.set(null)
+    llmEnabledAtom.set(true)
   })
 })
 
@@ -39,5 +41,13 @@ describe('NotebookLlmBar — model capabilities UI (TARDIS-168 C3/C4)', () => {
     expect(isReasoningModel(plain.id)).toBe(false)
     expect(isReasoningModel(null)).toBe(false)
     expect(isReasoningModel('not-in-catalog')).toBe(false)
+  })
+
+  test('master switch disables the model picker and load action', () => {
+    act(() => llmEnabledAtom.set(false))
+    render(<NotebookLlmBar />)
+
+    expect(screen.getByRole('combobox')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /load model/i })).toBeDisabled()
   })
 })

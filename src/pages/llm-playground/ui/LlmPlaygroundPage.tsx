@@ -27,6 +27,7 @@ import {
   streamingResponseAtom,
 } from '@/features/web-llm'
 import { cn } from '@/shared/lib/cn'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { cloudMessagesAtom, cloudSendAction } from '../model/cloudPlayground'
 
 function formatCloudSendError(err: Error): string {
@@ -36,6 +37,7 @@ function formatCloudSendError(err: Error): string {
 // ── Local panel ──────────────────────────────────────────────────────────────
 
 const LocalPanel = reatomComponent(() => {
+  const llmEnabled = llmEnabledAtom()
   const engine = engineAtom()
   const modelId = modelIdAtom()
   const loadedModelId = loadedModelIdAtom()
@@ -82,6 +84,7 @@ const LocalPanel = reatomComponent(() => {
           <Select
             value={modelId}
             onValueChange={wrap((val: string | null) => val && modelIdAtom.set(val))}
+            disabled={!llmEnabled}
           >
             <SelectTrigger className="h-8 flex-1 text-xs">
               <SelectValue />
@@ -125,7 +128,7 @@ const LocalPanel = reatomComponent(() => {
                 <Button
                   size="sm"
                   variant={isSelectedLoaded ? 'outline' : 'default'}
-                  disabled={isLoadingSelected}
+                  disabled={!llmEnabled || isLoadingSelected}
                   onClick={wrap(() => loadModelAction())}
                   className="shrink-0 text-xs"
                 >
@@ -133,7 +136,9 @@ const LocalPanel = reatomComponent(() => {
                 </Button>
               }
             />
-            <TooltipContent>{actionHint}</TooltipContent>
+            <TooltipContent>
+              {llmEnabled ? actionHint : 'Turn on LLM features in Settings'}
+            </TooltipContent>
           </Tooltip>
         </div>
         {progress && (
@@ -210,9 +215,6 @@ const CloudPanel = reatomComponent(() => {
           <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             {CLOUD_LLM_BETA_LABEL}
           </span>
-          <span className="ml-auto rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            requires sign-in
-          </span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{CLOUD_LLM_BETA_HINT}</p>
         {sendError && (
@@ -261,12 +263,14 @@ const CloudPanel = reatomComponent(() => {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const LlmPlaygroundPage = reatomComponent(() => {
-  const isBusy = !sendMessageAction.ready() || !cloudSendAction.ready()
+  const llmEnabled = llmEnabledAtom()
+  const isSending = !sendMessageAction.ready() || !cloudSendAction.ready()
+  const interactionDisabled = !llmEnabled || isSending
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const doSend = wrap(() => {
     const val = textareaRef.current?.value.trim()
-    if (!val || isBusy) return
+    if (!val || interactionDisabled) return
     if (textareaRef.current) textareaRef.current.value = ''
     sendMessageAction(val)
     cloudSendAction(val)
@@ -299,13 +303,23 @@ const LlmPlaygroundPage = reatomComponent(() => {
       <div className="flex gap-2 border-t px-6 py-4">
         <Textarea
           ref={textareaRef}
-          placeholder="Send a message to both models… (Enter to send, Shift+Enter for newline)"
-          disabled={isBusy}
+          placeholder={
+            llmEnabled
+              ? 'Send a message to both models… (Enter to send, Shift+Enter for newline)'
+              : 'LLM features are disabled in Settings.'
+          }
+          disabled={interactionDisabled}
           rows={2}
           className="resize-none"
           onKeyDown={handleKeyDown}
         />
-        <Button size="icon" onClick={doSend} disabled={isBusy} className="shrink-0 self-end">
+        <Button
+          size="icon"
+          onClick={doSend}
+          disabled={interactionDisabled}
+          className="shrink-0 self-end"
+          aria-label="Send message"
+        >
           <Send className="size-4" />
         </Button>
       </div>

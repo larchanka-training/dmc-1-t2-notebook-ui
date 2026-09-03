@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi 
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { llm } from '@/shared/api'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import { ForbiddenError } from '@/shared/api/errors'
 import { CLOUD_LLM_RESTRICTED_MESSAGE } from '@/features/notebook'
 import { engineAtom, messagesAtom } from '@/features/web-llm'
@@ -28,6 +29,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  llmEnabledAtom.set(true)
   engineAtom.set(null)
   messagesAtom.set([])
   cloudMessagesAtom.set([])
@@ -35,6 +37,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  llmEnabledAtom.set(true)
   engineAtom.set(null)
   messagesAtom.set([])
   cloudMessagesAtom.set([])
@@ -52,11 +55,13 @@ describe('LlmPlaygroundPage', () => {
     expect(screen.getByText('Cloud AI')).toBeInTheDocument()
     expect(screen.getByText('Load a model to enable local responses.')).toBeInTheDocument()
     expect(screen.getByText('Cloud responses will appear here.')).toBeInTheDocument()
+    expect(screen.queryByText(/requires sign-in/i)).not.toBeInTheDocument()
   })
 
   test('sends one prompt to local placeholder and cloud response', async () => {
     const user = userEvent.setup()
     const cloudSpy = vi.spyOn(llm, 'generateCode').mockResolvedValue(fakeResponse('cloud reply'))
+    expect(engineAtom()).toBeNull()
     render(<LlmPlaygroundPage />)
 
     const input = screen.getByPlaceholderText(/send a message to both models/i)
@@ -73,6 +78,17 @@ describe('LlmPlaygroundPage', () => {
     expect(screen.getAllByText('compare map and reduce')).toHaveLength(2)
     expect(screen.getByText('— Load a model to see a local response —')).toBeInTheDocument()
     expect(await screen.findByText('cloud reply')).toBeInTheDocument()
+  })
+
+  test('master switch disables sending and does not call the cloud API', async () => {
+    const cloudSpy = vi.spyOn(llm, 'generateCode')
+    llmEnabledAtom.set(false)
+    render(<LlmPlaygroundPage />)
+
+    expect(screen.getByPlaceholderText(/llm features are disabled in settings/i)).toBeDisabled()
+    expect(screen.getByRole('button', { name: /send message/i })).toBeDisabled()
+    expect(screen.getByRole('combobox')).toBeDisabled()
+    expect(cloudSpy).not.toHaveBeenCalled()
   })
 })
 

@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { llmEnabledAtom } from '@/entities/llm-availability'
 import {
   agentChatOpenAtom,
   agentSendAction,
@@ -25,15 +26,16 @@ export const AgentChatDialog = reatomComponent(() => {
   const isCloudSending = !agentSendAction.ready()
   const isInBrowserSending = !agentSendInBrowserAction.ready()
   const isSending = isCloudSending || isInBrowserSending
+  const llmEnabled = llmEnabledAtom()
   // In-browser tier needs a loaded WebLLM model (№4/№13): the generator slot is
   // null until the user loads one. Mirror the cell toolbar's gate.
-  const hasLocalModel = !!codeGeneratorAtom()
+  const hasLocalModel = llmEnabled && !!codeGeneratorAtom()
   const sendError = agentSendAction.error() ?? agentSendInBrowserAction.error()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const doSendCloud = wrap(() => {
     const val = textareaRef.current?.value.trim()
-    if (!val || isSending) return
+    if (!val || isSending || !llmEnabled) return
     // Clear a stale error from the OTHER tier so the popup only ever shows the
     // error of the tier actually running now (review PR #88 r2).
     agentSendInBrowserAction.error.set(undefined)
@@ -42,7 +44,7 @@ export const AgentChatDialog = reatomComponent(() => {
 
   const doSendInBrowser = wrap(() => {
     const val = textareaRef.current?.value.trim()
-    if (!val || isSending || !hasLocalModel) return
+    if (!val || isSending || !llmEnabled || !hasLocalModel) return
     agentSendAction.error.set(undefined)
     agentSendInBrowserAction(val)
   })
@@ -81,7 +83,7 @@ export const AgentChatDialog = reatomComponent(() => {
             placeholder="e.g. generate the first 20 Fibonacci numbers and log them…"
             rows={4}
             className="resize-none"
-            disabled={isSending}
+            disabled={isSending || !llmEnabled}
             autoFocus
             onKeyDown={handleKeyDown}
           />
@@ -90,6 +92,10 @@ export const AgentChatDialog = reatomComponent(() => {
             <p className="text-sm text-destructive">
               {formatCloudLlmError(sendError, USE_IN_BROWSER_SUGGESTION)}
             </p>
+          )}
+
+          {!llmEnabled && (
+            <p className="text-sm text-muted-foreground">LLM features are disabled in Settings.</p>
           )}
 
           {/* TARDIS-167 (№13): two explicit tiers, like the cell toolbar —
@@ -114,7 +120,7 @@ export const AgentChatDialog = reatomComponent(() => {
                   <Button
                     variant="outline"
                     onClick={doSendInBrowser}
-                    disabled={isSending || !hasLocalModel}
+                    disabled={isSending || !llmEnabled || !hasLocalModel}
                     className="gap-2"
                   >
                     {isInBrowserSending ? (
@@ -127,9 +133,11 @@ export const AgentChatDialog = reatomComponent(() => {
                 }
               />
               <TooltipContent>
-                {hasLocalModel
-                  ? 'Generate with the in-browser model (WebLLM)'
-                  : 'Load an in-browser model first'}
+                {!llmEnabled
+                  ? 'Turn on LLM features in Settings'
+                  : hasLocalModel
+                    ? 'Generate with the in-browser model (WebLLM)'
+                    : 'Load an in-browser model first'}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -137,7 +145,7 @@ export const AgentChatDialog = reatomComponent(() => {
                 render={
                   <Button
                     onClick={doSendCloud}
-                    disabled={isSending}
+                    disabled={isSending || !llmEnabled}
                     className="gap-2"
                     // Explicit, because the visible label and the badge are
                     // adjacent nodes: the derived name would be "CloudBeta" with
@@ -156,7 +164,11 @@ export const AgentChatDialog = reatomComponent(() => {
                   </Button>
                 }
               />
-              <TooltipContent>Generate with the cloud agent · {CLOUD_LLM_BETA_HINT}</TooltipContent>
+              <TooltipContent>
+                {llmEnabled
+                  ? `Generate with the cloud agent · ${CLOUD_LLM_BETA_HINT}`
+                  : 'Turn on LLM features in Settings'}
+              </TooltipContent>
             </Tooltip>
           </div>
         </div>
