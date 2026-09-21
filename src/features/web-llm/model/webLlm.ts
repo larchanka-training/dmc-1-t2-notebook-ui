@@ -1,7 +1,24 @@
 import { atom, action, wrap, withLocalStorage } from '@reatom/core'
 import { withAsync } from '@reatom/core'
-import * as webllm from '@mlc-ai/web-llm'
+import type * as webllm from '@mlc-ai/web-llm'
 import { llmEnabledAtom } from '@/entities/llm-availability'
+
+// Lazy-load WebLLM: defer importing the ~6 MB dependency until an action needs
+// it (loadModelAction or reconcileDownloadedModelsAction with cached models).
+// This removes webllm from the cold-load bootstrap path.
+let webLlmModule: typeof import('@mlc-ai/web-llm') | null = null
+let webLlmModulePromise: Promise<typeof import('@mlc-ai/web-llm')> | null = null
+
+async function loadWebLlm(): Promise<typeof import('@mlc-ai/web-llm')> {
+  if (webLlmModule) return webLlmModule
+  if (!webLlmModulePromise) {
+    webLlmModulePromise = import('@mlc-ai/web-llm').then((m) => {
+      webLlmModule = m
+      return m
+    })
+  }
+  return await wrap(webLlmModulePromise)
+}
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -166,6 +183,12 @@ export const loadModelAction = action(async () => {
     await wrap(Promise.resolve(previousEngine.unload()).catch(() => undefined))
   }
 
+  if (!webLlmModule) {
+    await loadWebLlm()
+    if (seq !== latestLoadSeq) return
+  }
+  const webllm = webLlmModule!
+
   // Build the engine ourselves (instead of CreateMLCEngine) so we keep a handle
   // to it even when `reload()` throws. A failed load (a flaky weights download,
   // or a transient WebGPU hiccup) otherwise LEAVES a half-initialised engine
@@ -210,7 +233,9 @@ export const loadModelAction = action(async () => {
     // Free the leaked WebGPU device so a retry isn't poisoned. Best-effort:
     // unload() may itself reject on a broken engine — swallow that and rethrow
     // the ORIGINAL load error for the UI (`loadModelAction.error()`).
-    await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
+    if (engine) {
+      await wrap(Promise.resolve(engine.unload()).catch(() => undefined))
+    }
     // A superseded run's failure is nobody's problem: a newer load already won,
     // its orphan engine is unloaded above, and the shared atoms belong to the
     // winner. Re-throwing would surface a stale "load failed" on `loadModelAction
@@ -262,6 +287,13 @@ export const cancelModelLoad = action(() => {
 export const reconcileDownloadedModelsAction = action(async () => {
   const ids = downloadedModelIdsAtom()
   if (ids.length === 0) return
+  let webllm: typeof import('@mlc-ai/web-llm')
+  try {
+    webllm = await loadWebLlm()
+  } catch {
+    // Probe failed to load module — keep ids as-is rather than failing boot.
+    return
+  }
   const checks = await wrap(
     Promise.all(
       ids.map(async (id) => {
