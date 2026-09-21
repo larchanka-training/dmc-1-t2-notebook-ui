@@ -20,6 +20,7 @@ vi.mock('@mlc-ai/web-llm', () => ({
 import * as webllm from '@mlc-ai/web-llm'
 import {
   AVAILABLE_MODELS,
+  cancelModelLoad,
   downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
@@ -281,9 +282,15 @@ describe('lazy-loading cold path and failure recovery', () => {
     expect(frame.run(() => loadProgressAtom())).toBeNull()
   })
 
-  test('cold reconcile preserves Reatom context under production clearStack', async () => {
+  test('cold reconcile preserves Reatom context under production clearStack and drops evicted ids', async () => {
     resetWebLlmModuleCacheForTesting()
-    downloadedModelIdsAtom.set(['Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'])
+    downloadedModelIdsAtom.set([
+      'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC',
+      'Llama-3.2-1B-Instruct-q4f32_1-MLC',
+    ])
+    vi.mocked(webllm.hasModelInCache).mockImplementation(
+      async (id) => id === 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC',
+    )
     const frame = context.start()
 
     const error = await settle(fireLikeProd(frame, () => reconcileDownloadedModelsAction()))
@@ -320,12 +327,13 @@ describe('lazy-loading cold path and failure recovery', () => {
   test('cold concurrent loads share in-flight import and superseded load cleans up cleanly', async () => {
     resetWebLlmModuleCacheForTesting()
     let resolveImport!: (m: typeof webllm) => void
-    setImportWebLlmForTesting(
+    const importSpy = vi.fn(
       () =>
-        new Promise((resolve) => {
+        new Promise<typeof webllm>((resolve) => {
           resolveImport = resolve
         }),
     )
+    setImportWebLlmForTesting(importSpy)
 
     modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
     const firstRun = wrap(loadModelAction())
@@ -333,6 +341,9 @@ describe('lazy-loading cold path and failure recovery', () => {
     // Second load supersedes the first while chunk import is still in-flight
     modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
     const secondRun = wrap(loadModelAction())
+
+    // Exactly one dynamic import should be in-flight (single-flight)
+    expect(importSpy).toHaveBeenCalledTimes(1)
 
     // Complete chunk import
     resolveImport(webllm)
@@ -344,6 +355,38 @@ describe('lazy-loading cold path and failure recovery', () => {
     expect(peek(engineAtom)).not.toBeNull()
     expect(peek(loadingModelIdAtom)).toBeNull()
     expect(peek(loadProgressAtom)).toBeNull()
+    // Exactly one engine was built and reloaded for the winner
+    expect(vi.mocked(webllm.MLCEngine)).toHaveBeenCalledTimes(1)
+    expect(reloadMock).toHaveBeenCalledWith('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+  })
+
+  test('cancelModelLoad during cold import aborts cleanly without creating engine', async () => {
+    resetWebLlmModuleCacheForTesting()
+    let resolveImport!: (m: typeof webllm) => void
+    setImportWebLlmForTesting(
+      () =>
+        new Promise<typeof webllm>((resolve) => {
+          resolveImport = resolve
+        }),
+    )
+
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    const loadPromise = wrap(loadModelAction())
+
+    expect(peek(loadingModelIdAtom)).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+
+    // Cancel while import is still pending
+    cancelModelLoad()
+    expect(peek(loadingModelIdAtom)).toBeNull()
+
+    // Now import finishes
+    resolveImport(webllm)
+    await loadPromise
+
+    // Engine was never created or published
+    expect(vi.mocked(webllm.MLCEngine)).not.toHaveBeenCalled()
+    expect(peek(engineAtom)).toBeNull()
+    expect(peek(loadedModelIdAtom)).toBeNull()
   })
 
   test('cold reconcile safely catches import failure and keeps downloaded ids', async () => {

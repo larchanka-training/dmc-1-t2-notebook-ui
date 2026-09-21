@@ -21,10 +21,6 @@ export function resetWebLlmModuleCacheForTesting(): void {
   webLlmModulePromise = null
 }
 
-export function getLoadedWebLlm(): WebLlmModule | null {
-  return webLlmModule
-}
-
 export async function loadWebLlm(): Promise<WebLlmModule> {
   if (webLlmModule) return webLlmModule
   if (!webLlmModulePromise) {
