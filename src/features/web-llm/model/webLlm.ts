@@ -6,18 +6,40 @@ import { llmEnabledAtom } from '@/entities/llm-availability'
 // Lazy-load WebLLM: defer importing the ~6 MB dependency until an action needs
 // it (loadModelAction or reconcileDownloadedModelsAction with cached models).
 // This removes webllm from the cold-load bootstrap path.
-let webLlmModule: typeof import('@mlc-ai/web-llm') | null = null
-let webLlmModulePromise: Promise<typeof import('@mlc-ai/web-llm')> | null = null
+export type WebLlmModule = typeof import('@mlc-ai/web-llm')
 
-async function loadWebLlm(): Promise<typeof import('@mlc-ai/web-llm')> {
+let webLlmModule: WebLlmModule | null = null
+let webLlmModulePromise: Promise<WebLlmModule> | null = null
+let importWebLlmFn: () => Promise<WebLlmModule> = () => import('@mlc-ai/web-llm')
+
+export function setImportWebLlmForTesting(fn: (() => Promise<WebLlmModule>) | null): void {
+  importWebLlmFn = fn ?? (() => import('@mlc-ai/web-llm'))
+}
+
+export function resetWebLlmModuleCacheForTesting(): void {
+  webLlmModule = null
+  webLlmModulePromise = null
+}
+
+export function getLoadedWebLlm(): WebLlmModule | null {
+  return webLlmModule
+}
+
+export async function loadWebLlm(): Promise<WebLlmModule> {
   if (webLlmModule) return webLlmModule
   if (!webLlmModulePromise) {
-    webLlmModulePromise = import('@mlc-ai/web-llm').then((m) => {
-      webLlmModule = m
-      return m
-    })
+    webLlmModulePromise = importWebLlmFn()
+      .then((m) => {
+        webLlmModule = m
+        webLlmModulePromise = null
+        return m
+      })
+      .catch((err) => {
+        webLlmModulePromise = null
+        throw err
+      })
   }
-  return await wrap(webLlmModulePromise)
+  return webLlmModulePromise
 }
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
@@ -179,36 +201,37 @@ export const loadModelAction = action(async () => {
   messagesAtom.set([])
   loadProgressAtom.set({ progress: 0, text: 'Initializing...' })
 
-  if (previousEngine) {
-    await wrap(Promise.resolve(previousEngine.unload()).catch(() => undefined))
-  }
-
-  if (!webLlmModule) {
-    await loadWebLlm()
-    if (seq !== latestLoadSeq) return
-  }
-  const webllm = webLlmModule!
-
-  // Build the engine ourselves (instead of CreateMLCEngine) so we keep a handle
-  // to it even when `reload()` throws. A failed load (a flaky weights download,
-  // or a transient WebGPU hiccup) otherwise LEAVES a half-initialised engine
-  // holding the WebGPU device; the next attempt then can't acquire an adapter and
-  // reports a misleading "Unable to find a compatible GPU" — which a full page
-  // reload "fixes" only because it drops the leaked device. We release it in
-  // `catch` so a retry starts clean, and always clear the loader in `finally`
-  // (TARDIS-168).
-  const engine = new webllm.MLCEngine({
-    // initProgressCallback is called by WebLLM outside Reatom context — must wrap.
-    // Ignore progress from a superseded load so a slow older run can't drive the
-    // bar after the user already kicked off a newer one.
-    initProgressCallback: wrap((report: webllm.InitProgressReport) => {
-      if (seq === latestLoadSeq) {
-        loadProgressAtom.set({ progress: report.progress, text: report.text })
-      }
-    }),
-  })
-
+  let engine: webllm.MLCEngine | null = null
   try {
+    if (previousEngine) {
+      await wrap(Promise.resolve(previousEngine.unload()).catch(() => undefined))
+    }
+
+    let webllm = webLlmModule
+    if (!webllm) {
+      webllm = await wrap(loadWebLlm())
+      if (seq !== latestLoadSeq) return
+    }
+
+    // Build the engine ourselves (instead of CreateMLCEngine) so we keep a handle
+    // to it even when `reload()` throws. A failed load (a flaky weights download,
+    // or a transient WebGPU hiccup) otherwise LEAVES a half-initialised engine
+    // holding the WebGPU device; the next attempt then can't acquire an adapter and
+    // reports a misleading "Unable to find a compatible GPU" — which a full page
+    // reload "fixes" only because it drops the leaked device. We release it in
+    // `catch` so a retry starts clean, and always clear the loader in `finally`
+    // (TARDIS-168).
+    engine = new webllm.MLCEngine({
+      // initProgressCallback is called by WebLLM outside Reatom context — must wrap.
+      // Ignore progress from a superseded load so a slow older run can't drive the
+      // bar after the user already kicked off a newer one.
+      initProgressCallback: wrap((report: webllm.InitProgressReport) => {
+        if (seq === latestLoadSeq) {
+          loadProgressAtom.set({ progress: report.progress, text: report.text })
+        }
+      }),
+    })
+
     await wrap(engine.reload(modelId))
 
     // A newer load started while this one was initialising → this engine is an
@@ -287,9 +310,9 @@ export const cancelModelLoad = action(() => {
 export const reconcileDownloadedModelsAction = action(async () => {
   const ids = downloadedModelIdsAtom()
   if (ids.length === 0) return
-  let webllm: typeof import('@mlc-ai/web-llm')
+  let webllm: WebLlmModule
   try {
-    webllm = await loadWebLlm()
+    webllm = await wrap(loadWebLlm())
   } catch {
     // Probe failed to load module — keep ids as-is rather than failing boot.
     return

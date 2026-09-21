@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { peek, wrap } from '@reatom/core'
+import { context, peek, wrap } from '@reatom/core'
+import { fireLikeProd, reseedGlobalStack, settle } from '@/test/clearStack'
 
 // `loadModelAction` builds a `webllm.MLCEngine` and calls `reload()` (a heavy
 // WASM download), so mock the class with a stub whose `reload`/`unload` are
@@ -22,15 +23,21 @@ import {
   downloadedModelIdsAtom,
   engineAtom,
   loadModelAction,
+  loadProgressAtom,
+  loadWebLlm,
   loadedModelIdAtom,
+  loadingModelIdAtom,
   messagesAtom,
   modelIdAtom,
   normalizeWebLlmPersistedState,
   reconcileDownloadedModelsAction,
+  resetWebLlmModuleCacheForTesting,
   sendMessageAction,
+  setImportWebLlmForTesting,
 } from './webLlm'
 
-beforeEach(() => {
+beforeEach(async () => {
+  await loadWebLlm()
   downloadedModelIdsAtom.set([])
   engineAtom.set(null)
   loadedModelIdAtom.set(null)
@@ -251,5 +258,101 @@ describe('sendMessageAction placeholder branch', () => {
       { role: 'user', content: 'explain maps' },
       { role: 'assistant', content: '— Load a model to see a local response —' },
     ])
+  })
+})
+
+describe('lazy-loading cold path and failure recovery', () => {
+  afterEach(() => {
+    setImportWebLlmForTesting(null)
+    reseedGlobalStack()
+  })
+
+  test('cold load preserves Reatom context under production clearStack', async () => {
+    resetWebLlmModuleCacheForTesting()
+    const frame = context.start()
+    frame.run(() => modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'))
+
+    const error = await settle(fireLikeProd(frame, () => loadModelAction()))
+
+    expect(error).toBeNull()
+    expect(frame.run(() => loadedModelIdAtom())).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    expect(frame.run(() => engineAtom())).not.toBeNull()
+    expect(frame.run(() => loadingModelIdAtom())).toBeNull()
+    expect(frame.run(() => loadProgressAtom())).toBeNull()
+  })
+
+  test('cold reconcile preserves Reatom context under production clearStack', async () => {
+    resetWebLlmModuleCacheForTesting()
+    downloadedModelIdsAtom.set(['Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC'])
+    const frame = context.start()
+
+    const error = await settle(fireLikeProd(frame, () => reconcileDownloadedModelsAction()))
+
+    expect(error).toBeNull()
+    expect(frame.run(() => downloadedModelIdsAtom())).toEqual([
+      'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC',
+    ])
+  })
+
+  test('chunk import failure clears loading atoms and allows clean retry', async () => {
+    resetWebLlmModuleCacheForTesting()
+    setImportWebLlmForTesting(() => Promise.reject(new Error('Chunk 404 network failure')))
+
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    await expect(wrap(loadModelAction())).rejects.toThrow('Chunk 404 network failure')
+
+    // Crucial: loading state must be cleared, not stuck in Initializing
+    expect(peek(loadingModelIdAtom)).toBeNull()
+    expect(peek(loadProgressAtom)).toBeNull()
+    expect(peek(engineAtom)).toBeNull()
+    expect(peek(loadedModelIdAtom)).toBeNull()
+
+    // Retry after network recovery: new attempt must not reuse old rejected promise
+    setImportWebLlmForTesting(null)
+    await wrap(loadModelAction())
+
+    expect(peek(loadedModelIdAtom)).toBe('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    expect(peek(engineAtom)).not.toBeNull()
+    expect(peek(loadingModelIdAtom)).toBeNull()
+    expect(peek(loadProgressAtom)).toBeNull()
+  })
+
+  test('cold concurrent loads share in-flight import and superseded load cleans up cleanly', async () => {
+    resetWebLlmModuleCacheForTesting()
+    let resolveImport!: (m: typeof webllm) => void
+    setImportWebLlmForTesting(
+      () =>
+        new Promise((resolve) => {
+          resolveImport = resolve
+        }),
+    )
+
+    modelIdAtom.set('Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC')
+    const firstRun = wrap(loadModelAction())
+
+    // Second load supersedes the first while chunk import is still in-flight
+    modelIdAtom.set('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    const secondRun = wrap(loadModelAction())
+
+    // Complete chunk import
+    resolveImport(webllm)
+
+    await Promise.all([firstRun, secondRun])
+
+    // Winner is the second model
+    expect(peek(loadedModelIdAtom)).toBe('Llama-3.2-1B-Instruct-q4f32_1-MLC')
+    expect(peek(engineAtom)).not.toBeNull()
+    expect(peek(loadingModelIdAtom)).toBeNull()
+    expect(peek(loadProgressAtom)).toBeNull()
+  })
+
+  test('cold reconcile safely catches import failure and keeps downloaded ids', async () => {
+    resetWebLlmModuleCacheForTesting()
+    downloadedModelIdsAtom.set(['model-offline-cached'])
+    setImportWebLlmForTesting(() => Promise.reject(new Error('Offline')))
+
+    await expect(wrap(reconcileDownloadedModelsAction())).resolves.not.toThrow()
+
+    expect(peek(downloadedModelIdsAtom)).toEqual(['model-offline-cached'])
   })
 })
