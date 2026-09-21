@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { llmEnabledAtom } from '@/entities/llm-availability'
-import { llm } from '@/shared/api'
+import { llm, QuotaExceededError, RateLimitedError } from '@/shared/api'
 import { NotebookView } from './NotebookView'
 import { addCell, cellsAtom, updateCellCode } from '../model/notebook'
 import { slotOpeningPhaseAtom } from '../model/slot'
@@ -154,5 +154,70 @@ describe('NotebookView (RTL integration)', () => {
       expect(inserted?.executionCount()).toBeNull()
       expect(inserted?.output()).toEqual([])
     })
+  })
+
+  test('cloud agent failure with QuotaExceededError displays quota message and does not insert code', async () => {
+    const user = userEvent.setup()
+    const cloudSpy = vi
+      .spyOn(llm, 'generateCode')
+      .mockRejectedValue(
+        new QuotaExceededError('llm_quota_exceeded', 'Daily quota exhausted', 3600),
+      )
+    let promptCellId = ''
+
+    act(() => {
+      llmEnabledAtom.set(true)
+      codeGeneratorAtom.set(null)
+      const promptCell = addCell(cellsAtom()[0]?.id, 'markdown')
+      promptCellId = promptCell.id
+      updateCellCode(promptCell.id, 'Generate some code that exceeds quota')
+    })
+
+    const initialCellCount = cellsAtom().length
+    renderView()
+    const generateBtn = screen.getByRole('button', { name: /generate code.*cloud agent/i })
+    await user.click(generateBtn)
+
+    await waitFor(() => expect(cloudSpy).toHaveBeenCalledOnce())
+
+    // The quota error message is rendered in the DOM
+    expect(
+      await screen.findByText(
+        'Generation quota exceeded. Try again in 3600s. Use the in-browser model instead.',
+      ),
+    ).toBeInTheDocument()
+
+    // No code cell is inserted into the notebook
+    expect(cellsAtom().length).toBe(initialCellCount)
+    const promptIndex = cellsAtom().findIndex((cell) => cell.id === promptCellId)
+    expect(cellsAtom()[promptIndex]?.kind).toBe('markdown')
+
+    // Button recovers and is re-enabled for interaction
+    expect(generateBtn).toBeEnabled()
+  })
+
+  test('cloud agent failure with RateLimitedError displays rate limit message and preserves cells', async () => {
+    const user = userEvent.setup()
+    const cloudSpy = vi
+      .spyOn(llm, 'generateCode')
+      .mockRejectedValue(new RateLimitedError('rate_limited', 'Slow down', 30))
+
+    act(() => {
+      llmEnabledAtom.set(true)
+      codeGeneratorAtom.set(null)
+      const promptCell = addCell(cellsAtom()[0]?.id, 'markdown')
+      updateCellCode(promptCell.id, 'Generate code that hits rate limit')
+    })
+
+    const initialCellCount = cellsAtom().length
+    renderView()
+    const generateBtn = screen.getByRole('button', { name: /generate code.*cloud agent/i })
+    await user.click(generateBtn)
+
+    await waitFor(() => expect(cloudSpy).toHaveBeenCalledOnce())
+
+    expect(await screen.findByText('Rate limit reached. Try again in 30s.')).toBeInTheDocument()
+    expect(cellsAtom().length).toBe(initialCellCount)
+    expect(generateBtn).toBeEnabled()
   })
 })

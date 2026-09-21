@@ -103,4 +103,44 @@ describe('formatCloudGenerateError', () => {
     const err = new Error('something unexpected')
     expect(formatCloudGenerateError(err)).toBe('Cloud generation failed: something unexpected')
   })
+
+  test('quota exceeded with zero retry-after omits wait time', () => {
+    const err = new QuotaExceededError('llm_quota_exceeded', 'Quota reached', 0)
+    expect(formatCloudGenerateError(err)).toBe(
+      'Generation quota exceeded. Use the in-browser model instead.',
+    )
+  })
+
+  test('quota exceeded with long retry-after displays full wait seconds', () => {
+    const err = new QuotaExceededError('llm_quota_exceeded', 'Monthly limit reached', 86400)
+    expect(formatCloudGenerateError(err)).toBe(
+      'Generation quota exceeded. Try again in 86400s. Use the in-browser model instead.',
+    )
+  })
+
+  test('ApiError with llm_quota_exceeded code produces quota copy', () => {
+    const err = new ApiError(429, 'llm_quota_exceeded', 'Direct API quota error')
+    expect(formatCloudGenerateError(err)).toBe(
+      'Generation quota exceeded. Use the in-browser model instead.',
+    )
+  })
+
+  test('plain Error mentioning llm_quota_exceeded falls back to quota copy', () => {
+    const err = new Error('Action failed: llm_quota_exceeded for current window')
+    expect(formatCloudGenerateError(err)).toBe(
+      'Generation quota exceeded. Use the in-browser model instead.',
+    )
+  })
+
+  test('plain Error mentioning "quota exceeded" falls back to quota copy', () => {
+    const err = new Error('Upstream error: User quota exceeded for daily tier')
+    expect(formatCloudGenerateError(err)).toBe(
+      'Generation quota exceeded. Use the in-browser model instead.',
+    )
+  })
+
+  test('ApiError with generic 400 status falls through to unknown error message', () => {
+    const err = new ApiError(400, 'bad_request', 'Invalid payload structure')
+    expect(formatCloudGenerateError(err)).toBe('Cloud generation failed: Invalid payload structure')
+  })
 })
