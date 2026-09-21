@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { setAuthTokenGetter } from './client'
-import { ApiError, BadRequestError, RateLimitedError, UnauthorizedError } from './errors'
+import {
+  ApiError,
+  BadRequestError,
+  QuotaExceededError,
+  RateLimitedError,
+  UnauthorizedError,
+} from './errors'
 import * as llm from './llm'
 
 function jsonResponse(
@@ -192,5 +198,86 @@ describe('LLM API — Retry-After surfacing (U2)', () => {
       caught = err
     }
     expect((caught as RateLimitedError).retryAfter).toBeUndefined()
+  })
+
+  test('throws QuotaExceededError when 429 carries llm_quota_exceeded', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        429,
+        { error: { code: 'llm_quota_exceeded', message: 'daily limit reached' } },
+        { 'retry-after': '3600' },
+      ),
+    )
+
+    let caught: unknown
+    try {
+      await llm.generateCode({ prompt: 'p' })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(QuotaExceededError)
+    expect(caught).toBeInstanceOf(RateLimitedError)
+    expect((caught as QuotaExceededError).retryAfter).toBe(3600)
+    expect((caught as QuotaExceededError).code).toBe('llm_quota_exceeded')
+  })
+})
+
+describe('LLM API — getLlmUsage (Step 8e-3)', () => {
+  const fakeUsage = {
+    userId: '11111111-1111-1111-1111-111111111111',
+    tier: 'free',
+    day: {
+      scope: 'user',
+      windowKind: 'day',
+      windowStart: '2026-09-21',
+      callLimit: 50,
+      callsReserved: 4,
+      callsSettled: 4,
+      callsTotal: 4,
+      costLimitMicros: null,
+      costReservedMicros: 0,
+      costMicros: 1200,
+      costTotalMicros: 1200,
+      resetsAt: '2026-09-22T00:00:00Z',
+      retryAfter: 0,
+    },
+    month: {
+      scope: 'user',
+      windowKind: 'month',
+      windowStart: '2026-09-01',
+      callLimit: 500,
+      callsReserved: 40,
+      callsSettled: 40,
+      callsTotal: 40,
+      costLimitMicros: null,
+      costReservedMicros: 0,
+      costMicros: 12000,
+      costTotalMicros: 12000,
+      resetsAt: '2026-10-01T00:00:00Z',
+      retryAfter: 0,
+    },
+  }
+
+  test('fetches user usage windows successfully', async () => {
+    setAuthTokenGetter(() => 'token-123')
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, fakeUsage))
+
+    const usage = await llm.getLlmUsage()
+
+    expect(usage.userId).toBe('11111111-1111-1111-1111-111111111111')
+    expect(usage.tier).toBe('free')
+    expect(usage.day.callsTotal).toBe(4)
+    expect(usage.month.callsTotal).toBe(40)
+    expect(lastRequest().method).toBe('GET')
+    expect(lastRequest().url).toContain('/api/v1/llm/usage')
+    expect(lastRequest().headers.get('authorization')).toBe('Bearer token-123')
+  })
+
+  test('throws UnauthorizedError when not authenticated', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { error: { code: 'unauthorized', message: 'Missing token' } }),
+    )
+
+    await expect(llm.getLlmUsage()).rejects.toBeInstanceOf(UnauthorizedError)
   })
 })

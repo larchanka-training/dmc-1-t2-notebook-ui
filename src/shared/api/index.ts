@@ -13,6 +13,7 @@ export {
   ForbiddenError,
   NetworkError,
   NotFoundError,
+  QuotaExceededError,
   RateLimitedError,
   UnauthorizedError,
 } from './errors'

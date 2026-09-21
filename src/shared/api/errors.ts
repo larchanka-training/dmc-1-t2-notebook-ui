@@ -77,6 +77,20 @@ export class RateLimitedError extends ApiError {
 }
 
 /**
+ * Thrown when the backend returns 429 with error code 'llm_quota_exceeded' (Step 8e).
+ *
+ * Distinguishes consumption exhaustion (daily or monthly generation / cost cap)
+ * from short-term frequency rate limiting ('rate_limited').
+ * Extends RateLimitedError so generic 429 catch blocks continue to handle it.
+ */
+export class QuotaExceededError extends RateLimitedError {
+  constructor(code = 'llm_quota_exceeded', message?: string, retryAfter?: number) {
+    super(code, message, retryAfter)
+    this.name = 'QuotaExceededError'
+  }
+}
+
+/**
  * Thrown when the request never reached the server (offline, DNS failure,
  * connection reset). `fetch` rejects with a TypeError in these cases; the
  * facade catches it and rethrows as a NetworkError, so callers can tell
@@ -146,6 +160,9 @@ export function toApiError(status: number, body: unknown, retryAfter?: number): 
     case 409:
       return new ConflictError(error?.code, error?.message)
     case 429:
+      if (error?.code === 'llm_quota_exceeded') {
+        return new QuotaExceededError(error?.code, error?.message, retryAfter)
+      }
       return new RateLimitedError(error?.code, error?.message, retryAfter)
     default:
       return new ApiError(status, error?.code, error?.message)

@@ -6,6 +6,8 @@ import {
   NetworkError,
   NotFoundError,
   parseRetryAfter,
+  QuotaExceededError,
+  RateLimitedError,
   UnauthorizedError,
   toApiError,
   ForbiddenError,
@@ -141,5 +143,41 @@ describe('toApiError — 403 (Step 8d-2 allowlist)', () => {
 
     expect(err).not.toBeInstanceOf(ForbiddenError)
     expect(err.status).toBe(500)
+  })
+})
+
+describe('toApiError — 429 (Step 8e quota & rate limit)', () => {
+  test('maps 429 with llm_quota_exceeded to QuotaExceededError', () => {
+    const err = toApiError(
+      429,
+      { error: { code: 'llm_quota_exceeded', message: 'Daily limit exceeded' } },
+      3600,
+    )
+
+    expect(err).toBeInstanceOf(QuotaExceededError)
+    expect(err).toBeInstanceOf(RateLimitedError)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(429)
+    expect(err.code).toBe('llm_quota_exceeded')
+    expect(err.message).toBe('Daily limit exceeded')
+    expect((err as QuotaExceededError).retryAfter).toBe(3600)
+  })
+
+  test('maps 429 with rate_limited to standard RateLimitedError', () => {
+    const err = toApiError(429, { error: { code: 'rate_limited', message: 'Slow down' } }, 30)
+
+    expect(err).toBeInstanceOf(RateLimitedError)
+    expect(err).not.toBeInstanceOf(QuotaExceededError)
+    expect(err.status).toBe(429)
+    expect(err.code).toBe('rate_limited')
+    expect((err as RateLimitedError).retryAfter).toBe(30)
+  })
+
+  test('maps 429 with other code to standard RateLimitedError', () => {
+    const err = toApiError(429, { error: { code: 'too_many_requests', message: 'Too many' } })
+
+    expect(err).toBeInstanceOf(RateLimitedError)
+    expect(err).not.toBeInstanceOf(QuotaExceededError)
+    expect(err.status).toBe(429)
   })
 })

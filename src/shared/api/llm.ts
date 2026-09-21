@@ -11,6 +11,8 @@ export type GenerateCodeRequest = Omit<
   Partial<Pick<GeneratedGenerateCodeRequest, 'context' | 'language' | 'mode'>>
 export type GenerateCodeResponse = components['schemas']['GenerateResponse']
 export type LlmContextCell = components['schemas']['LlmContextCell']
+export type LlmUserUsageResponse = components['schemas']['LlmUserUsageResponse']
+export type LlmQuotaWindowView = components['schemas']['LlmQuotaWindowView']
 
 /**
  * Send a code-generation request to the backend Cloud LLM agent.
@@ -20,9 +22,10 @@ export type LlmContextCell = components['schemas']['LlmContextCell']
  * defaults survive (this is what `??` does below; a plain object spread
  * would let `{ language: undefined }` clobber the default).
  *
- * On 429 the thrown error is a `RateLimitedError` whose `retryAfter`
- * field is populated from the `Retry-After` response header. Other
- * statuses surface through their usual error subclasses.
+ * On 429 the thrown error is a `RateLimitedError` (or `QuotaExceededError`
+ * if `llm_quota_exceeded`) whose `retryAfter` field is populated from the
+ * `Retry-After` response header. Other statuses surface through their usual
+ * error subclasses.
  */
 export async function generateCode(body: GenerateCodeRequest): Promise<GenerateCodeResponse> {
   const requestBody: GeneratedGenerateCodeRequest = {
@@ -38,6 +41,19 @@ export async function generateCode(body: GenerateCodeRequest): Promise<GenerateC
     const retryAfter =
       response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : undefined
     throw toApiError(response.status, error, retryAfter)
+  }
+  return data
+}
+
+/**
+ * Fetch current user LLM usage and quotas for daily and monthly windows.
+ *
+ * Calls `GET /api/v1/llm/usage`.
+ */
+export async function getLlmUsage(): Promise<LlmUserUsageResponse> {
+  const { data, error, response } = await llmClient.GET('/llm/usage')
+  if (error !== undefined || !data) {
+    throw toApiError(response.status, error)
   }
   return data
 }

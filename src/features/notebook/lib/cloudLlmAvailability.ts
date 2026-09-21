@@ -45,6 +45,10 @@ export const CLOUD_LLM_RESTRICTED_MESSAGE =
  */
 export function formatCloudLlmError(err: Error, suggestion: string): string {
   if (err instanceof RateLimitedError) {
+    if (err.code === 'llm_quota_exceeded') {
+      const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
+      return `Generation quota exceeded.${wait} ${suggestion}`
+    }
     const wait = err.retryAfter ? ` Try again in ${err.retryAfter}s.` : ''
     return `Rate limit reached.${wait}`
   }
@@ -59,6 +63,9 @@ export function formatCloudLlmError(err: Error, suggestion: string): string {
 
   if (err instanceof ApiError) {
     if (err.status === 401) return 'Cloud AI requires sign-in. Log in and try again.'
+    if (err.code === 'llm_quota_exceeded') {
+      return `Generation quota exceeded. ${suggestion}`
+    }
     if (err.code === 'llm_internal' || err.code === 'llm_access_denied') {
       return `Cloud AI is temporarily unavailable. ${suggestion}`
     }
@@ -68,6 +75,9 @@ export function formatCloudLlmError(err: Error, suggestion: string): string {
   // Fallback matching on the message. Kept because not every failure arrives as a
   // typed ApiError (an action can reject with a plain Error carrying the code).
   const msg = err.message.toLowerCase()
+  if (msg.includes('llm_quota_exceeded') || msg.includes('quota exceeded')) {
+    return `Generation quota exceeded. ${suggestion}`
+  }
   if (msg.includes('invalid_token') || msg.includes('401') || msg.includes('sign in')) {
     return 'Cloud AI requires sign-in. Log in and try again.'
   }
