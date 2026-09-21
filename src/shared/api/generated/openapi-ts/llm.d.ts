@@ -21,10 +21,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get current user LLM usage and quotas
+         * @description Return caller's usage counters, active limits, and reset times for day and month windows.
+         */
+        get: operations["getLlmUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Aggregated quota and usage view for a scope and time window. */
+        LlmQuotaWindowView: {
+            /** @enum {string} */
+            scope: "user" | "global";
+            /** @enum {string} */
+            windowKind: "day" | "month";
+            /** Format: date */
+            windowStart: string;
+            callLimit?: number | null;
+            callsReserved: number;
+            callsSettled: number;
+            callsTotal: number;
+            costLimitMicros?: number | null;
+            costReservedMicros: number;
+            costMicros: number;
+            costTotalMicros: number;
+            /** Format: date-time */
+            resetsAt: string;
+            retryAfter: number;
+        };
+        /** @description User-facing usage and quota view for daily and monthly windows. */
+        LlmUserUsageResponse: {
+            /** Format: uuid */
+            userId: string;
+            tier: string;
+            day: components["schemas"]["LlmQuotaWindowView"];
+            month: components["schemas"]["LlmQuotaWindowView"];
+        };
         GenerateRequest: {
             prompt: string;
             /**
@@ -110,7 +158,7 @@ export interface components {
                 "application/json": components["schemas"]["ApiErrorResponse"];
             };
         };
-        /** @description Per-user LLM rate limit exceeded */
+        /** @description Per-user LLM rate limit or usage quota exceeded */
         RateLimited: {
             headers: {
                 /** @description Seconds until the user can retry. */
@@ -185,6 +233,27 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             502: components["responses"]["BadGateway"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getLlmUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmUserUsageResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
 }

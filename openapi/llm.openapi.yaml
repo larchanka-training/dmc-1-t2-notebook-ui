@@ -47,6 +47,24 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /llm/usage:
+    get:
+      operationId: getLlmUsage
+      summary: Get current user LLM usage and quotas
+      description: Return caller's usage counters, active limits, and reset times for day and month windows.
+      tags: [llm]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmUserUsageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -55,6 +73,72 @@ components:
       bearerFormat: JWT
 
   schemas:
+    LlmQuotaWindowView:
+      type: object
+      description: Aggregated quota and usage view for a scope and time window.
+      required:
+        - scope
+        - windowKind
+        - windowStart
+        - callsReserved
+        - callsSettled
+        - callsTotal
+        - costReservedMicros
+        - costMicros
+        - costTotalMicros
+        - resetsAt
+        - retryAfter
+      properties:
+        scope:
+          type: string
+          enum: [user, global]
+        windowKind:
+          type: string
+          enum: [day, month]
+        windowStart:
+          type: string
+          format: date
+        callLimit:
+          type:
+            - integer
+            - 'null'
+        callsReserved:
+          type: integer
+        callsSettled:
+          type: integer
+        callsTotal:
+          type: integer
+        costLimitMicros:
+          type:
+            - integer
+            - 'null'
+        costReservedMicros:
+          type: integer
+        costMicros:
+          type: integer
+        costTotalMicros:
+          type: integer
+        resetsAt:
+          type: string
+          format: date-time
+        retryAfter:
+          type: integer
+
+    LlmUserUsageResponse:
+      type: object
+      description: User-facing usage and quota view for daily and monthly windows.
+      required: [userId, tier, day, month]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        tier:
+          type: string
+        day:
+          $ref: '#/components/schemas/LlmQuotaWindowView'
+        month:
+          $ref: '#/components/schemas/LlmQuotaWindowView'
+
     GenerateRequest:
       type: object
       required: [prompt]
@@ -179,7 +263,7 @@ components:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
     RateLimited:
-      description: Per-user LLM rate limit exceeded
+      description: Per-user LLM rate limit or usage quota exceeded
       headers:
         Retry-After:
           schema:
